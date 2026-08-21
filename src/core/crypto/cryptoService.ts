@@ -151,41 +151,11 @@ export async function decryptBytes(
   key: SymmetricCryptoKey,
 ): Promise<Uint8Array> {
   switch (encString.encryptionType) {
-    case EncryptionType.AesCbc256_HmacSha256_B64: {
-      if (key.macKey === undefined) {
-        throw new UnsupportedEncryptionError(
-          'Donnée authentifiée présentée avec une clé de 32 octets, sans macKey',
-        );
-      }
-      if (encString.mac === undefined) {
-        // Type 2 sans MAC : structurellement impossible après `EncString.parse`,
-        // donc forcément une instance construite à la main. Traité comme un
-        // échec d'authentification, pas comme une erreur de programmation.
-        throw new MacMismatchError();
-      }
+    case EncryptionType.AesCbc256_HmacSha256_B64:
+      return decryptAuthenticated(encString, key);
 
-      const iv = encString.iv!;
-
-      // Ordre critique : vérifier, puis seulement déchiffrer. Voir l'en-tête.
-      const expected = await computeMac(key.macKey, iv, encString.ciphertext);
-      if (!timingSafeEqual(expected, encString.mac)) {
-        throw new MacMismatchError();
-      }
-
-      return aesCbcDecrypt(key.encKey, iv, encString.ciphertext);
-    }
-
-    case EncryptionType.AesCbc256_B64: {
-      if (key.macKey !== undefined) {
-        throw new UnsupportedEncryptionError(
-          'Donnée de type 0 (non authentifiée) présentée avec une clé authentifiée : ' +
-            'rétrogradation refusée',
-        );
-      }
-      // Coffre legacy assumé : aucune garantie d'intégrité. Toléré uniquement
-      // pour permettre la lecture puis la migration vers le type 2.
-      return aesCbcDecrypt(key.encKey, encString.iv!, encString.ciphertext);
-    }
+    case EncryptionType.AesCbc256_B64:
+      return decryptLegacyUnauthenticated(encString, key);
 
     case EncryptionType.AesCbc128_HmacSha256_B64:
       throw new UnsupportedEncryptionError(
@@ -197,6 +167,58 @@ export async function decryptBytes(
         `Type ${encString.encryptionType} : chiffrement RSA, hors périmètre du service symétrique`,
       );
   }
+}
+
+/**
+ * Déchiffre du type 2, après vérification du MAC.
+ *
+ * L'ordre des opérations est la propriété de sécurité centrale du module :
+ * vérifier d'abord, déchiffrer ensuite. Voir l'en-tête de fichier.
+ */
+async function decryptAuthenticated(
+  encString: EncString,
+  key: SymmetricCryptoKey,
+): Promise<Uint8Array> {
+  if (key.macKey === undefined) {
+    throw new UnsupportedEncryptionError(
+      'Donnée authentifiée présentée avec une clé de 32 octets, sans macKey',
+    );
+  }
+
+  if (encString.mac === undefined) {
+    // Structurellement impossible après `EncString.parse`, donc forcément une
+    // instance construite à la main. Traité comme un échec d'authentification,
+    // pas comme une erreur de programmation.
+    throw new MacMismatchError();
+  }
+
+  const iv = encString.iv!;
+  const expected = await computeMac(key.macKey, iv, encString.ciphertext);
+  if (!timingSafeEqual(expected, encString.mac)) {
+    throw new MacMismatchError();
+  }
+
+  return aesCbcDecrypt(key.encKey, iv, encString.ciphertext);
+}
+
+/**
+ * Déchiffre du type 0, sans aucune garantie d'intégrité.
+ *
+ * Toléré uniquement pour lire puis migrer un coffre ancien. Une clé
+ * authentifiée signale une tentative de rétrogradation et fait échouer l'appel.
+ */
+async function decryptLegacyUnauthenticated(
+  encString: EncString,
+  key: SymmetricCryptoKey,
+): Promise<Uint8Array> {
+  if (key.macKey !== undefined) {
+    throw new UnsupportedEncryptionError(
+      'Donnée de type 0 (non authentifiée) présentée avec une clé authentifiée : ' +
+        'rétrogradation refusée',
+    );
+  }
+
+  return aesCbcDecrypt(key.encKey, encString.iv!, encString.ciphertext);
 }
 
 /**

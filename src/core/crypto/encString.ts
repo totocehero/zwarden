@@ -105,6 +105,36 @@ function decodeSegment(segment: string, label: string): Uint8Array {
   }
 }
 
+/** Décode un segment et vérifie sa longueur, pour l'IV et le MAC. */
+function decodeFixedLength(segment: string, label: string, expected: number): Uint8Array {
+  const bytes = decodeSegment(segment, label);
+  if (bytes.length !== expected) {
+    throw new EncStringParseError(
+      `segment « ${label} » : ${bytes.length} octets, ${expected} attendus`,
+    );
+  }
+  return bytes;
+}
+
+/**
+ * Extrait et valide le préfixe numérique de type.
+ *
+ * @throws {EncStringParseError} Si le préfixe est absent ou non numérique.
+ */
+function parseTypePrefix(value: string): EncryptionType {
+  const separator = value.indexOf('.');
+  if (separator < 1) {
+    throw new EncStringParseError('préfixe de type absent');
+  }
+
+  const raw = value.slice(0, separator);
+  if (!/^\d+$/.test(raw)) {
+    throw new EncStringParseError(`préfixe de type non numérique : « ${raw} »`);
+  }
+
+  return Number(raw) as EncryptionType;
+}
+
 /**
  * Donnée chiffrée analysée et structurellement validée.
  *
@@ -154,23 +184,13 @@ export class EncString {
    *   inconnu, nombre de segments incorrect, IV ou MAC de taille invalide.
    */
   static parse(value: string): EncString {
-    const separator = value.indexOf('.');
-    if (separator < 1) {
-      throw new EncStringParseError('préfixe de type absent');
-    }
-
-    const rawType = value.slice(0, separator);
-    if (!/^\d+$/.test(rawType)) {
-      throw new EncStringParseError(`préfixe de type non numérique : « ${rawType} »`);
-    }
-
-    const encryptionType = Number(rawType) as EncryptionType;
+    const encryptionType = parseTypePrefix(value);
     const shape = SHAPES[encryptionType];
     if (shape === undefined) {
       throw new EncStringParseError(`type de chiffrement inconnu : ${encryptionType}`);
     }
 
-    const segments = value.slice(separator + 1).split('|');
+    const segments = value.slice(value.indexOf('.') + 1).split('|');
     const expected = segmentCount(shape);
     if (segments.length !== expected) {
       throw new EncStringParseError(
@@ -180,24 +200,13 @@ export class EncString {
 
     // Les segments sont consommés dans l'ordre : [iv] ciphertext [mac].
     let cursor = 0;
-
-    let iv: Uint8Array | undefined;
-    if (shape.hasIv) {
-      iv = decodeSegment(segments[cursor++]!, 'iv');
-      if (iv.length !== IV_LENGTH) {
-        throw new EncStringParseError(`IV de ${iv.length} octets, ${IV_LENGTH} attendus`);
-      }
-    }
-
+    const iv = shape.hasIv
+      ? decodeFixedLength(segments[cursor++]!, 'iv', IV_LENGTH)
+      : undefined;
     const ciphertext = decodeSegment(segments[cursor++]!, 'ciphertext');
-
-    let mac: Uint8Array | undefined;
-    if (shape.hasMac) {
-      mac = decodeSegment(segments[cursor++]!, 'mac');
-      if (mac.length !== MAC_LENGTH) {
-        throw new EncStringParseError(`MAC de ${mac.length} octets, ${MAC_LENGTH} attendus`);
-      }
-    }
+    const mac = shape.hasMac
+      ? decodeFixedLength(segments[cursor++]!, 'mac', MAC_LENGTH)
+      : undefined;
 
     return new EncString(encryptionType, iv, ciphertext, mac);
   }

@@ -68,12 +68,12 @@ describe('EncString — analyse', () => {
 
   it('rejette un IV de mauvaise taille', () => {
     const raw = `2.${toBase64(new Uint8Array(8))}|AAAA|${toBase64(new Uint8Array(32))}`;
-    expect(() => EncString.parse(raw)).toThrow(/IV de 8 octets/);
+    expect(() => EncString.parse(raw)).toThrow(/« iv » : 8 octets, 16 attendus/);
   });
 
   it('rejette un MAC de mauvaise taille', () => {
     const raw = `2.${toBase64(new Uint8Array(16))}|AAAA|${toBase64(new Uint8Array(16))}`;
-    expect(() => EncString.parse(raw)).toThrow(/MAC de 16 octets/);
+    expect(() => EncString.parse(raw)).toThrow(/« mac » : 16 octets, 32 attendus/);
   });
 
   it('parseOrNull renvoie null au lieu de jeter', () => {

@@ -35,7 +35,7 @@ const subtle = globalThis.crypto.subtle;
  * code cryptographique, où ils seraient difficiles à distinguer d'un vrai
  * contournement de typage.
  */
-function buf(bytes: Uint8Array): BufferSource {
+function asBufferSource(bytes: Uint8Array): BufferSource {
   return bytes as unknown as BufferSource;
 }
 
@@ -58,7 +58,7 @@ export function randomBytes(length: number): Uint8Array {
  * @returns Condensat de 32 octets.
  */
 export async function sha256(data: Uint8Array): Promise<Uint8Array> {
-  return new Uint8Array(await subtle.digest('SHA-256', buf(data)));
+  return new Uint8Array(await subtle.digest('SHA-256', asBufferSource(data)));
 }
 
 /**
@@ -70,10 +70,10 @@ export async function sha256(data: Uint8Array): Promise<Uint8Array> {
  * @returns MAC de 32 octets.
  */
 export async function hmacSha256(key: Uint8Array, data: Uint8Array): Promise<Uint8Array> {
-  const cryptoKey = await subtle.importKey('raw', buf(key), { name: 'HMAC', hash: 'SHA-256' }, false, [
+  const cryptoKey = await subtle.importKey('raw', asBufferSource(key), { name: 'HMAC', hash: 'SHA-256' }, false, [
     'sign',
   ]);
-  return new Uint8Array(await subtle.sign('HMAC', cryptoKey, buf(data)));
+  return new Uint8Array(await subtle.sign('HMAC', cryptoKey, asBufferSource(data)));
 }
 
 /**
@@ -101,9 +101,9 @@ export async function pbkdf2Sha256(
     throw new RangeError('pbkdf2Sha256 : au moins 1 itération requise');
   }
 
-  const baseKey = await subtle.importKey('raw', buf(password), 'PBKDF2', false, ['deriveBits']);
+  const baseKey = await subtle.importKey('raw', asBufferSource(password), 'PBKDF2', false, ['deriveBits']);
   const bits = await subtle.deriveBits(
-    { name: 'PBKDF2', salt: buf(salt), iterations, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt: asBufferSource(salt), iterations, hash: 'SHA-256' },
     baseKey,
     lengthBytes * 8,
   );
@@ -174,9 +174,9 @@ export async function aesCbcEncrypt(
   iv: Uint8Array,
   plaintext: Uint8Array,
 ): Promise<Uint8Array> {
-  const cryptoKey = await subtle.importKey('raw', buf(key), 'AES-CBC', false, ['encrypt']);
+  const cryptoKey = await subtle.importKey('raw', asBufferSource(key), 'AES-CBC', false, ['encrypt']);
   return new Uint8Array(
-    await subtle.encrypt({ name: 'AES-CBC', iv: buf(iv) }, cryptoKey, buf(plaintext)),
+    await subtle.encrypt({ name: 'AES-CBC', iv: asBufferSource(iv) }, cryptoKey, asBufferSource(plaintext)),
   );
 }
 
@@ -204,8 +204,8 @@ export async function aesCbcDecrypt(
   iv: Uint8Array,
   ciphertext: Uint8Array,
 ): Promise<Uint8Array> {
-  const cryptoKey = await subtle.importKey('raw', buf(key), 'AES-CBC', false, ['decrypt']);
+  const cryptoKey = await subtle.importKey('raw', asBufferSource(key), 'AES-CBC', false, ['decrypt']);
   return new Uint8Array(
-    await subtle.decrypt({ name: 'AES-CBC', iv: buf(iv) }, cryptoKey, buf(ciphertext)),
+    await subtle.decrypt({ name: 'AES-CBC', iv: asBufferSource(iv) }, cryptoKey, asBufferSource(ciphertext)),
   );
 }
