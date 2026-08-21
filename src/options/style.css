@@ -1,0 +1,134 @@
+/* Page de paramètres Zwarden. Mêmes jetons de couleur que la popup. */
+
+:root {
+  --fond: #1c1f26;
+  --panneau: #262a33;
+  --texte: #e6e8ee;
+  --texte-2: #9aa1af;
+  --accent: #4f8cff;
+  --erreur: #ff6b6b;
+  --ok: #5dd39e;
+  --bord: #3a3f4b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font: 14px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  background: var(--fond);
+  color: var(--texte);
+}
+
+.page {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+h1 {
+  font-size: 20px;
+  margin: 0 0 4px;
+}
+
+.version {
+  color: var(--texte-2);
+  font-size: 12px;
+  margin: 0 0 20px;
+}
+
+section {
+  background: var(--panneau);
+  border: 1px solid var(--bord);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+h2 {
+  font-size: 15px;
+  margin: 0 0 12px;
+}
+
+form,
+.champs {
+  display: grid;
+  gap: 10px;
+}
+
+label {
+  display: grid;
+  gap: 3px;
+  color: var(--texte-2);
+  font-size: 12px;
+}
+
+input,
+select {
+  padding: 7px 9px;
+  border: 1px solid var(--bord);
+  border-radius: 6px;
+  background: var(--fond);
+  color: var(--texte);
+  font-size: 13px;
+}
+
+input:focus,
+select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+button {
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  justify-self: start;
+}
+
+button.secondaire {
+  background: transparent;
+  border: 1px solid var(--bord);
+  color: var(--texte);
+  font-weight: 400;
+}
+
+button.danger {
+  background: transparent;
+  border: 1px solid var(--erreur);
+  color: var(--erreur);
+  font-weight: 400;
+}
+
+.aide {
+  color: var(--texte-2);
+  font-size: 12px;
+  margin: 2px 0 0;
+}
+
+.statut {
+  color: var(--ok);
+  font-size: 13px;
+  min-height: 20px;
+  margin: 8px 0 0;
+}
+
+.device-id {
+  font-family: ui-monospace, 'Cascadia Mono', monospace;
+  font-size: 12px;
+  color: var(--texte-2);
+  user-select: all;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}

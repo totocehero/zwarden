@@ -7,14 +7,16 @@ Objectif : la même compatibilité, un ordre de grandeur en moins de poids.
 
 ## Pourquoi
 
-L'extension Bitwarden officielle (2026.7.0) mesurée sur disque :
+L'extension Bitwarden officielle (2026.7.0) mesurée sur disque — **46,4 Mo**
+décompressée, hors sourcemaps :
 
 | Poste | Taille | Conséquence |
 |---|---|---|
 | `background.js` | 3,3 Mo | service worker MV3 tué après 30 s d'inactivité → 3,3 Mo reparsés à chaque réveil |
-| `bitwarden_wasm_internal.wasm` | 7,4 Mo | chargé au démarrage, et présent en double dans le paquet |
-| `bootstrap-autofill-overlay.js` | 1,7 Mo | injecté dans **chaque frame** de **chaque page** visitée |
-| popup Angular | ~2 Mo | plusieurs centaines de ms avant le premier rendu |
+| module WASM (SDK Rust) | 7,4 Mo **× 2** | chargé au démarrage — et le paquet contient deux copies **octet pour octet identiques** |
+| bundles d'autofill (`bootstrap-autofill-overlay*.js` × 3) | 4,9 Mo | candidats à l'injection dans les pages visitées ; le « détecteur » à `document_start` est en réalité un déclencheur inconditionnel de 164 octets, sans détection de formulaire |
+| popup Angular (JS + CSS) | 6,7 Mo | plusieurs centaines de ms avant le premier rendu |
+| traductions (63 locales) | 15 Mo | embarquées intégralement, quelle que soit la langue |
 
 Zwarden vise **< 300 Ko** au total.
 
@@ -41,12 +43,19 @@ Le noyau cryptographique est implémenté et testé. Le reste est en cours.
 - [x] `SymmetricCryptoKey` — clés 32/64 octets
 - [x] AES-256-CBC + HMAC-SHA256, Encrypt-then-MAC
 - [x] Dérivation de clé : PBKDF2-SHA256 et Argon2id
-- [x] 112 tests, dont les vecteurs RFC 4231 / 5869 / 7914
+- [x] 197 tests, dont les vecteurs RFC 4231 / 5869 / 7914
 - [x] **Interopérabilité validée contre Vaultwarden 2026.6.0** — authentification,
       déchiffrement de la clé de coffre, et aller-retour écriture/lecture complet
-- [x] Client API : prelogin, authentification, synchronisation, création et suppression d'items
+- [x] Client API : prelogin, authentification, rafraîchissement de session,
+      synchronisation, création et suppression d'items — sans jamais voir ni
+      clé ni mot de passe
+- [x] Couche coffre : orchestrateur de déverrouillage (`unlock()`, hygiène
+      mémoire incluse) et déchiffrement d'items (clé par item, vues
+      partielles, casse tolérée)
 - [ ] Service worker et cycle de vie du verrouillage
-- [ ] Popup (déverrouillage, liste, recherche, copie)
+- [ ] Popup (déverrouillage, liste, recherche, copie) — deux vues commutables :
+      « Bitwarden-like » (disposition classique, zéro réapprentissage pour les
+      migrants) et « Zwarden » (filtrée sur l'onglet actif, pilotage clavier)
 - [ ] TOTP et générateur de mots de passe
 - [ ] Création / édition d'items
 - [ ] Autofill
@@ -66,11 +75,13 @@ Décisions notables, dont certaines sont plus strictes que Bitwarden :
   peut dépouiller le MAC et retrouver un oracle de padding.
 - **Écriture toujours authentifiée.** Chiffrer avec une clé sans `macKey` lève
   une erreur. Le type 0 reste lisible pour la migration d'anciens coffres.
-- **Paramètres KDF validés.** `iterations` et `memory` viennent du serveur
-  *avant* authentification : un serveur compromis peut annoncer 1 itération pour
-  rendre la clé maître triviale à casser hors ligne. Zwarden rejette les
-  configurations en dessous du plancher OWASP. Bitwarden ne fait pas cette
-  vérification.
+- **Paramètres KDF validés, dans les deux sens.** `iterations` et `memory`
+  viennent du serveur *avant* authentification : un serveur compromis peut
+  annoncer 1 itération pour rendre la clé maître triviale à casser hors ligne —
+  ou des valeurs absurdes (2³¹ itérations, mémoire Argon2 en gibioctets) pour
+  geler le client au déverrouillage. Zwarden rejette les configurations sous le
+  plancher OWASP, au-dessus des maxima du client officiel, et les valeurs non
+  entières. Bitwarden ne fait aucune de ces vérifications.
 - **AES-128 (type 1) refusé** en déchiffrement : ré-chiffrement requis.
 
 ## Compatibilité
@@ -90,7 +101,7 @@ interopérables dans les deux sens :
 
 ```bash
 npm install
-npm test          # 112 tests
+npm test          # 197 tests
 npm run typecheck # TypeScript strict
 npm run build
 ```
@@ -99,6 +110,9 @@ npm run build
 
 - [`docs/CRYPTO.md`](docs/CRYPTO.md) — modèle de menace, hiérarchie des clés,
   schéma de chiffrement, durcissements et leurs justifications.
+- [`docs/EXTENSION.md`](docs/EXTENSION.md) — décisions d'ergonomie et de
+  sécurité de l'extension : déverrouillage, cycle de verrouillage, deux vues
+  de popup, règles d'autofill.
 
 ## Licence
 

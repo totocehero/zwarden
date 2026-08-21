@@ -1,0 +1,236 @@
+/* Popup Zwarden — style minimal de la version de preuve de vie. */
+
+:root {
+  --fond: #1c1f26;
+  --panneau: #262a33;
+  --texte: #e6e8ee;
+  --texte-2: #9aa1af;
+  --accent: #4f8cff;
+  --erreur: #ff6b6b;
+  --bord: #3a3f4b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 360px;
+  margin: 0;
+  font: 13px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  background: var(--fond);
+  color: var(--texte);
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--bord);
+}
+
+header h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+main {
+  padding: 12px;
+}
+
+form {
+  display: grid;
+  gap: 8px;
+}
+
+label {
+  display: grid;
+  gap: 3px;
+  color: var(--texte-2);
+  font-size: 12px;
+}
+
+input {
+  padding: 7px 9px;
+  border: 1px solid var(--bord);
+  border-radius: 6px;
+  background: var(--panneau);
+  color: var(--texte);
+  font-size: 13px;
+}
+
+input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+select {
+  padding: 7px 9px;
+  border: 1px solid var(--bord);
+  border-radius: 6px;
+  background: var(--panneau);
+  color: var(--texte);
+  font-size: 13px;
+}
+
+label.ligne {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  color: var(--texte);
+}
+
+label.ligne input {
+  width: auto;
+}
+
+/* Champ mot de passe avec œil intégré. */
+.champ-mdp {
+  position: relative;
+  display: grid;
+}
+
+.champ-mdp input {
+  padding-right: 32px;
+}
+
+button.oeil {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  background: transparent;
+  border: 0;
+  color: var(--texte-2);
+  cursor: pointer;
+}
+
+button.oeil:hover {
+  color: var(--texte);
+}
+
+/* Œil des items de la liste. */
+button.oeil-item {
+  display: flex;
+  align-items: center;
+  padding: 5px;
+}
+
+button.oeil-item:hover {
+  color: var(--texte);
+}
+
+button {
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+button.discret {
+  background: transparent;
+  color: var(--texte-2);
+  font-weight: 400;
+  padding: 4px 8px;
+}
+
+.statut {
+  margin-top: 8px;
+  color: var(--texte-2);
+}
+
+.erreur {
+  margin-top: 8px;
+  color: var(--erreur);
+  white-space: pre-wrap;
+}
+
+.recherche {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+ul.items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 380px;
+  overflow-y: auto;
+}
+
+ul.items li {
+  padding: 7px 6px;
+  border-bottom: 1px solid var(--bord);
+}
+
+.item-ligne {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.secret {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 1px dashed var(--bord);
+  border-radius: 6px;
+  background: var(--panneau);
+  font-family: ui-monospace, 'Cascadia Mono', monospace;
+  font-size: 12px;
+  word-break: break-all;
+  user-select: all;
+}
+
+.item-texte {
+  flex: 1;
+  min-width: 0;
+}
+
+.item-nom {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item-uri {
+  color: var(--texte-2);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item-user {
+  color: var(--texte-2);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: copy;
+}
+
+.item-user:hover {
+  color: var(--texte);
+}
+
+.vide {
+  color: var(--texte-2);
+  text-align: center;
+  padding: 24px 0;
+}
