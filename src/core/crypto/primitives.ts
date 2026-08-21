@@ -62,18 +62,79 @@ export async function sha256(data: Uint8Array): Promise<Uint8Array> {
 }
 
 /**
+ * Importe une clé HMAC-SHA256 en `CryptoKey` non extractible.
+ *
+ * Un `importKey` coûte un aller-retour asynchrone vers le module crypto de la
+ * plateforme : importer une fois puis réutiliser le handle (voir le cache de
+ * `SymmetricCryptoKey`) évite de payer ce coût à chaque opération. La clé est
+ * non extractible : une fois importée, son matériel n'est plus lisible depuis
+ * JavaScript.
+ *
+ * @param raw Matériel de clé brut.
+ * @returns Handle utilisable pour signer et vérifier.
+ */
+export async function importHmacSha256Key(raw: Uint8Array): Promise<CryptoKey> {
+  return subtle.importKey('raw', asBufferSource(raw), { name: 'HMAC', hash: 'SHA-256' }, false, [
+    'sign',
+    'verify',
+  ]);
+}
+
+/**
+ * Importe une clé AES-CBC en `CryptoKey` non extractible.
+ *
+ * Mêmes motivations que {@link importHmacSha256Key}.
+ *
+ * @param raw Clé de 32 octets.
+ * @returns Handle utilisable pour chiffrer et déchiffrer.
+ */
+export async function importAesCbcKey(raw: Uint8Array): Promise<CryptoKey> {
+  return subtle.importKey('raw', asBufferSource(raw), 'AES-CBC', false, ['encrypt', 'decrypt']);
+}
+
+/** Accepte indifféremment du matériel brut ou un handle déjà importé. */
+async function toHmacKey(key: Uint8Array | CryptoKey): Promise<CryptoKey> {
+  return key instanceof CryptoKey ? key : importHmacSha256Key(key);
+}
+
+/** Accepte indifféremment du matériel brut ou un handle déjà importé. */
+async function toAesKey(key: Uint8Array | CryptoKey): Promise<CryptoKey> {
+  return key instanceof CryptoKey ? key : importAesCbcKey(key);
+}
+
+/**
  * Calcule un HMAC-SHA256.
  *
- * @param key Clé d'authentification. Toute longueur est acceptée : HMAC la
- *   condense ou la complète selon RFC 2104.
+ * @param key Clé d'authentification, brute ou déjà importée. En brut, toute
+ *   longueur est acceptée : HMAC la condense ou la complète selon RFC 2104.
  * @param data Données à authentifier.
  * @returns MAC de 32 octets.
  */
-export async function hmacSha256(key: Uint8Array, data: Uint8Array): Promise<Uint8Array> {
-  const cryptoKey = await subtle.importKey('raw', asBufferSource(key), { name: 'HMAC', hash: 'SHA-256' }, false, [
-    'sign',
-  ]);
+export async function hmacSha256(key: Uint8Array | CryptoKey, data: Uint8Array): Promise<Uint8Array> {
+  const cryptoKey = await toHmacKey(key);
   return new Uint8Array(await subtle.sign('HMAC', cryptoKey, asBufferSource(data)));
+}
+
+/**
+ * Vérifie un HMAC-SHA256 en temps constant.
+ *
+ * Délègue la comparaison à `subtle.verify` : elle s'exécute en code natif, à
+ * temps constant garanti par la plateforme — contrairement à une boucle
+ * JavaScript, dont le profil temporel dépend in fine du JIT. C'est la voie à
+ * utiliser pour toute vérification de MAC.
+ *
+ * @param key Clé d'authentification, brute ou déjà importée.
+ * @param mac MAC attendu, 32 octets.
+ * @param data Données authentifiées.
+ * @returns `true` si le MAC correspond.
+ */
+export async function hmacSha256Verify(
+  key: Uint8Array | CryptoKey,
+  mac: Uint8Array,
+  data: Uint8Array,
+): Promise<boolean> {
+  const cryptoKey = await toHmacKey(key);
+  return subtle.verify('HMAC', cryptoKey, asBufferSource(mac), asBufferSource(data));
 }
 
 /**
@@ -143,12 +204,15 @@ export async function hkdfExpandSha256(
   const infoBytes = typeof info === 'string' ? toUtf8Bytes(info) : info;
   const out = new Uint8Array(lengthBytes);
 
+  // La PRK est importée une seule fois pour toute la boucle.
+  const prkKey = await importHmacSha256Key(prk);
+
   // T(0) = chaîne vide ; T(i) = HMAC(PRK, T(i-1) ‖ info ‖ i)
   let previous: Uint8Array = new Uint8Array(0);
   let offset = 0;
 
   for (let i = 1; i <= blocks; i++) {
-    const block = await hmacSha256(prk, concatBytes(previous, infoBytes, Uint8Array.of(i)));
+    const block = await hmacSha256(prkKey, concatBytes(previous, infoBytes, Uint8Array.of(i)));
     out.set(block.subarray(0, Math.min(HASH_LENGTH, lengthBytes - offset)), offset);
     offset += HASH_LENGTH;
     previous = block;
@@ -164,17 +228,17 @@ export async function hkdfExpandSha256(
  * utilisé seul : l'appelant est tenu d'ajouter un MAC. Voir `cryptoService.ts`,
  * seul point d'entrée légitime.
  *
- * @param key Clé de 32 octets.
+ * @param key Clé de 32 octets, brute ou déjà importée.
  * @param iv Vecteur d'initialisation de 16 octets, unique par chiffrement.
  * @param plaintext Données en clair.
  * @returns Ciphertext, remplissage inclus.
  */
 export async function aesCbcEncrypt(
-  key: Uint8Array,
+  key: Uint8Array | CryptoKey,
   iv: Uint8Array,
   plaintext: Uint8Array,
 ): Promise<Uint8Array> {
-  const cryptoKey = await subtle.importKey('raw', asBufferSource(key), 'AES-CBC', false, ['encrypt']);
+  const cryptoKey = await toAesKey(key);
   return new Uint8Array(
     await subtle.encrypt({ name: 'AES-CBC', iv: asBufferSource(iv) }, cryptoKey, asBufferSource(plaintext)),
   );
@@ -192,7 +256,7 @@ export async function aesCbcEncrypt(
  * rejeté sans jamais atteindre AES. `cryptoService.decryptBytes` applique cette
  * règle ; ne pas appeler cette fonction directement.
  *
- * @param key Clé de 32 octets.
+ * @param key Clé de 32 octets, brute ou déjà importée.
  * @param iv Vecteur d'initialisation de 16 octets.
  * @param ciphertext Données chiffrées.
  * @returns Données en clair.
@@ -200,11 +264,11 @@ export async function aesCbcEncrypt(
  *   mauvaise clé ou une donnée altérée.
  */
 export async function aesCbcDecrypt(
-  key: Uint8Array,
+  key: Uint8Array | CryptoKey,
   iv: Uint8Array,
   ciphertext: Uint8Array,
 ): Promise<Uint8Array> {
-  const cryptoKey = await subtle.importKey('raw', asBufferSource(key), 'AES-CBC', false, ['decrypt']);
+  const cryptoKey = await toAesKey(key);
   return new Uint8Array(
     await subtle.decrypt({ name: 'AES-CBC', iv: asBufferSource(iv) }, cryptoKey, asBufferSource(ciphertext)),
   );

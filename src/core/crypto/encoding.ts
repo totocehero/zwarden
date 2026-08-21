@@ -22,23 +22,60 @@
 const FROM_CHAR_CODE_CHUNK = 8192;
 
 /**
+ * Méthodes base64 natives de `Uint8Array` (proposition TC39 arraybuffer-base64),
+ * disponibles dans les navigateurs cibles récents. Détectées une fois au
+ * chargement du module ; leur absence bascule sur le repli `btoa`/`atob`.
+ *
+ * Les types ne sont pas encore dans `lib.es2022`, d'où les élargissements
+ * locaux — confinés à ces deux constantes.
+ */
+const NATIVE_TO_BASE64 = (Uint8Array.prototype as Uint8Array & { toBase64?: () => string })
+  .toBase64;
+const NATIVE_FROM_BASE64 = (
+  Uint8Array as typeof Uint8Array & { fromBase64?: (input: string) => Uint8Array }
+).fromBase64;
+
+/**
  * Encode des octets en base64 standard (RFC 4648 §4), avec padding.
  *
- * S'appuie sur `btoa`, disponible dans tous les contextes d'extension
- * (fenêtre, service worker, content script). Une implémentation manuelle a été
- * mesurée : elle est plus lente que la primitive de la plateforme à l'encodage
- * comme au décodage (voir `scripts/bench-base64.mjs`). Le code natif gagne sur
- * les deux tableaux, il n'y a donc aucune raison de le réimplémenter.
+ * Utilise `Uint8Array.prototype.toBase64` quand la plateforme l'offre — code
+ * natif dédié, plus rapide que `btoa` — sinon {@link toBase64Js}. Une
+ * implémentation manuelle en JS a été mesurée plus lente que les deux (voir
+ * `scripts/bench-base64.mjs`) : on ne réimplémente pas ce que la plateforme
+ * fait mieux.
  *
  * @param bytes Octets à encoder.
  * @returns Chaîne base64 avec padding `=`.
  */
 export function toBase64(bytes: Uint8Array): string {
+  return NATIVE_TO_BASE64 !== undefined ? NATIVE_TO_BASE64.call(bytes) : toBase64Js(bytes);
+}
+
+/**
+ * Repli de {@link toBase64} sur `btoa`, pour les plateformes sans
+ * `Uint8Array.prototype.toBase64`. Exporté pour que les tests couvrent les
+ * deux chemins quelle que soit la plateforme d'exécution.
+ */
+export function toBase64Js(bytes: Uint8Array): string {
   let binary = '';
   for (let i = 0; i < bytes.length; i += FROM_CHAR_CODE_CHUNK) {
     binary += String.fromCharCode(...bytes.subarray(i, i + FROM_CHAR_CODE_CHUNK));
   }
   return btoa(binary);
+}
+
+/**
+ * Encode des octets en base64url sans padding (RFC 4648 §5).
+ *
+ * Forme attendue notamment par l'en-tête `Auth-Email` de l'API. Centralisé ici
+ * pour respecter la convention du module : aucune « binary string » ne circule
+ * ailleurs.
+ *
+ * @param bytes Octets à encoder.
+ * @returns Chaîne base64url, sans `=` final.
+ */
+export function toBase64Url(bytes: Uint8Array): string {
+  return toBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 /**
@@ -50,18 +87,34 @@ export function toBase64(bytes: Uint8Array): string {
  * un coffre déchiffrable pour un `\n` parasite serait une régression
  * fonctionnelle sans bénéfice de sécurité.
  *
- * Le padding manquant est reconstitué : `atob` le refuse, mais un base64
- * non paddé reste décodable sans ambiguïté.
+ * Le padding manquant est reconstitué : les décodeurs stricts le refusent,
+ * mais un base64 non paddé reste décodable sans ambiguïté.
+ *
+ * Le décodage lui-même passe par `Uint8Array.fromBase64` quand il existe,
+ * sinon par {@link fromBase64Js}.
  *
  * @param input Chaîne base64, standard ou URL-safe.
  * @returns Octets décodés.
- * @throws {DOMException} Si l'entrée contient des caractères hors alphabet
- *   après normalisation.
+ * @throws {DOMException | SyntaxError} Si l'entrée contient des caractères
+ *   hors alphabet après normalisation.
  */
 export function fromBase64(input: string): Uint8Array {
   const normalized = input.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
   const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), '=');
 
+  return NATIVE_FROM_BASE64 !== undefined
+    ? NATIVE_FROM_BASE64.call(Uint8Array, padded)
+    : fromBase64Js(padded);
+}
+
+/**
+ * Repli de {@link fromBase64} sur `atob`.
+ *
+ * Attend une entrée déjà normalisée : alphabet standard, padding présent —
+ * c'est {@link fromBase64} qui s'en charge. Exporté pour que les tests couvrent
+ * les deux chemins quelle que soit la plateforme d'exécution.
+ */
+export function fromBase64Js(padded: string): Uint8Array {
   const binary = atob(padded);
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {

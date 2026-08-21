@@ -120,9 +120,20 @@ Un serveur hostile répondant `iterations: 1` obtient une clé maître dérivée
 un seul tour, et le hash d'authentification transmis suffit alors à casser le
 mot de passe hors ligne en quelques secondes.
 
-Zwarden refuse en dessous de 100 000 itérations PBKDF2 (ancien défaut Bitwarden,
-conservé pour ne pas bloquer les coffres existants) et de `t=2, m=16 MiB, p=1`
-pour Argon2id. **Le client Bitwarden officiel n'effectue pas ce contrôle.**
+Le contrôle est borné **dans les deux sens** :
+
+- **Planchers** — en dessous, la clé devient cassable hors ligne. Refus sous
+  100 000 itérations PBKDF2 (ancien défaut Bitwarden, conservé pour ne pas
+  bloquer les coffres existants) et sous `t=2, m=16 MiB, p=1` pour Argon2id.
+- **Plafonds** — au-dessus, c'est un déni de service : `iterations: 2³¹` gèle le
+  client, une mémoire Argon2 de plusieurs gibioctets tue l'onglet en OOM au
+  déverrouillage. Refus au-dessus de 5 000 000 itérations PBKDF2 et de
+  `t=10, m=1024 MiB, p=16` pour Argon2id — les maxima de l'interface du client
+  officiel, donc aucun coffre légitime ne peut les dépasser.
+- **Valeurs non entières** — `NaN`, flottants et chaînes déguisées en nombres
+  sont rejetés avant d'atteindre le KDF (`Number.isSafeInteger`).
+
+**Le client Bitwarden officiel n'effectue aucun de ces contrôles.**
 
 ---
 
@@ -166,6 +177,10 @@ Le nombre d'itérations **est** la valeur de l'énumération. Les deux hashs son
 donc structurellement distincts : celui stocké localement ne peut pas être
 rejoué comme preuve d'authentification, et inversement.
 
+La validation hors ligne passe par `verifyLocalPasswordHash`, qui compare les
+**octets décodés** à temps constant — jamais un `===` sur les chaînes base64,
+qui court-circuite au premier caractère divergent.
+
 ---
 
 ## 6. Chiffrement des données
@@ -183,7 +198,7 @@ Sérialisation : `2.<base64(iv)>|<base64(ct)>|<base64(mac)>`
 ### Déchiffrement
 
 ```
-1. vérifier  HMAC-SHA256(macKey, iv ‖ ct) == mac    (temps constant)
+1. vérifier  HMAC-SHA256(macKey, iv ‖ ct) == mac    (subtle.verify, temps constant natif)
 2. si échec  → rejeter, sans toucher AES
 3. sinon     → AES-256-CBC-décrypt
 ```
@@ -259,21 +274,40 @@ Un compte configuré en PBKDF2 ne télécharge **jamais** le module Argon2id.
 
 ### base64 délégué à la plateforme
 
-Une implémentation manuelle a été écrite puis retirée : `scripts/bench-base64.mjs`
-la mesure **plus lente** que `atob`/`btoa` (2,2× au décodage). 40 lignes de code
-sensible supprimées pour un gain de performance.
+Le chemin principal utilise `Uint8Array.prototype.toBase64` /
+`Uint8Array.fromBase64` (proposition TC39 arraybuffer-base64), détectés au
+chargement du module ; à défaut, repli sur `btoa`/`atob`. Une implémentation
+manuelle a été écrite puis retirée : `scripts/bench-base64.mjs` la mesure
+**plus lente** que `atob`/`btoa` (2,2× au décodage), elles-mêmes battues par les
+méthodes natives dédiées. 40 lignes de code sensible supprimées pour un gain de
+performance.
 
-`atob` **rejette** les entrées invalides, là où l'implémentation manuelle les
-ignorait. C'est le bon comportement : sur du matériel cryptographique, ignorer
-des octets illisibles masquerait une corruption ou une réponse falsifiée.
-`EncString.parse` traduit ces échecs en `EncStringParseError`.
+Les décodeurs de la plateforme **rejettent** les entrées invalides, là où
+l'implémentation manuelle les ignorait. C'est le bon comportement : sur du
+matériel cryptographique, ignorer des octets illisibles masquerait une
+corruption ou une réponse falsifiée. `EncString.parse` traduit ces échecs en
+`EncStringParseError`.
+
+### Réutilisation des clés importées
+
+`subtle.importKey` coûte un aller-retour asynchrone vers le module crypto.
+`SymmetricCryptoKey` importe donc chaque moitié de clé **une seule fois**
+(handles non extractibles, mis en cache paresseusement) : la synchronisation
+d'un coffre de N items économise 2 N imports. `destroy()` abandonne les handles
+en même temps qu'il efface le matériel brut.
 
 ### Comparaison à temps constant
 
-`timingSafeEqual` parcourt systématiquement toute la longueur et accumule les
-différences par OU binaire. Une comparaison à court-circuit révèle par son temps
-de réponse le nombre d'octets de tête corrects, ce qui ramène la forge d'un MAC
-de 2²⁵⁶ à environ 256 × 32 essais.
+La vérification de MAC est déléguée à `subtle.verify` : code natif, à temps
+constant garanti par la plateforme. Une boucle JavaScript « à temps constant »
+reste à la merci du JIT, qui ne promet rien sur le profil temporel du code
+qu'il optimise.
+
+`timingSafeEqual` demeure pour les comparaisons hors WebCrypto (hash local,
+tests). Il parcourt systématiquement toute la longueur et accumule les
+différences par OU binaire : une comparaison à court-circuit révèle par son
+temps de réponse le nombre d'octets de tête corrects, ce qui ramène la forge
+d'un MAC de 2²⁵⁶ à environ 256 × 32 essais.
 
 ### Effacement mémoire
 
@@ -287,14 +321,16 @@ garantie.
 
 ## 9. Couverture de tests
 
-`npm test` — 106 tests.
+`npm test` — 190 tests unitaires.
 
 | Fichier | Portée |
 |---|---|
-| `encoding.test.ts` | Vecteurs RFC 4648 ; aller-retour sur les 256 valeurs d'octet ; UTF-8 multi-octets ; temps constant |
-| `primitives.test.ts` | Vecteurs RFC 4231 (HMAC), RFC 7914 (PBKDF2), RFC 5869 (HKDF) |
-| `cryptoService.test.ts` | Aller-retours ; unicité de l'IV ; **altération IV / ciphertext / MAC** ; rétrogradation ; mauvaise clé ; vecteur de non-régression figé |
-| `kdf.test.ts` | Déterminisme ; normalisation e-mail et mot de passe ; séparation des sels ; refus des KDF faibles ; séparation des hashs |
+| `encoding.test.ts` | Vecteurs RFC 4648, sur le chemin natif **et** le repli ; aller-retour sur les 256 valeurs d'octet ; UTF-8 multi-octets ; base64url ; temps constant |
+| `primitives.test.ts` | Vecteurs RFC 4231 (HMAC), RFC 7914 (PBKDF2), RFC 5869 (HKDF) ; `subtle.verify` ; équivalence clé brute / `CryptoKey` importée |
+| `cryptoService.test.ts` | Aller-retours ; unicité de l'IV ; **altération IV / ciphertext / MAC** ; rétrogradation ; mauvaise clé ; validation structurelle du ciphertext ; vecteur de non-régression figé |
+| `kdf.test.ts` | Déterminisme ; normalisation e-mail et mot de passe ; séparation des sels ; refus des KDF faibles, aberrants et non entiers ; séparation des hashs ; validation locale à temps constant |
+| `apiClient.test.ts` | `fetch` simulé : validation d'URL, casse des champs, 429 / Retry-After, second facteur, captcha, rafraîchissement de session, 200 non-JSON, jeton absent, idempotence de la suppression ; seul le hash d'autorisation transite |
+| `vault.test.ts` | Serveur simulé qui **vérifie le hash** : `unlock()` de bout en bout, refus de KDF faible avant tout envoi, clé enveloppée absente ou falsifiée ; items à clé propre, casse PascalCase, champs corrompus isolés, liste à concurrence bornée |
 
 Les tests d'altération sont les plus importants : ils vérifient que chaque
 falsification possible produit bien `MacMismatchError`.

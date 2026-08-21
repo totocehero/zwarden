@@ -3,16 +3,19 @@
  *
  * ## Responsabilité
  *
- * Transport et analyse de réponses, rien d'autre. Ce module ne déchiffre rien
- * et ne détient aucune clé — la cryptographie vit dans `core/crypto`. La
- * séparation permet d'auditer les deux indépendamment : une faille de
+ * Transport et analyse de réponses, rien d'autre. Ce module ne déchiffre rien,
+ * ne détient aucune clé et **n'importe aucune primitive cryptographique** — la
+ * cryptographie vit dans `core/crypto`, l'orchestration dans `core/vault`. La
+ * séparation permet d'auditer les couches indépendamment : une faille de
  * transport ne peut pas exposer de clé, puisqu'il n'y en a aucune ici.
  *
- * ## Le mot de passe ne quitte jamais le client
+ * ## Ni mot de passe, ni clé ne traversent ce module
  *
- * {@link ApiClient.login} prend une clé maître **déjà dérivée**, jamais le mot
- * de passe. Le serveur ne reçoit que le hash d'autorisation. Cette signature
- * rend l'erreur difficile à commettre par inadvertance.
+ * {@link ApiClient.login} prend le **hash d'autorisation déjà calculé**
+ * (`derivePasswordHash`, usage `ServerAuthorization`) — jamais le mot de
+ * passe, jamais la clé maître. Cette signature rend l'erreur impossible à
+ * commettre par inadvertance : il n'existe aucun paramètre où placer un
+ * secret.
  *
  * ## Aucun serveur par défaut
  *
@@ -22,8 +25,8 @@
  * télémétrie.
  */
 
-import { HashPurpose, derivePasswordHash, type KdfConfig, KdfType } from '../crypto/kdf.js';
-import type { SymmetricCryptoKey } from '../crypto/symmetricCryptoKey.js';
+import { type KdfConfig, KdfType } from '../crypto/kdf.js';
+import { toBase64Url, toUtf8Bytes } from '../crypto/encoding.js';
 import {
   type CipherResponse,
   DeviceType,
@@ -37,6 +40,8 @@ import {
 /** Échec d'un appel API, avec le contexte nécessaire au diagnostic. */
 export class ApiError extends Error {
   override readonly name = 'ApiError';
+  /** Identifiant stable pour l'interface : les messages servent aux journaux. */
+  readonly code = 'api-error';
 
   constructor(
     message: string,
@@ -50,11 +55,30 @@ export class ApiError extends Error {
 /** Levée lorsque le serveur exige une seconde étape d'authentification. */
 export class TwoFactorRequiredError extends Error {
   override readonly name = 'TwoFactorRequiredError';
+  /** Identifiant stable pour l'interface : les messages servent aux journaux. */
+  readonly code = 'two-factor-required';
 
   constructor(readonly providers: readonly string[]) {
     super(
       `Authentification à deux facteurs requise (fournisseurs : ${providers.join(', ') || 'non précisés'})`,
     );
+  }
+}
+
+/**
+ * Levée lorsque le serveur exige la résolution d'un captcha.
+ *
+ * Vaultwarden peut l'imposer après des échecs répétés ou selon sa
+ * configuration. Sans traitement dédié, l'utilisateur verrait un « échec
+ * d'authentification » inexpliqué alors que son mot de passe est correct.
+ */
+export class CaptchaRequiredError extends Error {
+  override readonly name = 'CaptchaRequiredError';
+  /** Identifiant stable pour l'interface : les messages servent aux journaux. */
+  readonly code = 'captcha-required';
+
+  constructor(readonly siteKey: string) {
+    super('Le serveur exige la résolution d’un captcha avant de poursuivre');
   }
 }
 
@@ -69,6 +93,8 @@ export class TwoFactorRequiredError extends Error {
  */
 export class RateLimitedError extends Error {
   override readonly name = 'RateLimitedError';
+  /** Identifiant stable pour l'interface : les messages servent aux journaux. */
+  readonly code = 'rate-limited';
 
   constructor(readonly retryAfterSeconds: number | undefined) {
     super(
@@ -91,12 +117,29 @@ export interface LoginResult {
    */
   readonly protectedUserKey: string | undefined;
   readonly protectedPrivateKey: string | undefined;
+  /**
+   * Jeton de dispense de second facteur, présent si `remember` a été demandé
+   * et accepté. À persister par appareil, puis rejouer comme fournisseur 5
+   * (`Remember`) pour ne plus être sollicité sur cet appareil.
+   */
+  readonly twoFactorRememberToken: string | undefined;
+}
+
+/** Second facteur joint à une tentative d'authentification. */
+export interface TwoFactorSubmission {
+  /** Identifiant du fournisseur (voir `TwoFactorProvider` dans models.ts). */
+  readonly provider: number;
+  /** Code TOTP, code e-mail, OTP YubiKey, ou jeton de dispense (fournisseur 5). */
+  readonly token: string;
+  /** Demande un jeton de dispense pour cet appareil. */
+  readonly remember?: boolean;
 }
 
 export interface ApiClientOptions {
   /**
    * URL de l'instance auto-hébergée, par exemple `https://coffre.exemple.fr`.
-   * Obligatoire, sans valeur par défaut.
+   * Obligatoire, sans valeur par défaut. HTTPS exigé — HTTP n'est toléré que
+   * vers localhost, pour le développement.
    */
   readonly serverUrl: string;
   /** Nom affiché dans la liste des sessions actives côté serveur. */
@@ -107,6 +150,19 @@ export interface ApiClientOptions {
    * et déclenche les alertes « nouvel appareil ».
    */
   readonly deviceIdentifier: string;
+  /**
+   * Type d'appareil annoncé à l'authentification. À fixer selon la cible de
+   * build (`ChromeExtension` par défaut, `FirefoxExtension` pour le paquet
+   * Firefox) : Vaultwarden s'en sert pour l'affichage des sessions actives.
+   */
+  readonly deviceType?: DeviceType;
+  /**
+   * Délai maximal d'une requête, en millisecondes. Un dépassement rejette avec
+   * une `DOMException` de nom `TimeoutError`. Une requête sans borne est
+   * particulièrement coûteuse dans un service worker MV3, dont la durée de vie
+   * est comptée.
+   */
+  readonly timeoutMs?: number;
   /** Injection pour les tests. Par défaut, le `fetch` global. */
   readonly fetchFn?: typeof fetch;
 }
@@ -124,18 +180,27 @@ const CLIENT_ID = 'zwarden';
 /** Portée OAuth2 demandée. `offline_access` conditionne l'émission d'un jeton de rafraîchissement. */
 const SCOPE = 'api offline_access';
 
+/** Délai réseau par défaut, en millisecondes. */
+const DEFAULT_TIMEOUT_MS = 30_000;
+
 export class ApiClient {
   private readonly baseUrl: string;
   private readonly deviceName: string;
   private readonly deviceIdentifier: string;
+  private readonly deviceType: DeviceType;
+  private readonly timeoutMs: number;
   private readonly fetchFn: typeof fetch;
 
+  /**
+   * @throws {RangeError} Si `serverUrl` n'est pas une URL valide, ou n'est ni
+   *   HTTPS ni du HTTP vers localhost.
+   */
   constructor(options: ApiClientOptions) {
-    // Normaliser le slash final évite les `//` dans les chemins, que certains
-    // reverse-proxies traitent différemment du serveur applicatif.
-    this.baseUrl = options.serverUrl.replace(/\/+$/, '');
+    this.baseUrl = validateServerUrl(options.serverUrl);
     this.deviceName = options.deviceName ?? 'Zwarden';
     this.deviceIdentifier = options.deviceIdentifier;
+    this.deviceType = options.deviceType ?? DeviceType.ChromeExtension;
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.fetchFn = options.fetchFn ?? globalThis.fetch.bind(globalThis);
   }
 
@@ -152,42 +217,89 @@ export class ApiClient {
    * @throws {ApiError} Si le serveur répond en erreur.
    */
   async prelogin(email: string): Promise<KdfConfig> {
-    const body = await this.requestText('/identity/accounts/prelogin', {
+    const data = await this.requestJson<PreloginResponse>('/identity/accounts/prelogin', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: normalizeEmail(email) }),
     });
 
-    return toKdfConfig(JSON.parse(body) as PreloginResponse);
+    return toKdfConfig(data);
   }
 
   /**
    * Authentifie le compte et ouvre une session.
    *
    * @param email E-mail du compte.
-   * @param masterKey Clé maître dérivée localement.
-   * @param password Mot de passe maître, utilisé uniquement comme sel pour
-   *   produire le hash d'autorisation. Il n'est jamais transmis.
+   * @param passwordHash Hash d'autorisation, produit par `derivePasswordHash`
+   *   avec l'usage `ServerAuthorization`. Ni le mot de passe ni la clé maître
+   *   ne doivent jamais atteindre ce module.
+   * @param twoFactor Second facteur, lors d'une seconde tentative après
+   *   {@link TwoFactorRequiredError} — ou jeton de dispense (fournisseur 5)
+   *   dès la première.
    * @returns Jetons de session et clé de coffre enveloppée.
-   * @throws {TwoFactorRequiredError} Si une seconde étape est exigée.
+   * @throws {TwoFactorRequiredError} Si une seconde étape est exigée — y
+   *   compris lorsque le second facteur fourni est invalide ou expiré.
+   * @throws {CaptchaRequiredError} Si le serveur exige un captcha.
    * @throws {RateLimitedError} Si le serveur limite le débit.
    * @throws {ApiError} Pour tout autre échec.
    */
-  async login(email: string, masterKey: SymmetricCryptoKey, password: string): Promise<LoginResult> {
+  async login(
+    email: string,
+    passwordHash: string,
+    twoFactor?: TwoFactorSubmission,
+  ): Promise<LoginResult> {
     const normalized = normalizeEmail(email);
-    const passwordHash = await derivePasswordHash(
-      masterKey,
-      password,
-      HashPurpose.ServerAuthorization,
-    );
 
+    const form = this.buildTokenForm(normalized, passwordHash);
+    if (twoFactor !== undefined) {
+      form.set('twoFactorProvider', String(twoFactor.provider));
+      form.set('twoFactorToken', twoFactor.token);
+      form.set('twoFactorRemember', twoFactor.remember === true ? '1' : '0');
+    }
+
+    return this.requestToken(form, {
+      'Auth-Email': toBase64Url(toUtf8Bytes(normalized)),
+    });
+  }
+
+  /**
+   * Renouvelle la session à partir du jeton de rafraîchissement.
+   *
+   * Indispensable au service worker MV3 : le jeton d'accès expire en une
+   * heure environ, bien après la mort du worker. Rafraîchir évite de
+   * redemander le mot de passe — et donc de refaire une dérivation KDF —
+   * à chaque expiration.
+   *
+   * @param refreshToken Jeton émis par {@link ApiClient.login} (portée
+   *   `offline_access`).
+   * @returns Nouvelle session ; le serveur peut faire tourner le jeton de
+   *   rafraîchissement, utiliser systématiquement celui du résultat.
+   * @throws {RateLimitedError} Si le serveur limite le débit.
+   * @throws {ApiError} Si le jeton est expiré ou révoqué.
+   */
+  async refreshToken(refreshToken: string): Promise<LoginResult> {
+    return this.requestToken(
+      new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+        client_id: CLIENT_ID,
+      }),
+    );
+  }
+
+  /** Appelle `/identity/connect/token` et analyse la réponse de jeton. */
+  private async requestToken(
+    form: URLSearchParams,
+    extraHeaders?: Record<string, string>,
+  ): Promise<LoginResult> {
     const response = await this.fetchFn(`${this.baseUrl}/identity/connect/token`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'Auth-Email': toBase64Url(normalized),
+        ...extraHeaders,
       },
-      body: this.buildTokenForm(normalized, passwordHash).toString(),
+      body: form.toString(),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
 
     const body = await response.text();
@@ -195,7 +307,14 @@ export class ApiClient {
       throw this.toLoginError(response, body);
     }
 
-    return toLoginResult(JSON.parse(body) as TokenResponse);
+    const data = parseJsonOrUndefined<TokenResponse>(body);
+    if (data === undefined || typeof data.access_token !== 'string' || data.access_token === '') {
+      // Un 200 sans jeton produirait une session silencieusement inutilisable :
+      // mieux vaut échouer ici, avec le corps sous les yeux.
+      throw new ApiError("Réponse d'authentification sans jeton d'accès", response.status, body);
+    }
+
+    return toLoginResult(data);
   }
 
   /**
@@ -206,11 +325,9 @@ export class ApiClient {
    * @throws {ApiError} Si le serveur répond en erreur.
    */
   async sync(accessToken: string): Promise<SyncResponse> {
-    const body = await this.requestText('/api/sync?excludeDomains=true', {
+    return this.requestJson<SyncResponse>('/api/sync?excludeDomains=true', {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-
-    return JSON.parse(body) as SyncResponse;
   }
 
   /**
@@ -226,7 +343,7 @@ export class ApiClient {
    * @throws {ApiError} Si le serveur refuse la création.
    */
   async createCipher(accessToken: string, cipher: Record<string, unknown>): Promise<CipherResponse> {
-    const body = await this.requestText('/api/ciphers', {
+    return this.requestJson<CipherResponse>('/api/ciphers', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -234,8 +351,6 @@ export class ApiClient {
       },
       body: JSON.stringify(cipher),
     });
-
-    return JSON.parse(body) as CipherResponse;
   }
 
   /**
@@ -253,6 +368,7 @@ export class ApiClient {
     const response = await this.fetchFn(`${this.baseUrl}/api/ciphers/${cipherId}`, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
 
     if (!response.ok && response.status !== 404) {
@@ -272,7 +388,7 @@ export class ApiClient {
       password: passwordHash,
       scope: SCOPE,
       client_id: CLIENT_ID,
-      deviceType: String(DeviceType.ChromeExtension),
+      deviceType: String(this.deviceType),
       deviceIdentifier: this.deviceIdentifier,
       deviceName: this.deviceName,
     });
@@ -282,7 +398,8 @@ export class ApiClient {
    * Traduit un échec d'authentification en erreur typée.
    *
    * L'ordre compte : le limiteur de débit répond avant toute vérification
-   * d'identifiants, et une demande de second facteur n'est pas un échec.
+   * d'identifiants, une demande de second facteur n'est pas un échec, et un
+   * captcha exigé n'est pas un mauvais mot de passe.
    */
   private toLoginError(response: Response, body: string): Error {
     if (response.status === 429) {
@@ -295,6 +412,11 @@ export class ApiClient {
       return new TwoFactorRequiredError(providers);
     }
 
+    const captchaSiteKey = readField<string>(error, 'HCaptcha_SiteKey');
+    if (typeof captchaSiteKey === 'string' && captchaSiteKey !== '') {
+      return new CaptchaRequiredError(captchaSiteKey);
+    }
+
     return new ApiError(
       error?.error_description ?? "Échec de l'authentification",
       response.status,
@@ -302,9 +424,18 @@ export class ApiClient {
     );
   }
 
-  /** Exécute une requête et renvoie le corps, en traduisant les échecs. */
-  private async requestText(path: string, init?: RequestInit): Promise<string> {
-    const response = await this.fetchFn(`${this.baseUrl}${path}`, init);
+  /**
+   * Exécute une requête attendue en JSON, en traduisant les échecs.
+   *
+   * Couvre aussi le cas du 200 non-JSON — page de garde d'un reverse-proxy,
+   * portail captif — qui doit produire une `ApiError` exploitable, pas une
+   * `SyntaxError` brute.
+   */
+  private async requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+    const response = await this.fetchFn(`${this.baseUrl}${path}`, {
+      ...init,
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
     const body = await response.text();
 
     if (response.status === 429) {
@@ -314,8 +445,47 @@ export class ApiClient {
       throw new ApiError(`Échec de la requête ${path}`, response.status, body);
     }
 
-    return body;
+    try {
+      return JSON.parse(body) as T;
+    } catch {
+      throw new ApiError(`Réponse illisible (JSON attendu) pour ${path}`, response.status, body);
+    }
   }
+}
+
+/**
+ * Valide l'URL du serveur et la normalise (slash final retiré, pour éviter les
+ * `//` dans les chemins, que certains reverse-proxies traitent différemment du
+ * serveur applicatif).
+ *
+ * HTTPS est exigé : un coffre — même chiffré de bout en bout — ne transite pas
+ * en clair, ne serait-ce que pour protéger les jetons de session. HTTP reste
+ * toléré vers localhost, pour le développement.
+ *
+ * @throws {RangeError} URL invalide, ou protocole refusé.
+ */
+function validateServerUrl(serverUrl: string): string {
+  let url: URL;
+  try {
+    url = new URL(serverUrl);
+  } catch {
+    throw new RangeError(`URL de serveur invalide : « ${serverUrl} »`);
+  }
+
+  const isLoopback =
+    url.hostname === 'localhost' ||
+    url.hostname === '127.0.0.1' ||
+    url.hostname === '[::1]' ||
+    url.hostname === '::1' ||
+    url.hostname.endsWith('.localhost');
+
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLoopback)) {
+    throw new RangeError(
+      `Le serveur doit être joint en HTTPS (HTTP toléré pour localhost uniquement) : « ${serverUrl} »`,
+    );
+  }
+
+  return serverUrl.replace(/\/+$/, '');
 }
 
 /** Normalise l'e-mail comme le fait la dérivation de clé, pour rester cohérent. */
@@ -350,6 +520,7 @@ function toLoginResult(data: TokenResponse): LoginResult {
     expiresAt: Date.now() + expiresIn * 1000,
     protectedUserKey: readField<string>(data, 'Key'),
     protectedPrivateKey: readField<string>(data, 'PrivateKey'),
+    twoFactorRememberToken: readField<string>(data, 'TwoFactorToken'),
   };
 }
 
@@ -376,16 +547,6 @@ function parseRetryAfter(value: string | null): number | undefined {
   }
   const seconds = Number(value);
   return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
-}
-
-/** Encode en base64url sans padding, format attendu par l'en-tête `Auth-Email`. */
-function toBase64Url(value: string): string {
-  const bytes = new TextEncoder().encode(value);
-  let binary = '';
-  for (const byte of bytes) {
-    binary += String.fromCharCode(byte);
-  }
-  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 /** Analyse un JSON sans jeter : les corps d'erreur ne sont pas toujours du JSON. */

@@ -21,6 +21,7 @@
 
 import { EncryptionType } from './encString.js';
 import { fromBase64, toBase64, wipe } from './encoding.js';
+import { importAesCbcKey, importHmacSha256Key, randomBytes } from './primitives.js';
 
 /** Longueur d'une clé sans authentification, en octets. */
 const UNAUTHENTICATED_LENGTH = 32;
@@ -39,7 +40,21 @@ export class SymmetricCryptoKey {
   readonly encryptionType: EncryptionType;
 
   /**
-   * @param key Matériel de clé brut, de 32 ou 64 octets.
+   * Handles WebCrypto importés paresseusement, puis réutilisés.
+   *
+   * `subtle.importKey` coûte un aller-retour asynchrone : sans cache, chaque
+   * chiffrement ou déchiffrement le paierait deux fois (AES + HMAC). Lors de la
+   * synchronisation d'un coffre de N items avec la même clé, le cache économise
+   * 2 N imports. Les handles sont non extractibles.
+   */
+  #encCryptoKey: Promise<CryptoKey> | undefined;
+  #macCryptoKey: Promise<CryptoKey> | undefined;
+
+  /**
+   * @param key Matériel de clé brut, de 32 ou 64 octets. **Le tampon devient
+   *   la propriété de la clé** : `encKey` et `macKey` sont des vues dessus,
+   *   pas des copies. L'appelant ne doit plus ni le réutiliser ni l'effacer —
+   *   c'est `destroy()` qui s'en charge au verrouillage.
    * @throws {RangeError} Pour toute autre longueur.
    */
   constructor(readonly key: Uint8Array) {
@@ -85,14 +100,35 @@ export class SymmetricCryptoKey {
    * de passe possible sans re-chiffrer le coffre.
    */
   static generate(): SymmetricCryptoKey {
-    const key = new Uint8Array(AUTHENTICATED_LENGTH);
-    globalThis.crypto.getRandomValues(key);
-    return new SymmetricCryptoKey(key);
+    return new SymmetricCryptoKey(randomBytes(AUTHENTICATED_LENGTH));
   }
 
   /** `true` si la clé permet le chiffrement authentifié. */
   get isAuthenticated(): boolean {
     return this.macKey !== undefined;
+  }
+
+  /**
+   * Handle AES-CBC importé, mis en cache au premier appel.
+   *
+   * @returns `CryptoKey` non extractible pour `encKey`.
+   */
+  getEncCryptoKey(): Promise<CryptoKey> {
+    return (this.#encCryptoKey ??= importAesCbcKey(this.encKey));
+  }
+
+  /**
+   * Handle HMAC-SHA256 importé, mis en cache au premier appel.
+   *
+   * @returns `CryptoKey` non extractible pour `macKey`.
+   * @throws {RangeError} Si la clé fait 32 octets, donc sans `macKey`. Les
+   *   appelants doivent tester `isAuthenticated` ou `macKey` avant.
+   */
+  getMacCryptoKey(): Promise<CryptoKey> {
+    if (this.macKey === undefined) {
+      throw new RangeError('Clé de 32 octets : aucune macKey à importer');
+    }
+    return (this.#macCryptoKey ??= importHmacSha256Key(this.macKey));
   }
 
   /** Encode la clé en base64, pour stockage ou transmission. */
@@ -109,9 +145,13 @@ export class SymmetricCryptoKey {
    * d'exposition sans l'éliminer.
    *
    * L'instance devient inutilisable : `encKey` et `macKey` sont des vues sur
-   * le tampon effacé.
+   * le tampon effacé. Les handles WebCrypto en cache sont abandonnés ; non
+   * extractibles, ils ne redonnent de toute façon jamais le matériel de clé,
+   * et le GC les libérera.
    */
   destroy(): void {
     wipe(this.key);
+    this.#encCryptoKey = undefined;
+    this.#macCryptoKey = undefined;
   }
 }

@@ -6,6 +6,7 @@ import {
   MacMismatchError,
   UnsupportedEncryptionError,
   decryptString,
+  decryptStringOrNull,
   encryptString,
 } from '../src/core/crypto/cryptoService.js';
 import { toBase64 } from '../src/core/crypto/encoding.js';
@@ -72,14 +73,41 @@ describe('EncString — analyse', () => {
   });
 
   it('rejette un MAC de mauvaise taille', () => {
-    const raw = `2.${toBase64(new Uint8Array(16))}|AAAA|${toBase64(new Uint8Array(16))}`;
+    const raw = `2.${toBase64(new Uint8Array(16))}|${toBase64(new Uint8Array(16))}|${toBase64(
+      new Uint8Array(16),
+    )}`;
     expect(() => EncString.parse(raw)).toThrow(/« mac » : 16 octets, 32 attendus/);
   });
 
-  it('parseOrNull renvoie null au lieu de jeter', () => {
-    expect(EncString.parseOrNull('n’importe quoi')).toBeNull();
-    expect(EncString.parseOrNull(null)).toBeNull();
-    expect(EncString.parseOrNull('')).toBeNull();
+  it('rejette un ciphertext vide sur un type symétrique', () => {
+    const raw = `2.${toBase64(new Uint8Array(16))}||${toBase64(new Uint8Array(32))}`;
+    expect(() => EncString.parse(raw)).toThrow(/« ciphertext » : 0 octets/);
+  });
+
+  it('rejette un ciphertext non aligné sur les blocs AES', () => {
+    const raw = `2.${toBase64(new Uint8Array(16))}|${toBase64(new Uint8Array(15))}|${toBase64(
+      new Uint8Array(32),
+    )}`;
+    expect(() => EncString.parse(raw)).toThrow(EncStringParseError);
+  });
+
+  it('n’impose pas l’alignement de bloc aux types RSA', () => {
+    // La contrainte des blocs AES ne concerne que les types symétriques.
+    expect(() => EncString.parse(`3.${toBase64(new Uint8Array(11))}`)).not.toThrow();
+  });
+
+  it('parseOrNull renvoie null au lieu de jeter, en notifiant les malformations', () => {
+    const erreurs: unknown[] = [];
+    const surErreur = (e: unknown) => erreurs.push(e);
+
+    expect(EncString.parseOrNull('n’importe quoi', surErreur)).toBeNull();
+    expect(erreurs).toHaveLength(1);
+    expect(erreurs[0]).toBeInstanceOf(EncStringParseError);
+
+    // Absence légitime : null renvoyé sans notification.
+    expect(EncString.parseOrNull(null, surErreur)).toBeNull();
+    expect(EncString.parseOrNull('', surErreur)).toBeNull();
+    expect(erreurs).toHaveLength(1);
   });
 });
 
@@ -237,6 +265,47 @@ describe('résistance à l’altération', () => {
     await expect(decryptString(EncString.parse(raw), key)).rejects.toThrow(
       UnsupportedEncryptionError,
     );
+  });
+});
+
+describe('decryptStringOrNull', () => {
+  it('déchiffre une valeur valide sans invoquer onError', async () => {
+    const key = testKey();
+    const enc = (await encryptString('visible', key)).toString();
+    const erreurs: unknown[] = [];
+
+    expect(await decryptStringOrNull(enc, key, (e) => erreurs.push(e))).toBe('visible');
+    expect(erreurs).toHaveLength(0);
+  });
+
+  it('renvoie null sans erreur pour un champ absent', async () => {
+    const key = testKey();
+    const jamais = () => {
+      throw new Error('onError ne doit pas être appelé pour un champ absent');
+    };
+
+    expect(await decryptStringOrNull(null, key, jamais)).toBeNull();
+    expect(await decryptStringOrNull(undefined, key, jamais)).toBeNull();
+    expect(await decryptStringOrNull('', key, jamais)).toBeNull();
+  });
+
+  it('renvoie null et notifie sur une donnée illisible', async () => {
+    const key = testKey();
+    const erreurs: unknown[] = [];
+
+    expect(await decryptStringOrNull('pas une EncString', key, (e) => erreurs.push(e))).toBeNull();
+    expect(erreurs).toHaveLength(1);
+  });
+
+  it('renvoie null et notifie sur un MAC invalide', async () => {
+    const key = testKey();
+    const autre = new SymmetricCryptoKey(new Uint8Array(64).fill(7));
+    const enc = (await encryptString('secret', key)).toString();
+    const erreurs: unknown[] = [];
+
+    expect(await decryptStringOrNull(enc, autre, (e) => erreurs.push(e))).toBeNull();
+    expect(erreurs).toHaveLength(1);
+    expect(erreurs[0]).toBeInstanceOf(MacMismatchError);
   });
 });
 

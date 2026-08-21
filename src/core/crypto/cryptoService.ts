@@ -29,7 +29,9 @@
  *    jamais connaître la clé. Inverser l'ordre des deux étapes dans
  *    {@link decryptBytes} suffit à rouvrir cette faille.
  *
- * 2. **Comparaison de MAC à temps constant.** Voir `timingSafeEqual`.
+ * 2. **Comparaison de MAC à temps constant.** Déléguée à `subtle.verify` :
+ *    code natif, à temps constant garanti par la plateforme plutôt que par le
+ *    comportement du JIT sur une boucle JavaScript.
  *
  * 3. **Aucune rétrogradation.** Une donnée authentifiée resservie comme non
  *    authentifiée est rejetée. Sans cela, un serveur hostile retire simplement
@@ -38,8 +40,8 @@
  */
 
 import { EncString, EncryptionType } from './encString.js';
-import { concatBytes, fromUtf8Bytes, timingSafeEqual, toUtf8Bytes } from './encoding.js';
-import { aesCbcDecrypt, aesCbcEncrypt, hmacSha256, randomBytes } from './primitives.js';
+import { concatBytes, fromUtf8Bytes, toUtf8Bytes } from './encoding.js';
+import { aesCbcDecrypt, aesCbcEncrypt, hmacSha256, hmacSha256Verify, randomBytes } from './primitives.js';
 import type { SymmetricCryptoKey } from './symmetricCryptoKey.js';
 
 /**
@@ -50,6 +52,8 @@ import type { SymmetricCryptoKey } from './symmetricCryptoKey.js';
  */
 export class MacMismatchError extends Error {
   override readonly name = 'MacMismatchError';
+  /** Identifiant stable pour l'interface : les messages servent aux journaux. */
+  readonly code = 'mac-mismatch';
 
   constructor() {
     super('Vérification du MAC échouée : donnée altérée, corrompue, ou clé incorrecte');
@@ -59,23 +63,21 @@ export class MacMismatchError extends Error {
 /** Levée lorsqu'une combinaison type / clé est refusée par politique. */
 export class UnsupportedEncryptionError extends Error {
   override readonly name = 'UnsupportedEncryptionError';
+  /** Identifiant stable pour l'interface : les messages servent aux journaux. */
+  readonly code = 'unsupported-encryption';
 }
 
 /** Taille d'un IV AES, en octets. */
 const IV_LENGTH = 16;
 
 /**
- * Calcule le MAC d'un couple (IV, ciphertext).
+ * Données couvertes par le MAC : IV ‖ ciphertext.
  *
  * L'ordre de concaténation fait partie du format sur le fil : le modifier
  * rendrait tous les coffres existants illisibles.
  */
-async function computeMac(
-  macKey: Uint8Array,
-  iv: Uint8Array,
-  ciphertext: Uint8Array,
-): Promise<Uint8Array> {
-  return hmacSha256(macKey, concatBytes(iv, ciphertext));
+function macPayload(iv: Uint8Array, ciphertext: Uint8Array): Uint8Array {
+  return concatBytes(iv, ciphertext);
 }
 
 /**
@@ -105,8 +107,8 @@ export async function encryptBytes(
   }
 
   const iv = randomBytes(IV_LENGTH);
-  const ciphertext = await aesCbcEncrypt(key.encKey, iv, plaintext);
-  const mac = await computeMac(key.macKey, iv, ciphertext);
+  const ciphertext = await aesCbcEncrypt(await key.getEncCryptoKey(), iv, plaintext);
+  const mac = await hmacSha256(await key.getMacCryptoKey(), macPayload(iv, ciphertext));
 
   return EncString.fromParts(EncryptionType.AesCbc256_HmacSha256_B64, iv, ciphertext, mac);
 }
@@ -193,12 +195,16 @@ async function decryptAuthenticated(
   }
 
   const iv = encString.iv!;
-  const expected = await computeMac(key.macKey, iv, encString.ciphertext);
-  if (!timingSafeEqual(expected, encString.mac)) {
+  const macValid = await hmacSha256Verify(
+    await key.getMacCryptoKey(),
+    encString.mac,
+    macPayload(iv, encString.ciphertext),
+  );
+  if (!macValid) {
     throw new MacMismatchError();
   }
 
-  return aesCbcDecrypt(key.encKey, iv, encString.ciphertext);
+  return aesCbcDecrypt(await key.getEncCryptoKey(), iv, encString.ciphertext);
 }
 
 /**
@@ -218,7 +224,7 @@ async function decryptLegacyUnauthenticated(
     );
   }
 
-  return aesCbcDecrypt(key.encKey, encString.iv!, encString.ciphertext);
+  return aesCbcDecrypt(await key.getEncCryptoKey(), encString.iv!, encString.ciphertext);
 }
 
 /**
@@ -242,8 +248,10 @@ export async function decryptString(
  *
  * Un item corrompu ne doit pas faire échouer la synchronisation entière : la
  * fonction renvoie `null` et laisse l'appelant décider. Les erreurs restent
- * observables via `onError` — ne jamais les avaler en silence, un champ qui
- * disparaît sans trace est indiscernable d'une attaque de suppression.
+ * observables via `onError`, volontairement **obligatoire** : un champ qui
+ * disparaît sans trace est indiscernable d'une attaque de suppression, le
+ * compilateur impose donc à chaque appelant de choisir explicitement quoi en
+ * faire.
  *
  * @param value Chaîne sérialisée, `null` ou `undefined`.
  * @param key Clé de déchiffrement.
@@ -253,7 +261,7 @@ export async function decryptString(
 export async function decryptStringOrNull(
   value: string | null | undefined,
   key: SymmetricCryptoKey,
-  onError?: (error: unknown) => void,
+  onError: (error: unknown) => void,
 ): Promise<string | null> {
   if (value == null || value === '') {
     return null;
@@ -262,7 +270,7 @@ export async function decryptStringOrNull(
   try {
     return await decryptString(EncString.parse(value), key);
   } catch (error) {
-    onError?.(error);
+    onError(error);
     return null;
   }
 }

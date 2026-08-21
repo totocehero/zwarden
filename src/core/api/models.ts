@@ -32,6 +32,11 @@ export interface TokenResponse {
   /** Clé du coffre, enveloppée par la clé maître étirée. */
   readonly Key?: string;
   readonly PrivateKey?: string;
+  /**
+   * Jeton de dispense de second facteur, émis si `twoFactorRemember=1` a été
+   * demandé. À conserver et rejouer comme fournisseur 5 (`Remember`).
+   */
+  readonly TwoFactorToken?: string;
 }
 
 /** Réponse d'erreur de `POST /identity/connect/token`. */
@@ -41,7 +46,29 @@ export interface TokenErrorResponse {
   /** Présent lorsqu'une seconde étape d'authentification est requise. */
   readonly TwoFactorProviders?: readonly string[];
   readonly TwoFactorProviders2?: Record<string, unknown>;
+  /** Présent lorsque le serveur exige un captcha avant de réessayer. */
+  readonly HCaptcha_SiteKey?: string;
 }
+
+/**
+ * Identifiants des fournisseurs de second facteur, tels que transmis par
+ * l'API (sous forme de chaînes numériques dans les réponses d'erreur).
+ *
+ * Valeurs imposées par l'API, ne pas renuméroter. L'interface s'en sert pour
+ * afficher un libellé et router vers le bon écran de saisie.
+ */
+export const TwoFactorProvider = {
+  Authenticator: 0,
+  Email: 1,
+  Duo: 2,
+  YubiKey: 3,
+  U2f: 4,
+  Remember: 5,
+  OrganizationDuo: 6,
+  WebAuthn: 7,
+} as const;
+
+export type TwoFactorProvider = (typeof TwoFactorProvider)[keyof typeof TwoFactorProvider];
 
 /** Item du coffre, tel que renvoyé par `GET /api/sync`. */
 export interface CipherResponse {

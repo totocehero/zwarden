@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { hkdfExpandSha256, hmacSha256, pbkdf2Sha256 } from '../src/core/crypto/primitives.js';
+import {
+  hkdfExpandSha256,
+  hmacSha256,
+  hmacSha256Verify,
+  importHmacSha256Key,
+  pbkdf2Sha256,
+} from '../src/core/crypto/primitives.js';
 import { fromBase64, toBase64, toUtf8Bytes } from '../src/core/crypto/encoding.js';
 
 function hexToBytes(hex: string): Uint8Array {
@@ -29,6 +35,40 @@ describe('HMAC-SHA256 (vecteurs RFC 4231)', () => {
     expect(bytesToHex(mac)).toBe(
       '5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843',
     );
+  });
+
+  it('produit le même MAC via une CryptoKey importée puis réutilisée', async () => {
+    const raw = hexToBytes('0b'.repeat(20));
+    const imported = await importHmacSha256Key(raw);
+    const data = toUtf8Bytes('Hi There');
+
+    const viaRaw = await hmacSha256(raw, data);
+    const viaKey = await hmacSha256(imported, data);
+    const viaKeyBis = await hmacSha256(imported, data);
+
+    expect(bytesToHex(viaKey)).toBe(bytesToHex(viaRaw));
+    expect(bytesToHex(viaKeyBis)).toBe(bytesToHex(viaRaw));
+  });
+});
+
+describe('hmacSha256Verify', () => {
+  const key = toUtf8Bytes('clé de test');
+  const data = toUtf8Bytes('données authentifiées');
+
+  it('accepte le MAC correct', async () => {
+    const mac = await hmacSha256(key, data);
+    expect(await hmacSha256Verify(key, mac, data)).toBe(true);
+  });
+
+  it('rejette un MAC altéré d’un seul bit', async () => {
+    const mac = await hmacSha256(key, data);
+    mac[0]! ^= 0x01;
+    expect(await hmacSha256Verify(key, mac, data)).toBe(false);
+  });
+
+  it('rejette le MAC d’une autre clé', async () => {
+    const mac = await hmacSha256(toUtf8Bytes('autre clé'), data);
+    expect(await hmacSha256Verify(key, mac, data)).toBe(false);
   });
 });
 

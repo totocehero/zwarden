@@ -36,7 +36,7 @@
 
 import { hkdfExpandSha256, pbkdf2Sha256, sha256 } from './primitives.js';
 import { SymmetricCryptoKey } from './symmetricCryptoKey.js';
-import { toBase64, toUtf8Bytes } from './encoding.js';
+import { fromBase64, timingSafeEqual, toBase64, toUtf8Bytes, wipe } from './encoding.js';
 
 /** Fonctions de dérivation supportées, valeurs telles qu'annoncées par l'API. */
 export const KdfType = {
@@ -76,6 +76,18 @@ export const PBKDF2_DEFAULT_ITERATIONS = 600_000;
  */
 export const PBKDF2_MIN_ITERATIONS = 100_000;
 
+/**
+ * Plafond de refus pour PBKDF2.
+ *
+ * Symétrique du plancher : les paramètres viennent du serveur avant
+ * authentification, un serveur hostile peut donc annoncer une valeur absurde
+ * (2³¹ itérations) pour geler le client au déverrouillage — un déni de service
+ * qui pousse l'utilisateur vers un client moins regardant. L'interface du
+ * client officiel plafonne à 2 000 000 ; 5 000 000 laisse une marge
+ * confortable sans jamais refuser un coffre légitime.
+ */
+export const PBKDF2_MAX_ITERATIONS = 5_000_000;
+
 /** Paramètres Argon2id par défaut, alignés sur ceux de Bitwarden. */
 export const ARGON2_DEFAULTS = {
   iterations: 3,
@@ -91,6 +103,20 @@ const ARGON2_MINIMUMS = {
   parallelism: 1,
 } as const;
 
+/**
+ * Plafonds de refus pour Argon2id, alignés sur les maxima de l'interface du
+ * client officiel : aucun coffre créé par Bitwarden ne peut les dépasser.
+ *
+ * Le plus critique est la mémoire : `memoryMiB` se traduit en allocation WASM
+ * réelle. Sans plafond, un serveur hostile annonçant plusieurs gibioctets fait
+ * échouer l'allocation ou tue l'onglet — déni de service au déverrouillage.
+ */
+const ARGON2_MAXIMUMS = {
+  iterations: 10,
+  memoryMiB: 1024,
+  parallelism: 16,
+} as const;
+
 /** Paramètres de dérivation, tels qu'annoncés par le serveur. */
 export type KdfConfig =
   | { readonly type: typeof KdfType.PBKDF2_SHA256; readonly iterations: number }
@@ -101,13 +127,43 @@ export type KdfConfig =
       readonly parallelism: number;
     };
 
-/** Levée lorsque le serveur annonce des paramètres KDF dangereusement faibles. */
+/** Levée lorsque le serveur annonce des paramètres KDF dangereux ou malformés. */
 export class WeakKdfError extends Error {
   override readonly name = 'WeakKdfError';
+  /** Identifiant stable pour l'interface : les messages servent aux journaux. */
+  readonly code = 'weak-kdf';
 }
 
 /**
- * Refuse les paramètres KDF trop faibles.
+ * Valide un paramètre KDF annoncé par le serveur : entier sûr, dans [min, max].
+ *
+ * @throws {WeakKdfError} Message adapté au cas rencontré.
+ */
+function assertParameterInRange(label: string, value: number, min: number, max: number): void {
+  if (!Number.isSafeInteger(value)) {
+    // Couvre NaN, ±Infinity, les flottants, et les valeurs non numériques
+    // qu'un serveur hostile glisserait dans le JSON : rien de tout cela ne
+    // doit atteindre le KDF.
+    throw new WeakKdfError(
+      `${label} : valeur non entière ou absente (${String(value)}). Connexion refusée.`,
+    );
+  }
+  if (value < min) {
+    throw new WeakKdfError(
+      `${label} annoncé à ${value}, minimum accepté ${min}. ` +
+        'Connexion refusée : ce paramètre rendrait le mot de passe maître attaquable hors ligne.',
+    );
+  }
+  if (value > max) {
+    throw new WeakKdfError(
+      `${label} annoncé à ${value}, maximum accepté ${max}. ` +
+        'Connexion refusée : une valeur aberrante gèlerait le client au déverrouillage.',
+    );
+  }
+}
+
+/**
+ * Refuse les paramètres KDF trop faibles, aberrants ou malformés.
  *
  * ## Pourquoi cette vérification existe
  *
@@ -119,35 +175,45 @@ export class WeakKdfError extends Error {
  * passe devient attaquable hors ligne en quelques secondes, et le hash
  * d'authentification transmis suffit à monter l'attaque.
  *
- * Le client Bitwarden officiel n'effectue pas ce contrôle. Zwarden préfère
- * refuser de se connecter plutôt que d'affaiblir silencieusement la clé.
+ * Le contrôle est borné dans les deux sens : trop faible, la clé devient
+ * cassable hors ligne ; trop élevé (2³¹ itérations, mémoire Argon2 en
+ * gibioctets), le client gèle ou l'onglet meurt — déni de service au
+ * déverrouillage. Le client Bitwarden officiel n'effectue aucun de ces deux
+ * contrôles. Zwarden préfère refuser de se connecter plutôt que d'affaiblir
+ * silencieusement la clé ou de se laisser geler.
  *
  * @param config Paramètres annoncés par le serveur.
- * @throws {WeakKdfError} Si les paramètres sont sous les seuils.
+ * @throws {WeakKdfError} Si un paramètre est hors bornes ou non entier.
  */
 export function assertKdfIsAcceptable(config: KdfConfig): void {
   if (config.type === KdfType.PBKDF2_SHA256) {
-    if (config.iterations < PBKDF2_MIN_ITERATIONS) {
-      throw new WeakKdfError(
-        `PBKDF2 annoncé à ${config.iterations} itérations, minimum accepté ${PBKDF2_MIN_ITERATIONS}. ` +
-          'Connexion refusée : ce paramètre rendrait le mot de passe maître attaquable hors ligne.',
-      );
-    }
+    assertParameterInRange(
+      'PBKDF2 (itérations)',
+      config.iterations,
+      PBKDF2_MIN_ITERATIONS,
+      PBKDF2_MAX_ITERATIONS,
+    );
     return;
   }
 
-  const faibles =
-    config.iterations < ARGON2_MINIMUMS.iterations ||
-    config.memoryMiB < ARGON2_MINIMUMS.memoryMiB ||
-    config.parallelism < ARGON2_MINIMUMS.parallelism;
-
-  if (faibles) {
-    throw new WeakKdfError(
-      `Argon2id annoncé à t=${config.iterations} m=${config.memoryMiB}MiB p=${config.parallelism}, ` +
-        `minimum accepté t=${ARGON2_MINIMUMS.iterations} m=${ARGON2_MINIMUMS.memoryMiB}MiB ` +
-        `p=${ARGON2_MINIMUMS.parallelism}. Connexion refusée.`,
-    );
-  }
+  assertParameterInRange(
+    'Argon2id (itérations)',
+    config.iterations,
+    ARGON2_MINIMUMS.iterations,
+    ARGON2_MAXIMUMS.iterations,
+  );
+  assertParameterInRange(
+    'Argon2id (mémoire MiB)',
+    config.memoryMiB,
+    ARGON2_MINIMUMS.memoryMiB,
+    ARGON2_MAXIMUMS.memoryMiB,
+  );
+  assertParameterInRange(
+    'Argon2id (parallélisme)',
+    config.parallelism,
+    ARGON2_MINIMUMS.parallelism,
+    ARGON2_MAXIMUMS.parallelism,
+  );
 }
 
 /**
@@ -189,29 +255,43 @@ export async function deriveMasterKey(
   assertKdfIsAcceptable(config);
 
   const passwordBytes = normalizePassword(password);
+  try {
+    if (config.type === KdfType.PBKDF2_SHA256) {
+      // PBKDF2 prend l'e-mail normalisé directement comme sel.
+      const salt = toUtf8Bytes(normalizeEmail(email));
+      return new SymmetricCryptoKey(await pbkdf2Sha256(passwordBytes, salt, config.iterations, 32));
+    }
 
-  if (config.type === KdfType.PBKDF2_SHA256) {
-    // PBKDF2 prend l'e-mail normalisé directement comme sel.
-    const salt = toUtf8Bytes(normalizeEmail(email));
-    return new SymmetricCryptoKey(await pbkdf2Sha256(passwordBytes, salt, config.iterations, 32));
+    // Argon2id impose un sel de taille fixe : Bitwarden utilise le SHA-256 de
+    // l'e-mail, et non l'e-mail brut. Divergence = coffres illisibles.
+    const salt = await sha256(toUtf8Bytes(normalizeEmail(email)));
+
+    // Build par algorithme (29 Ko) plutôt que l'ESM monolithique du paquet
+    // (212 Ko une fois bundlé). Ce build UMD expose ses fonctions nommées ou
+    // sous `default` selon l'interop CJS de l'environnement : on couvre les
+    // deux. Voir `src/types/hash-wasm-argon2.d.ts`.
+    const umd = await import('hash-wasm/dist/argon2.umd.min.js');
+    const argon2id = umd.argon2id ?? umd.default?.argon2id;
+    if (argon2id === undefined) {
+      throw new Error('Module Argon2 illisible : aucun export argon2id');
+    }
+
+    const derived = await argon2id({
+      password: passwordBytes,
+      salt,
+      parallelism: config.parallelism,
+      iterations: config.iterations,
+      memorySize: config.memoryMiB * 1024, // hash-wasm attend des KiB
+      hashLength: 32,
+      outputType: 'binary',
+    });
+
+    return new SymmetricCryptoKey(derived);
+  } finally {
+    // Le mot de passe encodé n'a plus d'usage une fois la clé dérivée.
+    // Best-effort, comme tout effacement en JavaScript.
+    wipe(passwordBytes);
   }
-
-  // Argon2id impose un sel de taille fixe : Bitwarden utilise le SHA-256 de
-  // l'e-mail, et non l'e-mail brut. Divergence = coffres illisibles.
-  const salt = await sha256(toUtf8Bytes(normalizeEmail(email)));
-
-  const { argon2id } = await import('hash-wasm');
-  const derived = await argon2id({
-    password: passwordBytes,
-    salt,
-    parallelism: config.parallelism,
-    iterations: config.iterations,
-    memorySize: config.memoryMiB * 1024, // hash-wasm attend des KiB
-    hashLength: 32,
-    outputType: 'binary',
-  });
-
-  return new SymmetricCryptoKey(derived);
 }
 
 /**
@@ -229,9 +309,17 @@ export async function deriveMasterKey(
  * @returns Clé de 64 octets, authentifiée.
  */
 export async function stretchMasterKey(masterKey: SymmetricCryptoKey): Promise<SymmetricCryptoKey> {
+  // Les deux dérivations sont indépendantes : lancées de front.
+  const [encKey, macKey] = await Promise.all([
+    hkdfExpandSha256(masterKey.key, 'enc', 32),
+    hkdfExpandSha256(masterKey.key, 'mac', 32),
+  ]);
+
   const stretched = new Uint8Array(64);
-  stretched.set(await hkdfExpandSha256(masterKey.key, 'enc', 32), 0);
-  stretched.set(await hkdfExpandSha256(masterKey.key, 'mac', 32), 32);
+  stretched.set(encKey, 0);
+  stretched.set(macKey, 32);
+  wipe(encKey);
+  wipe(macKey);
   return new SymmetricCryptoKey(stretched);
 }
 
@@ -255,6 +343,34 @@ export async function derivePasswordHash(
   password: string,
   purpose: HashPurpose,
 ): Promise<string> {
-  const hash = await pbkdf2Sha256(masterKey.key, normalizePassword(password), purpose, 32);
-  return toBase64(hash);
+  const salt = normalizePassword(password);
+  try {
+    const hash = await pbkdf2Sha256(masterKey.key, salt, purpose, 32);
+    return toBase64(hash);
+  } finally {
+    wipe(salt);
+  }
+}
+
+/**
+ * Valide un mot de passe contre le hash local, sans réseau.
+ *
+ * C'est le chemin de l'écran de verrouillage : le hash `LocalAuthorization`
+ * est conservé au premier déverrouillage, puis chaque saisie est revalidée
+ * contre lui. La comparaison porte sur les **octets décodés**, à temps
+ * constant — jamais un `===` sur les chaînes base64, qui court-circuite au
+ * premier caractère divergent.
+ *
+ * @param masterKey Clé maître dérivée de la saisie à valider.
+ * @param password Mot de passe saisi, en clair.
+ * @param expectedHashB64 Hash local conservé, en base64.
+ * @returns `true` si la saisie correspond.
+ */
+export async function verifyLocalPasswordHash(
+  masterKey: SymmetricCryptoKey,
+  password: string,
+  expectedHashB64: string,
+): Promise<boolean> {
+  const actual = await derivePasswordHash(masterKey, password, HashPurpose.LocalAuthorization);
+  return timingSafeEqual(fromBase64(actual), fromBase64(expectedHashB64));
 }

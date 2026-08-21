@@ -30,8 +30,9 @@
  * ## Rôle de sécurité de ce module
  *
  * L'analyse est la première frontière de confiance : ces chaînes viennent du
- * serveur, qui est considéré comme hostile. Les tailles d'IV et de MAC sont
- * donc validées ici, une fois, plutôt que supposées correctes plus loin dans
+ * serveur, qui est considéré comme hostile. Les tailles d'IV et de MAC, et
+ * l'alignement du ciphertext sur les blocs AES pour les types symétriques,
+ * sont donc validés ici, une fois, plutôt que supposés corrects plus loin dans
  * la chaîne. Une `EncString` construite est structurellement bien formée.
  */
 
@@ -88,6 +89,8 @@ function segmentCount(shape: TypeShape): number {
 /** Levée lorsqu'une chaîne ne respecte pas la grammaire ou les tailles. */
 export class EncStringParseError extends Error {
   override readonly name = 'EncStringParseError';
+  /** Identifiant stable pour l'interface : les messages servent aux journaux. */
+  readonly code = 'enc-string-parse';
 }
 
 /**
@@ -117,11 +120,14 @@ function decodeFixedLength(segment: string, label: string, expected: number): Ui
 }
 
 /**
- * Extrait et valide le préfixe numérique de type.
+ * Sépare le préfixe numérique de type du reste de la chaîne.
  *
  * @throws {EncStringParseError} Si le préfixe est absent ou non numérique.
  */
-function parseTypePrefix(value: string): EncryptionType {
+function splitTypePrefix(value: string): {
+  readonly encryptionType: EncryptionType;
+  readonly body: string;
+} {
   const separator = value.indexOf('.');
   if (separator < 1) {
     throw new EncStringParseError('préfixe de type absent');
@@ -132,7 +138,7 @@ function parseTypePrefix(value: string): EncryptionType {
     throw new EncStringParseError(`préfixe de type non numérique : « ${raw} »`);
   }
 
-  return Number(raw) as EncryptionType;
+  return { encryptionType: Number(raw) as EncryptionType, body: value.slice(separator + 1) };
 }
 
 /**
@@ -184,13 +190,13 @@ export class EncString {
    *   inconnu, nombre de segments incorrect, IV ou MAC de taille invalide.
    */
   static parse(value: string): EncString {
-    const encryptionType = parseTypePrefix(value);
+    const { encryptionType, body } = splitTypePrefix(value);
     const shape = SHAPES[encryptionType];
     if (shape === undefined) {
       throw new EncStringParseError(`type de chiffrement inconnu : ${encryptionType}`);
     }
 
-    const segments = value.slice(value.indexOf('.') + 1).split('|');
+    const segments = body.split('|');
     const expected = segmentCount(shape);
     if (segments.length !== expected) {
       throw new EncStringParseError(
@@ -208,6 +214,16 @@ export class EncString {
       ? decodeFixedLength(segments[cursor++]!, 'mac', MAC_LENGTH)
       : undefined;
 
+    // Pour les types symétriques (CBC), un ciphertext valide est un nombre
+    // entier non nul de blocs AES : PKCS#7 ajoute toujours au moins un octet,
+    // donc même un clair vide produit un bloc. Rejeter ici donne une erreur du
+    // domaine, au lieu d'une DOMException opaque au fond d'AES.
+    if (shape.hasIv && (ciphertext.length === 0 || ciphertext.length % IV_LENGTH !== 0)) {
+      throw new EncStringParseError(
+        `segment « ciphertext » : ${ciphertext.length} octets, multiple non nul de ${IV_LENGTH} attendu`,
+      );
+    }
+
     return new EncString(encryptionType, iv, ciphertext, mac);
   }
 
@@ -215,18 +231,26 @@ export class EncString {
    * Variante tolérante de {@link EncString.parse}.
    *
    * Destinée aux champs optionnels du modèle serveur, où `null` et chaîne vide
-   * signifient légitimement « absent ».
+   * signifient légitimement « absent ». Une chaîne **malformée**, en revanche,
+   * n'est pas une absence : `onError` est obligatoire, comme pour
+   * `decryptStringOrNull` — un champ qui disparaît sans trace est
+   * indiscernable d'une attaque de suppression.
    *
    * @param value Chaîne, `null` ou `undefined`.
+   * @param onError Notification d'échec d'analyse, pour journalisation.
    * @returns Instance analysée, ou `null` si absente ou malformée.
    */
-  static parseOrNull(value: string | null | undefined): EncString | null {
+  static parseOrNull(
+    value: string | null | undefined,
+    onError: (error: unknown) => void,
+  ): EncString | null {
     if (value == null || value === '') {
       return null;
     }
     try {
       return EncString.parse(value);
-    } catch {
+    } catch (error) {
+      onError(error);
       return null;
     }
   }

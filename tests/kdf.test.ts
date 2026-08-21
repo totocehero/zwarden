@@ -9,6 +9,7 @@ import {
   derivePasswordHash,
   deriveMasterKey,
   stretchMasterKey,
+  verifyLocalPasswordHash,
   type KdfConfig,
 } from '../src/core/crypto/kdf.js';
 import { decryptString, encryptString } from '../src/core/crypto/cryptoService.js';
@@ -40,6 +41,45 @@ describe('validation des paramètres KDF', () => {
     ['parallélisme nul', { iterations: 3, memoryMiB: 64, parallelism: 0 }],
   ])('refuse Argon2id : %s', (_label, params) => {
     expect(() => assertKdfIsAcceptable({ type: KdfType.Argon2id, ...params })).toThrow(WeakKdfError);
+  });
+
+  // Bornes hautes : un serveur hostile peut annoncer des paramètres absurdes
+  // pour geler le client au déverrouillage (déni de service). Voir kdf.ts.
+  it.each([5_000_001, 2 ** 31, Number.MAX_SAFE_INTEGER])(
+    'refuse PBKDF2 à %i itérations (plafond anti-DoS)',
+    (iterations) => {
+      expect(() => assertKdfIsAcceptable({ type: KdfType.PBKDF2_SHA256, iterations })).toThrow(
+        WeakKdfError,
+      );
+    },
+  );
+
+  it.each([
+    ['itérations trop hautes', { iterations: 11, memoryMiB: 64, parallelism: 4 }],
+    ['mémoire démesurée', { iterations: 3, memoryMiB: 1_048_576, parallelism: 4 }],
+    ['parallélisme trop haut', { iterations: 3, memoryMiB: 64, parallelism: 17 }],
+  ])('refuse Argon2id (plafond anti-DoS) : %s', (_label, params) => {
+    expect(() => assertKdfIsAcceptable({ type: KdfType.Argon2id, ...params })).toThrow(WeakKdfError);
+  });
+
+  // Les paramètres viennent d'un JSON non fiable : un flottant, NaN ou une
+  // chaîne déguisée en nombre ne doivent jamais atteindre le KDF.
+  it.each([
+    ['flottant', 600_000.5],
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['chaîne', '600000' as unknown as number],
+    ['null', null as unknown as number],
+  ])('refuse PBKDF2 avec des itérations non entières : %s', (_label, iterations) => {
+    expect(() => assertKdfIsAcceptable({ type: KdfType.PBKDF2_SHA256, iterations })).toThrow(
+      WeakKdfError,
+    );
+  });
+
+  it('refuse Argon2id avec une mémoire non entière', () => {
+    expect(() =>
+      assertKdfIsAcceptable({ type: KdfType.Argon2id, iterations: 3, memoryMiB: 64.5, parallelism: 4 }),
+    ).toThrow(WeakKdfError);
   });
 });
 
@@ -160,5 +200,30 @@ describe('hash du mot de passe maître', () => {
     expect(await derivePasswordHash(master, 'mdp', HashPurpose.ServerAuthorization)).not.toBe(
       await derivePasswordHash(master, 'autre', HashPurpose.ServerAuthorization),
     );
+  });
+});
+
+describe('validation locale du mot de passe (écran de verrouillage)', () => {
+  it('accepte le bon mot de passe', async () => {
+    const master = await deriveMasterKey('mdp', 'a@b.c', PBKDF2_RAPIDE);
+    const stocké = await derivePasswordHash(master, 'mdp', HashPurpose.LocalAuthorization);
+
+    expect(await verifyLocalPasswordHash(master, 'mdp', stocké)).toBe(true);
+  });
+
+  it('rejette un mauvais mot de passe', async () => {
+    const master = await deriveMasterKey('mdp', 'a@b.c', PBKDF2_RAPIDE);
+    const stocké = await derivePasswordHash(master, 'mdp', HashPurpose.LocalAuthorization);
+
+    expect(await verifyLocalPasswordHash(master, 'presque-mdp', stocké)).toBe(false);
+  });
+
+  it('rejette le hash serveur rejoué comme hash local', async () => {
+    // Les deux usages diffèrent par leur nombre d'itérations : le hash
+    // d'autorisation intercepté ne déverrouille pas le coffre localement.
+    const master = await deriveMasterKey('mdp', 'a@b.c', PBKDF2_RAPIDE);
+    const serveur = await derivePasswordHash(master, 'mdp', HashPurpose.ServerAuthorization);
+
+    expect(await verifyLocalPasswordHash(master, 'mdp', serveur)).toBe(false);
   });
 });

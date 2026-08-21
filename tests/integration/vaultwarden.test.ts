@@ -34,17 +34,21 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { ApiClient, type LoginResult } from '../../src/core/api/apiClient.js';
 import { EncString } from '../../src/core/crypto/encString.js';
 import { SymmetricCryptoKey } from '../../src/core/crypto/symmetricCryptoKey.js';
+import { decryptBytes, encryptString } from '../../src/core/crypto/cryptoService.js';
 import {
-  decryptBytes,
-  decryptStringOrNull,
-  encryptString,
-} from '../../src/core/crypto/cryptoService.js';
-import {
+  HashPurpose,
   KdfType,
   type KdfConfig,
   deriveMasterKey,
+  derivePasswordHash,
   stretchMasterKey,
 } from '../../src/core/crypto/kdf.js';
+import {
+  decryptCipherDetails,
+  decryptCipherList,
+  decryptCipherOverview,
+} from '../../src/core/vault/cipherService.js';
+import { unlock } from '../../src/core/vault/session.js';
 
 const SERVER = process.env['ZWARDEN_TEST_SERVER'];
 const EMAIL = process.env['ZWARDEN_TEST_EMAIL'];
@@ -89,7 +93,12 @@ describe.skipIf(!configured)('interopérabilité Vaultwarden', () => {
   });
 
   it("s'authentifie et reçoit la clé de coffre enveloppée", async () => {
-    session = await client.login(EMAIL!, masterKey, PASSWORD!);
+    const serverHash = await derivePasswordHash(
+      masterKey,
+      PASSWORD!,
+      HashPurpose.ServerAuthorization,
+    );
+    session = await client.login(EMAIL!, serverHash);
 
     expect(session.accessToken.length).toBeGreaterThan(0);
     expect(session.protectedUserKey).toBeDefined();
@@ -115,6 +124,19 @@ describe.skipIf(!configured)('interopérabilité Vaultwarden', () => {
     expect(userKey.key).toHaveLength(64);
     expect(userKey.isAuthenticated).toBe(true);
     console.log('  Clé de coffre déchiffrée : 64 octets, authentifiée');
+  });
+
+  it("l'orchestrateur unlock() reproduit le chemin manuel", async () => {
+    // Le chemin pas-à-pas ci-dessus valide chaque maillon ; celui-ci valide
+    // l'enchaînement packagé que l'extension utilisera réellement.
+    const résultat = await unlock(client, EMAIL!, PASSWORD!);
+
+    expect(résultat.userKey.toBase64()).toBe(userKey.toBase64());
+    expect(résultat.session.accessToken.length).toBeGreaterThan(0);
+    expect(résultat.localPasswordHash.length).toBeGreaterThan(0);
+
+    résultat.userKey.destroy();
+    console.log('  unlock() : clé de coffre identique au chemin manuel');
   });
 
   it('effectue un aller-retour complet en écriture puis lecture', async () => {
@@ -156,18 +178,15 @@ describe.skipIf(!configured)('interopérabilité Vaultwarden', () => {
       const relu = (sync.ciphers ?? []).find((c) => c.id === créé.id);
       expect(relu).toBeDefined();
 
-      let itemKey = userKey;
-      if (relu!.key) {
-        itemKey = new SymmetricCryptoKey(await decryptBytes(EncString.parse(relu!.key), userKey));
-      }
+      const erreurs: unknown[] = [];
+      const surErreur = (e: unknown) => erreurs.push(e);
+      const vue = await decryptCipherOverview(relu!, userKey, surErreur);
+      const détails = await decryptCipherDetails(relu!, userKey, surErreur);
 
-      const nom = await decryptStringOrNull(relu!.name, itemKey);
-      const utilisateur = await decryptStringOrNull(relu!.login?.username, itemKey);
-      const motDePasseRelu = await decryptStringOrNull(relu!.login?.password, itemKey);
-
-      expect(nom).toBe(marqueur);
-      expect(utilisateur).toBe('utilisateur@test.local');
-      expect(motDePasseRelu).toBe(motDePasse);
+      expect(erreurs).toHaveLength(0);
+      expect(vue.name).toBe(marqueur);
+      expect(détails.username).toBe('utilisateur@test.local');
+      expect(détails.password).toBe(motDePasse);
 
       console.log('  Aller-retour validé : nom, utilisateur et mot de passe identiques');
     } finally {
@@ -190,28 +209,23 @@ describe.skipIf(!configured)('interopérabilité Vaultwarden', () => {
       return;
     }
 
-    let déchiffrés = 0;
+    // Le service de la couche coffre gère la clé par item et la tolérance de
+    // casse ; c'est le chemin que l'extension utilisera réellement.
     let échecs = 0;
+    const vues = await decryptCipherList(ciphers, userKey, () => {
+      échecs++;
+    });
 
-    for (const cipher of ciphers) {
-      // Un item peut porter sa propre clé, elle-même enveloppée par la clé du
-      // coffre. Le cas échéant, c'est elle qui déchiffre les champs.
-      let itemKey = userKey;
-      if (cipher.key) {
-        itemKey = new SymmetricCryptoKey(await decryptBytes(EncString.parse(cipher.key), userKey));
-      }
-
-      const name = await decryptStringOrNull(cipher.name, itemKey, () => {
-        échecs++;
-      });
-
-      if (name !== null) {
-        déchiffrés++;
+    for (const vue of vues) {
+      if (vue.name !== null) {
         // Seule la longueur est journalisée : le contenu reste secret.
-        console.log(`    item de type ${cipher.type} — nom déchiffré, ${name.length} caractère(s)`);
+        console.log(
+          `    item de type ${vue.type} — nom déchiffré, ${vue.name.length} caractère(s)`,
+        );
       }
     }
 
+    const déchiffrés = vues.filter((v) => v.name !== null).length;
     console.log(`  ${déchiffrés} déchiffré(s), ${échecs} échec(s)`);
     expect(échecs).toBe(0);
     expect(déchiffrés).toBe(ciphers.length);
