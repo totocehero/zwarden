@@ -15,7 +15,7 @@
 }
 
 body {
-  width: 360px;
+  width: 420px;
   margin: 0;
   font: 13px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif;
   background: var(--fond);
@@ -123,15 +123,30 @@ button.oeil:hover {
   color: var(--texte);
 }
 
-/* Œil des items de la liste. */
-button.oeil-item {
+/* Boutons-icônes des items de la liste : compacts, le texte a la place. */
+button.oeil-item,
+button.icone {
   display: flex;
   align-items: center;
   padding: 5px;
+  background: transparent;
+  border: 0;
+  color: var(--texte-2);
+  cursor: pointer;
 }
 
-button.oeil-item:hover {
+button.oeil-item:hover,
+button.icone:hover {
   color: var(--texte);
+}
+
+button.icone.copie-ok {
+  color: var(--accent);
+}
+
+/* « Remplir » reste le seul bouton texte : action principale. */
+.item-ligne button.remplir {
+  padding: 5px 10px;
 }
 
 button {

@@ -195,6 +195,32 @@ function IconCrayon() {
   );
 }
 
+/** Icône copie (coche quand la copie vient d'aboutir). */
+function IconCopie({ fait }: { fait: boolean }) {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      {fait ? (
+        <polyline points="20 6 9 17 4 12" />
+      ) : (
+        <>
+          <rect x="9" y="9" width="13" height="13" rx="2" />
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </>
+      )}
+    </svg>
+  );
+}
+
 /** Icône œil (barré quand le secret est visible, pour proposer de le cacher). */
 function IconOeil({ barre }: { barre: boolean }) {
   return (
@@ -988,14 +1014,14 @@ function App() {
               <li key={item.id}>
                 <div class="item-ligne">
                   <div class="item-texte">
-                    <div class="item-nom">
+                    <div class="item-nom" title={item.name ?? ''}>
                       {item.name ?? '(sans nom)'}
                       {item.hasPasskey && <span class="badge">passkey</span>}
                     </div>
                     {item.username !== null && (
                       <div
                         class="item-user"
-                        title="Copier l’identifiant"
+                        title={`Copier : ${item.username}`}
                         onClick={() => void onCopyUsername(item)}
                       >
                         {item.username}
@@ -1022,17 +1048,22 @@ function App() {
                   >
                     <IconCrayon />
                   </button>
+                  <button
+                    class={`icone${copiedId === item.id ? ' copie-ok' : ''}`}
+                    title={copiedId === item.id ? 'Mot de passe copié !' : 'Copier le mot de passe'}
+                    onClick={() => void onCopyPassword(item)}
+                  >
+                    <IconCopie fait={copiedId === item.id} />
+                  </button>
                   {tabOrigin !== null && matchesOrigin(item.uris, tabOrigin) && (
                     <button
+                      class="remplir"
                       title="Remplir le formulaire de l’onglet actif"
                       onClick={() => void onFill(item)}
                     >
                       Remplir
                     </button>
                   )}
-                  <button class="secondaire" onClick={() => void onCopyPassword(item)}>
-                    {copiedId === item.id ? 'Copié !' : 'Copier'}
-                  </button>
                 </div>
                 {revealed?.id === item.id && <div class="secret">{revealed.password}</div>}
               </li>
