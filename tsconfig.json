@@ -21,7 +21,7 @@
     "resolveJsonModule": true,
     "noEmit": true,
 
-    "types": ["chrome", "vitest/globals"],
+    "types": ["chrome", "node", "vitest/globals"],
     "baseUrl": ".",
     "paths": {
       "@core/*": ["src/core/*"],

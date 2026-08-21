@@ -301,12 +301,44 @@ falsification possible produit bien `MacMismatchError`.
 
 ---
 
-## 10. Ce qui reste à valider
+## 10. Interopérabilité : validée
 
-**L'interopérabilité réelle n'est pas encore démontrée.** Les tests prouvent la
-conformité aux RFC et la cohérence interne, mais aucun déverrouillage n'a été
-effectué contre un vrai serveur Vaultwarden. Tant que ce n'est pas fait, la
-compatibilité de format reste une déduction à partir de la spécification, pas un
-fait observé.
+L'interopérabilité n'est plus une déduction depuis la spécification, c'est un
+fait observé. Validation menée contre **Vaultwarden 2026.6.0**, compte en
+PBKDF2-SHA256 à 600 000 itérations.
 
-C'est la première chose à vérifier dès que le client API existe.
+| Étape | Résultat | Ce que cela prouve |
+|---|---|---|
+| `prelogin` | PBKDF2, 600 000 itérations | Lecture correcte des paramètres KDF |
+| Dérivation de la clé maître | 32 octets | — |
+| `connect/token` | **Accepté** | Le hash d'autorisation est identique à celui du client officiel, donc la dérivation de clé maître l'est aussi (NFKD, normalisation e-mail, sel, itérations) |
+| Déchiffrement de la clé de coffre | 64 o, MAC vérifié | HKDF-Expand sans Extract, étiquettes `enc`/`mac`, ordre de concaténation, format `EncString` type 2, AES-256-CBC et HMAC-SHA256 : tous corrects |
+| Écriture puis relecture | Valeurs identiques | Le chemin de chiffrement produit des données que le serveur accepte et que l'on redéchiffre après un aller-retour complet |
+
+Le test d'écriture est le plus concluant : un item est chiffré localement,
+poussé via `POST /api/ciphers`, relu par une synchronisation complète, puis
+redéchiffré. Nom, identifiant et mot de passe sont comparés à l'original. L'item
+est supprimé en fin de test, y compris en cas d'échec d'assertion.
+
+### Rejouer la validation
+
+```bash
+export ZWARDEN_TEST_SERVER=https://vault.exemple.fr
+export ZWARDEN_TEST_EMAIL=compte+test@exemple.fr
+export ZWARDEN_TEST_PASSWORD='...'
+npx vitest run tests/integration
+```
+
+Sans ces variables, le test est ignoré : la suite reste exécutable hors ligne.
+
+**Utiliser un compte jetable.** Le test crée et supprime un item. Aucun secret
+n'est écrit sur disque ni journalisé — le rapport ne montre que des longueurs et
+des identifiants d'items.
+
+### Non encore couvert
+
+- Argon2id contre un vrai serveur (testé unitairement, pas en interopérabilité)
+- Items à clé propre (`cipher.key`) — le code les gère, aucun échantillon réel
+  rencontré
+- Coffres d'organisation et déchiffrement RSA
+- Pièces jointes
