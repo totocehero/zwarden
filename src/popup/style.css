@@ -269,3 +269,26 @@ button.secondaire {
   color: var(--texte-2);
   margin: 2px 0 0;
 }
+
+.badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 600;
+  vertical-align: 1px;
+}
+
+.passkeys-info p {
+  margin: 4px 0;
+  font-size: 12px;
+  color: var(--texte-2);
+}
+
+.passkeys-info .badge {
+  margin-left: 0;
+  margin-right: 4px;
+}

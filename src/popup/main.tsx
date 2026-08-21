@@ -47,6 +47,7 @@ import {
   type CipherDetails,
   type CipherKeys,
   type CipherOverview,
+  type PasskeyView,
   buildCipherUpdatePayload,
   decryptCipherDetails,
   decryptCipherList,
@@ -249,6 +250,7 @@ function App() {
   const [editForm, setEditForm] = useState<EditForm>(EMPTY_EDIT);
   const [editOriginalPassword, setEditOriginalPassword] = useState('');
   const [editShowPassword, setEditShowPassword] = useState(false);
+  const [editPasskeys, setEditPasskeys] = useState<readonly PasskeyView[]>([]);
 
   // Second facteur : fournisseurs annoncés par le serveur, choix et code.
   const [twoFaProviders, setTwoFaProviders] = useState<readonly string[] | null>(null);
@@ -575,6 +577,7 @@ function App() {
       uris: item.uris.join('\n'),
     });
     setEditOriginalPassword(details.password ?? '');
+    setEditPasskeys(details.passkeys);
     setEditShowPassword(false);
     setEditing(item);
     setError(null);
@@ -911,6 +914,20 @@ function App() {
                 onInput={(e) => setEditForm({ ...editForm, notes: e.currentTarget.value })}
               />
             </label>
+            {editPasskeys.length > 0 && (
+              <div class="passkeys-info">
+                {editPasskeys.map((pk, i) => (
+                  <p key={i}>
+                    <span class="badge">passkey</span> {pk.rpId ?? 'site inconnu'}
+                    {pk.userName !== null ? ` — ${pk.userName}` : ''}
+                  </p>
+                ))}
+                <p class="aide-diag">
+                  Passkey conservée telle quelle — la signature WebAuthn arrivera dans une
+                  prochaine version.
+                </p>
+              </div>
+            )}
             <button type="submit" disabled={busy !== null}>
               Enregistrer
             </button>
@@ -971,7 +988,10 @@ function App() {
               <li key={item.id}>
                 <div class="item-ligne">
                   <div class="item-texte">
-                    <div class="item-nom">{item.name ?? '(sans nom)'}</div>
+                    <div class="item-nom">
+                      {item.name ?? '(sans nom)'}
+                      {item.hasPasskey && <span class="badge">passkey</span>}
+                    </div>
                     {item.username !== null && (
                       <div
                         class="item-user"

@@ -87,6 +87,7 @@ describe('cipherService', () => {
       name: 'Ma banque',
       username: 'alice@exemple.fr',
       uris: ['https://banque.exemple.fr'],
+      hasPasskey: false,
       organizationId: null,
     });
     expect(erreurs).toHaveLength(0);
@@ -103,8 +104,43 @@ describe('cipherService', () => {
       password: 'mot-de-passe-fort',
       totp: 'otpauth://totp/x',
       notes: 'notes privées',
+      passkeys: [],
     });
     expect(erreurs).toHaveLength(0);
+  });
+
+  it('signale et déchiffre les passkeys (FIDO2)', async () => {
+    const base = await makeCipher(userKey);
+    const cipher: CipherResponse = {
+      ...base,
+      login: {
+        ...base.login,
+        fido2Credentials: [
+          {
+            credentialId: await enc('uuid-credential', userKey),
+            keyType: await enc('public-key', userKey),
+            keyAlgorithm: await enc('ECDSA', userKey),
+            keyCurve: await enc('P-256', userKey),
+            keyValue: await enc('clé-privée-pkcs8-b64', userKey),
+            rpId: await enc('npmjs.com', userKey),
+            userName: await enc('fredc', userKey),
+            counter: await enc('0', userKey),
+            creationDate: '2026-08-22T00:00:00Z',
+          },
+        ],
+      },
+    };
+
+    const erreurs: unknown[] = [];
+    const vue = await decryptCipherOverview(cipher, userKey, (e) => erreurs.push(e));
+    expect(vue.hasPasskey).toBe(true);
+
+    const détails = await decryptCipherDetails(cipher, userKey, (e) => erreurs.push(e));
+    expect(détails.passkeys).toEqual([{ rpId: 'npmjs.com', userName: 'fredc' }]);
+    expect(erreurs).toHaveLength(0);
+
+    // La clé privée n'est jamais exposée par les vues.
+    expect(JSON.stringify(détails)).not.toContain('clé-privée');
   });
 
   it('tolère la casse PascalCase des anciennes versions de l’API', async () => {
@@ -332,6 +368,21 @@ describe('mise à jour d’item (buildCipherUpdatePayload)', () => {
 
     expect(payload['organizationId']).toBe('org-9');
     expect(await dec(payload['name'], orgKey)).toBe('Nouveau nom');
+  });
+
+  it('préserve les passkeys telles quelles lors d’une édition', async () => {
+    const base = await rawCipher(userKey);
+    const passkeys = [{ rpId: await enc('npmjs.com', userKey), keyValue: await enc('pk', userKey) }];
+    const brut: CipherResponse = {
+      ...base,
+      login: { ...base.login, fido2Credentials: passkeys },
+    };
+
+    const payload = await buildCipherUpdatePayload(brut, EDIT, userKey, false);
+    const login = payload['login'] as Record<string, unknown>;
+
+    // Reprises à l'identique, sans re-chiffrement ni perte.
+    expect(login['fido2Credentials']).toEqual(passkeys);
   });
 });
 

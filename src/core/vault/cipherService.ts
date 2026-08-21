@@ -75,7 +75,24 @@ export interface CipherOverview {
   readonly username: string | null;
   /** URIs déchiffrées, pour le filtrage par onglet actif. */
   readonly uris: readonly string[];
+  /**
+   * `true` si l'item embarque au moins une passkey (FIDO2). Détecté par la
+   * simple présence des entrées — aucun déchiffrement requis pour la liste.
+   */
+  readonly hasPasskey: boolean;
   readonly organizationId: string | null;
+}
+
+/**
+ * Passkey déchiffrée pour l'affichage. La clé privée (`keyValue`) n'est
+ * volontairement **pas** exposée ici : elle ne sera déchiffrée qu'au moment
+ * de signer une cérémonie WebAuthn.
+ */
+export interface PasskeyView {
+  /** Domaine du site (RP ID), par exemple `npmjs.com`. */
+  readonly rpId: string | null;
+  /** Identifiant de compte associé chez le site. */
+  readonly userName: string | null;
 }
 
 /** Vue détaillée : champs sensibles, déchiffrés à la demande. */
@@ -84,6 +101,8 @@ export interface CipherDetails {
   readonly password: string | null;
   readonly totp: string | null;
   readonly notes: string | null;
+  /** Passkeys de l'item, métadonnées déchiffrées. */
+  readonly passkeys: readonly PasskeyView[];
 }
 
 /** Concurrence par défaut du déchiffrement de liste. */
@@ -138,10 +157,13 @@ export async function decryptCipherOverview(
   const id = readField<string>(cipher, 'id') ?? '';
   const type = readField<number>(cipher, 'type') ?? 0;
   const organizationId = readField<string | null>(cipher, 'organizationId') ?? null;
+  const login = readLogin(cipher);
+  const hasPasskey =
+    (readField<readonly unknown[]>(login, 'fido2Credentials') ?? []).length > 0;
 
   const baseKey = baseKeyFor(cipher, keys, onError);
   if (baseKey === null) {
-    return { id, type, name: null, username: null, uris: [], organizationId };
+    return { id, type, name: null, username: null, uris: [], hasPasskey, organizationId };
   }
 
   let itemKey: SymmetricCryptoKey;
@@ -149,10 +171,9 @@ export async function decryptCipherOverview(
     itemKey = await resolveItemKey(cipher, baseKey);
   } catch (error) {
     onError(error);
-    return { id, type, name: null, username: null, uris: [], organizationId };
+    return { id, type, name: null, username: null, uris: [], hasPasskey, organizationId };
   }
 
-  const login = readLogin(cipher);
   const rawUris = readField<readonly RawUriEntry[]>(login, 'uris') ?? [];
 
   const [name, username, ...decryptedUris] = await Promise.all([
@@ -164,7 +185,15 @@ export async function decryptCipherOverview(
   ]);
   const uris = decryptedUris.filter((uri): uri is string => uri !== null);
 
-  return { id, type, name: name ?? null, username: username ?? null, uris, organizationId };
+  return {
+    id,
+    type,
+    name: name ?? null,
+    username: username ?? null,
+    uris,
+    hasPasskey,
+    organizationId,
+  };
 }
 
 /**
@@ -182,7 +211,7 @@ export async function decryptCipherDetails(
 ): Promise<CipherDetails> {
   const baseKey = baseKeyFor(cipher, keys, onError);
   if (baseKey === null) {
-    return { username: null, password: null, totp: null, notes: null };
+    return { username: null, password: null, totp: null, notes: null, passkeys: [] };
   }
 
   let itemKey: SymmetricCryptoKey;
@@ -190,18 +219,33 @@ export async function decryptCipherDetails(
     itemKey = await resolveItemKey(cipher, baseKey);
   } catch (error) {
     onError(error);
-    return { username: null, password: null, totp: null, notes: null };
+    return { username: null, password: null, totp: null, notes: null, passkeys: [] };
   }
 
   const login = readLogin(cipher);
-  const [username, password, totp, notes] = await Promise.all([
+  const rawPasskeys = readField<readonly Record<string, unknown>[]>(login, 'fido2Credentials') ?? [];
+
+  const [username, password, totp, notes, ...passkeys] = await Promise.all([
     decryptStringOrNull(readField<string>(login, 'username'), itemKey, onError),
     decryptStringOrNull(readField<string>(login, 'password'), itemKey, onError),
     decryptStringOrNull(readField<string>(login, 'totp'), itemKey, onError),
     decryptStringOrNull(readField<string>(cipher, 'notes'), itemKey, onError),
+    ...rawPasskeys.map(async (entry): Promise<PasskeyView> => {
+      const [rpId, userName] = await Promise.all([
+        decryptStringOrNull(readField<string>(entry, 'rpId'), itemKey, onError),
+        decryptStringOrNull(readField<string>(entry, 'userName'), itemKey, onError),
+      ]);
+      return { rpId, userName };
+    }),
   ]);
 
-  return { username, password, totp, notes };
+  return {
+    username: username as string | null,
+    password: password as string | null,
+    totp: totp as string | null,
+    notes: notes as string | null,
+    passkeys: passkeys as PasskeyView[],
+  };
 }
 
 /**
@@ -331,6 +375,9 @@ export async function buildCipherUpdatePayload(
       password: await encOrNull(edit.password),
       totp: await encOrNull(edit.totp),
       uris,
+      // Les passkeys ne sont pas éditables ici : reprises telles quelles,
+      // déjà chiffrées. Les omettre les effacerait du serveur.
+      fido2Credentials: readField<unknown>(login, 'fido2Credentials') ?? null,
     };
 
     const previousPassword = readField<string>(login, 'password');

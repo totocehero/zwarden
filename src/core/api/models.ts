@@ -70,6 +70,30 @@ export const TwoFactorProvider = {
 
 export type TwoFactorProvider = (typeof TwoFactorProvider)[keyof typeof TwoFactorProvider];
 
+/**
+ * Passkey (identifiant FIDO2) rangée dans un item de connexion.
+ *
+ * Tous les champs sont des `EncString` sérialisées, sauf `creationDate`.
+ * `keyValue` est la **clé privée** ECDSA P-256 (PKCS#8) : c'est elle qui
+ * permet à l'extension de répondre aux cérémonies WebAuthn à la place d'une
+ * clé matérielle.
+ */
+export interface Fido2CredentialResponse {
+  readonly credentialId?: string | null;
+  readonly keyType?: string | null;
+  readonly keyAlgorithm?: string | null;
+  readonly keyCurve?: string | null;
+  readonly keyValue?: string | null;
+  readonly rpId?: string | null;
+  readonly rpName?: string | null;
+  readonly userHandle?: string | null;
+  readonly userName?: string | null;
+  readonly userDisplayName?: string | null;
+  readonly counter?: string | null;
+  readonly discoverable?: string | null;
+  readonly creationDate?: string | null;
+}
+
 /** Item du coffre, tel que renvoyé par `GET /api/sync`. */
 export interface CipherResponse {
   readonly id: string;
@@ -81,6 +105,7 @@ export interface CipherResponse {
     readonly password?: string | null;
     readonly totp?: string | null;
     readonly uris?: ReadonlyArray<{ readonly uri?: string | null }> | null;
+    readonly fido2Credentials?: readonly Fido2CredentialResponse[] | null;
   } | null;
   /** Clé propre à l'item, si présente. Enveloppée par la clé du coffre. */
   readonly key?: string | null;
