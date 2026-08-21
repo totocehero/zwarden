@@ -1,0 +1,12 @@
+node_modules/
+dist/
+dist-firefox/
+*.zip
+*.crx
+*.pem
+.DS_Store
+.vite/
+coverage/
+*.local
+.env
+.env.*
