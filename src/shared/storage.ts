@@ -14,6 +14,8 @@
  * en se comportant comme un stockage vide.
  */
 
+import type { SyncResponse } from '../core/api/models.js';
+
 /** Paramètres de l'application, tels qu'édités dans la page d'options. */
 export interface AppSettings {
   readonly serverUrl: string;
@@ -177,6 +179,13 @@ export interface StoredSession {
   readonly expiresAt: number;
   readonly serverUrl: string;
   readonly email: string;
+  /**
+   * Dernière réponse de synchronisation, telle quelle — champs sensibles
+   * toujours chiffrés. Permet d'afficher le coffre immédiatement à
+   * l'ouverture de la popup, avant le rafraîchissement réseau. Même stockage
+   * mémoire que la clé : aucune surface supplémentaire.
+   */
+  readonly cachedSync: SyncResponse | null;
 }
 
 const SESSION_KEY = 'session';
@@ -202,6 +211,7 @@ export async function loadStoredSession(): Promise<StoredSession | null> {
       expiresAt: s.expiresAt,
       serverUrl: s.serverUrl,
       email: s.email,
+      cachedSync: (s.cachedSync as SyncResponse | null | undefined) ?? null,
     };
   }
   return null;

@@ -37,10 +37,11 @@ import { useEffect, useState } from 'preact/hooks';
 
 import {
   ApiClient,
+  ApiError,
   TwoFactorRequiredError,
   type TwoFactorSubmission,
 } from '@core/api/apiClient.js';
-import { TwoFactorProvider, type CipherResponse } from '@core/api/models.js';
+import { TwoFactorProvider, type CipherResponse, type SyncResponse } from '@core/api/models.js';
 import { SymmetricCryptoKey } from '@core/crypto/symmetricCryptoKey.js';
 import {
   type CipherDetails,
@@ -194,6 +195,8 @@ function messageFor(err: unknown): string {
 
 function App() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  /** Vrai tant que la tentative de restauration initiale n'a pas conclu. */
+  const [initializing, setInitializing] = useState(true);
   const [serverUrl, setServerUrl] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -235,55 +238,94 @@ function App() {
   /**
    * Restaure une session encore vivante dans `chrome.storage.session`.
    *
-   * Rafraîchit le jeton d'accès s'il approche de l'expiration. Tout échec
-   * (session périmée, jeton révoqué, serveur injoignable) retombe simplement
-   * sur l'écran de déverrouillage — c'est un cas normal, pas une erreur à
-   * afficher.
+   * Deux temps, pour ne jamais montrer la mire inutilement :
+   *
+   * 1. **Affichage immédiat** depuis la dernière synchronisation en cache —
+   *    aucun réseau, la liste apparaît en quelques dizaines de millisecondes.
+   * 2. **Rafraîchissement réseau** en arrière-plan, qui met la liste à jour.
+   *
+   * Un échec réseau conserve le cache affiché — être hors ligne ne verrouille
+   * pas le coffre. Seul un refus d'authentification (jeton révoqué) verrouille.
    */
   async function restoreSession(s: AppSettings): Promise<void> {
     const stored = await loadStoredSession();
     if (stored === null) {
+      setInitializing(false);
       return;
     }
 
-    setBusy('Restauration de la session…');
+    setServerUrl(stored.serverUrl);
+    setEmail(stored.email);
+    const userKey = SymmetricCryptoKey.fromBase64(stored.userKeyB64);
+    scheduleAutoLock(s.autoLockMinutes);
+
+    let displayed = false;
+    if (stored.cachedSync !== null) {
+      try {
+        await showVault(stored.cachedSync, userKey, false);
+        displayed = true;
+        setInitializing(false);
+      } catch {
+        // Cache inexploitable : le chemin réseau ci-dessous tranchera.
+      }
+    }
+
     try {
       const client = makeClient(s, stored.serverUrl, await getDeviceId());
 
       let accessToken = stored.accessToken;
-      if (Date.now() > stored.expiresAt - 60_000) {
-        if (stored.refreshToken === null) {
-          throw new Error('session expirée sans jeton de rafraîchissement');
+      let refreshToken = stored.refreshToken;
+      let expiresAt = stored.expiresAt;
+      if (Date.now() > expiresAt - 60_000) {
+        if (refreshToken === null) {
+          throw new ApiError('Session expirée sans jeton de rafraîchissement', 401, '');
         }
-        const renewed = await client.refreshToken(stored.refreshToken);
+        const renewed = await client.refreshToken(refreshToken);
         accessToken = renewed.accessToken;
-        await saveStoredSession({
-          ...stored,
-          accessToken,
-          refreshToken: renewed.refreshToken ?? stored.refreshToken,
-          expiresAt: renewed.expiresAt,
-        });
+        refreshToken = renewed.refreshToken ?? refreshToken;
+        expiresAt = renewed.expiresAt;
       }
 
-      setServerUrl(stored.serverUrl);
-      setEmail(stored.email);
-      await openVaultFrom(client, SymmetricCryptoKey.fromBase64(stored.userKeyB64), accessToken);
-      scheduleAutoLock(s.autoLockMinutes);
-    } catch {
-      await clearStoredSession();
+      if (!displayed) {
+        setBusy('Ouverture du coffre…');
+      }
+      const sync = await client.sync(accessToken);
+      await saveStoredSession({
+        userKeyB64: stored.userKeyB64,
+        accessToken,
+        refreshToken,
+        expiresAt,
+        serverUrl: stored.serverUrl,
+        email: stored.email,
+        cachedSync: sync,
+      });
+      await showVault(sync, userKey, !displayed);
+    } catch (err) {
+      // Jeton refusé : la session est morte côté serveur, verrouillage net.
+      const authFailure = err instanceof ApiError && (err.status === 400 || err.status === 401);
+      if (authFailure) {
+        await clearStoredSession();
+        cancelAutoLock();
+        userKey.destroy();
+        setVault(null);
+      } else if (!displayed) {
+        // Panne réseau sans cache : la session est conservée pour un essai
+        // ultérieur, mais il n'y a rien à montrer.
+        setError('Serveur injoignable — réessayer, ou déverrouiller à nouveau.');
+      }
+      // Panne réseau avec cache affiché : on reste simplement sur le cache.
     } finally {
       setBusy(null);
+      setInitializing(false);
     }
   }
 
-  /** Synchronise, déchiffre les vues de liste et affiche le coffre. */
-  async function openVaultFrom(
-    client: ApiClient,
+  /** Déchiffre une réponse de synchronisation et affiche le coffre. */
+  async function showVault(
+    sync: SyncResponse,
     userKey: SymmetricCryptoKey,
-    accessToken: string,
+    announce: boolean,
   ): Promise<void> {
-    setBusy('Synchronisation…');
-    const sync = await client.sync(accessToken);
     const ciphers = sync.ciphers ?? [];
 
     // Les échecs sont journalisés dans la console DE LA POPUP (clic droit sur
@@ -295,10 +337,10 @@ function App() {
       console.warn('[zwarden] champ illisible :', error);
     };
 
-    setBusy('Déballage des clés d’organisation…');
+    if (announce) {
+      setBusy(`Déchiffrement de ${ciphers.length} item(s)…`);
+    }
     const keys = await buildVaultKeys(sync.profile, userKey, onDecryptError);
-
-    setBusy(`Déchiffrement de ${ciphers.length} item(s)…`);
     const items = await decryptCipherList(ciphers, keys, onDecryptError);
 
     const raw = new Map<string, CipherResponse>();
@@ -309,13 +351,13 @@ function App() {
     setVault({ userKey, keys, items, raw, errors });
 
     // Onglet actif : origine stricte pour « Remplir », domaine pour le filtre
-    // prérempli — seulement s'il correspond à quelque chose, une liste vide
-    // serait déroutante.
+    // prérempli — sans écraser une recherche déjà saisie, et seulement s'il
+    // correspond à quelque chose, une liste vide serait déroutante.
     const tab = await activeWebTab();
     setTabOrigin(tab === null ? null : tab.url.origin);
     const host = tab?.url.hostname.replace(/^www\./, '');
     if (host !== undefined && items.some((item) => matchesNeedle(item, host))) {
-      setFilter(host);
+      setFilter((current) => (current === '' ? host : current));
     }
   }
 
@@ -352,8 +394,13 @@ function App() {
         await saveRememberToken(serverUrl, email, result.twoFactorRememberToken);
       }
 
+      setBusy('Synchronisation…');
+      const sync = await client.sync(result.session.accessToken);
+
       // La session survit à la fermeture de la popup, jusqu'à la fermeture du
-      // navigateur, l'échéance d'inactivité ou le verrouillage manuel.
+      // navigateur, l'échéance d'inactivité ou le verrouillage manuel. La
+      // synchronisation est mise en cache pour un affichage immédiat à la
+      // prochaine ouverture.
       await saveStoredSession({
         userKeyB64: result.userKey.toBase64(),
         accessToken: result.session.accessToken,
@@ -361,10 +408,11 @@ function App() {
         expiresAt: result.session.expiresAt,
         serverUrl,
         email,
+        cachedSync: sync,
       });
       scheduleAutoLock(settings.autoLockMinutes);
 
-      await openVaultFrom(client, result.userKey, result.session.accessToken);
+      await showVault(sync, result.userKey, true);
     } catch (err) {
       if (err instanceof TwoFactorRequiredError) {
         // Un jeton de dispense refusé est expiré : on l'oublie et on repasse
@@ -477,6 +525,20 @@ function App() {
       (item.name ?? '').toLowerCase().includes(needle) ||
       (item.username ?? '').toLowerCase().includes(needle) ||
       item.uris.some((uri) => uri.toLowerCase().includes(needle))
+    );
+  }
+
+  // --- Initialisation : ni mire ni liste tant qu'on ne sait pas -------------
+  if (vault === null && initializing) {
+    return (
+      <div>
+        <header>
+          <h1>Zwarden</h1>
+        </header>
+        <main>
+          <p class="statut">{busy ?? 'Ouverture…'}</p>
+        </main>
+      </div>
     );
   }
 

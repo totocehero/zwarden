@@ -4,9 +4,19 @@
   "version": "0.1.0",
   "description": "Gestionnaire de mots de passe open source, compatible Vaultwarden / API Bitwarden. Conçu pour la légèreté.",
   "minimum_chrome_version": "120",
+  "icons": {
+    "16": "images/icon16.png",
+    "32": "images/icon32.png",
+    "48": "images/icon48.png",
+    "128": "images/icon128.png"
+  },
   "action": {
     "default_popup": "src/popup/index.html",
-    "default_title": "Zwarden"
+    "default_title": "Zwarden",
+    "default_icon": {
+      "16": "images/icon16.png",
+      "32": "images/icon32.png"
+    }
   },
   "options_ui": {
     "page": "src/options/index.html",
