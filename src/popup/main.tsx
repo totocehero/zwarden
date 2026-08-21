@@ -33,7 +33,7 @@
  */
 
 import { render } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 
 import {
   ApiClient,
@@ -175,6 +175,9 @@ interface EditForm {
 }
 
 const EMPTY_EDIT: EditForm = { name: '', username: '', password: '', totp: '', notes: '', uris: '' };
+
+/** Durée d'affichage d'un mot de passe révélé avant masquage automatique. */
+const REVEAL_HIDE_MS = 20_000;
 
 /** Icône crayon, pour l'édition. */
 function IconCrayon() {
@@ -506,6 +509,7 @@ function App() {
     vault?.userKey.destroy();
     void clearStoredSession();
     cancelAutoLock();
+    clearRevealTimer();
     setVault(null);
     setFilter('');
     setRevealed(null);
@@ -549,7 +553,18 @@ function App() {
     }
   }
 
+  /** Minuteur d'auto-masquage du mot de passe révélé. */
+  const revealTimer = useRef<number | undefined>(undefined);
+
+  function clearRevealTimer(): void {
+    if (revealTimer.current !== undefined) {
+      clearTimeout(revealTimer.current);
+      revealTimer.current = undefined;
+    }
+  }
+
   async function onToggleReveal(item: CipherOverview): Promise<void> {
+    clearRevealTimer();
     if (revealed?.id === item.id) {
       setRevealed(null);
       return;
@@ -557,6 +572,9 @@ function App() {
     const motDePasse = (await detailsOf(item))?.password ?? null;
     if (motDePasse !== null) {
       setRevealed({ id: item.id, password: motDePasse });
+      // Auto-masquage : un mot de passe affiché ne doit pas rester à l'écran
+      // par oubli.
+      revealTimer.current = window.setTimeout(() => setRevealed(null), REVEAL_HIDE_MS);
     }
   }
 
