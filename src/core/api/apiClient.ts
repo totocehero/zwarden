@@ -354,6 +354,35 @@ export class ApiClient {
   }
 
   /**
+   * Met à jour un item du coffre.
+   *
+   * Le corps transmis doit être **complet et déjà chiffré** : le serveur
+   * remplace les données de l'item par ce qu'il reçoit, les champs omis sont
+   * perdus. Voir `buildCipherUpdatePayload` dans la couche coffre, qui
+   * reconstruit le corps à partir de l'item existant.
+   *
+   * @param accessToken Jeton d'accès.
+   * @param cipherId Identifiant de l'item.
+   * @param cipher Corps complet, champs sensibles en `EncString` sérialisées.
+   * @returns Item mis à jour, tel que renvoyé par le serveur.
+   * @throws {ApiError} Si le serveur refuse la mise à jour.
+   */
+  async updateCipher(
+    accessToken: string,
+    cipherId: string,
+    cipher: Record<string, unknown>,
+  ): Promise<CipherResponse> {
+    return this.requestJson<CipherResponse>(`/api/ciphers/${cipherId}`, {
+      method: 'PUT',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(cipher),
+    });
+  }
+
+  /**
    * Supprime définitivement un item, sans passer par la corbeille.
    *
    * Un 404 est traité comme un succès : l'item n'existe plus, l'intention est

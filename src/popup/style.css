@@ -66,13 +66,21 @@ input:focus {
   outline-offset: -1px;
 }
 
-select {
+select,
+textarea {
   padding: 7px 9px;
   border: 1px solid var(--bord);
   border-radius: 6px;
   background: var(--panneau);
   color: var(--texte);
   font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
 }
 
 label.ligne {

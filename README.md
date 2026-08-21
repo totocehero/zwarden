@@ -60,8 +60,10 @@ Le noyau cryptographique est implémenté et testé. Le reste est en cours.
       déballées, items partagés lisibles
 - [x] Remplissage depuis la popup — geste explicite, correspondance
       d'origine stricte
+- [x] Édition d'items depuis la popup — champs préservés, clé d'item et
+      clés d'organisation respectées, historique de mots de passe
 - [ ] TOTP et générateur de mots de passe
-- [ ] Création / édition d'items
+- [ ] Création d'items depuis la popup
 - [ ] Autofill automatique (détection de formulaire, suggestion en page)
 
 ## Modèle de sécurité

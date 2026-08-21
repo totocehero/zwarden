@@ -44,6 +44,7 @@ import {
   stretchMasterKey,
 } from '../../src/core/crypto/kdf.js';
 import {
+  buildCipherUpdatePayload,
   decryptCipherDetails,
   decryptCipherList,
   decryptCipherOverview,
@@ -189,6 +190,38 @@ describe.skipIf(!configured)('interopérabilité Vaultwarden', () => {
       expect(détails.password).toBe(motDePasse);
 
       console.log('  Aller-retour validé : nom, utilisateur et mot de passe identiques');
+
+      // Mise à jour : nouveau nom et nouveau mot de passe, poussés puis relus
+      // par une synchronisation complète — le chemin exact de l'édition dans
+      // la popup.
+      const marqueurModifié = `${marqueur}-modifié`;
+      const nouveauMotDePasse = crypto.randomUUID();
+      const payload = await buildCipherUpdatePayload(
+        relu!,
+        {
+          name: marqueurModifié,
+          username: 'utilisateur@test.local',
+          password: nouveauMotDePasse,
+          totp: '',
+          notes: 'Item de test Zwarden, supprimé automatiquement.',
+          uris: ['https://test.local'],
+        },
+        userKey,
+        true,
+      );
+      await client.updateCipher(session.accessToken, créé.id, payload);
+
+      const sync2 = await client.sync(session.accessToken);
+      const relu2 = (sync2.ciphers ?? []).find((c) => c.id === créé.id);
+      expect(relu2).toBeDefined();
+
+      const vue2 = await decryptCipherOverview(relu2!, userKey, surErreur);
+      const détails2 = await decryptCipherDetails(relu2!, userKey, surErreur);
+      expect(erreurs).toHaveLength(0);
+      expect(vue2.name).toBe(marqueurModifié);
+      expect(détails2.password).toBe(nouveauMotDePasse);
+
+      console.log('  Mise à jour poussée, relue et revalidée');
     } finally {
       // Nettoyage systématique, y compris si une assertion a échoué.
       await client.deleteCipher(session.accessToken, créé.id);

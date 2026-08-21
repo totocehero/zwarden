@@ -47,6 +47,7 @@ import {
   type CipherDetails,
   type CipherKeys,
   type CipherOverview,
+  buildCipherUpdatePayload,
   decryptCipherDetails,
   decryptCipherList,
 } from '@core/vault/cipherService.js';
@@ -161,6 +162,38 @@ function openOptions(): void {
   }
 }
 
+/** Formulaire d'édition d'un item. Chaîne vide = champ effacé. */
+interface EditForm {
+  name: string;
+  username: string;
+  password: string;
+  totp: string;
+  notes: string;
+  /** Une URI par ligne. */
+  uris: string;
+}
+
+const EMPTY_EDIT: EditForm = { name: '', username: '', password: '', totp: '', notes: '', uris: '' };
+
+/** Icône crayon, pour l'édition. */
+function IconCrayon() {
+  return (
+    <svg
+      width="15"
+      height="15"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+    </svg>
+  );
+}
+
 /** Icône œil (barré quand le secret est visible, pour proposer de le cacher). */
 function IconOeil({ barre }: { barre: boolean }) {
   return (
@@ -209,6 +242,13 @@ function App() {
   const [copiedUserId, setCopiedUserId] = useState<string | null>(null);
   const [revealed, setRevealed] = useState<{ id: string; password: string } | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+
+  // Édition : item en cours, valeurs du formulaire, mot de passe d'origine
+  // (pour l'historique), visibilité du champ.
+  const [editing, setEditing] = useState<CipherOverview | null>(null);
+  const [editForm, setEditForm] = useState<EditForm>(EMPTY_EDIT);
+  const [editOriginalPassword, setEditOriginalPassword] = useState('');
+  const [editShowPassword, setEditShowPassword] = useState(false);
 
   // Second facteur : fournisseurs annoncés par le serveur, choix et code.
   const [twoFaProviders, setTwoFaProviders] = useState<readonly string[] | null>(null);
@@ -520,6 +560,104 @@ function App() {
     window.close();
   }
 
+  /** Ouvre l'écran d'édition, prérempli avec les valeurs déchiffrées. */
+  async function onEdit(item: CipherOverview): Promise<void> {
+    const details = await detailsOf(item);
+    if (details === null) {
+      return;
+    }
+    setEditForm({
+      name: item.name ?? '',
+      username: details.username ?? '',
+      password: details.password ?? '',
+      totp: details.totp ?? '',
+      notes: details.notes ?? '',
+      uris: item.uris.join('\n'),
+    });
+    setEditOriginalPassword(details.password ?? '');
+    setEditShowPassword(false);
+    setEditing(item);
+    setError(null);
+  }
+
+  /** Chiffre, envoie la mise à jour, resynchronise et revient à la liste. */
+  async function onSaveEdit(event: Event): Promise<void> {
+    event.preventDefault();
+    if (vault === null || editing === null) {
+      return;
+    }
+    const raw = vault.raw.get(editing.id);
+    if (raw === undefined) {
+      return;
+    }
+
+    setError(null);
+    setBusy('Chiffrement…');
+    try {
+      const stored = await loadStoredSession();
+      if (stored === null) {
+        throw new Error('Session expirée — verrouiller puis déverrouiller.');
+      }
+      const client = makeClient(settings, stored.serverUrl, await getDeviceId());
+
+      let accessToken = stored.accessToken;
+      let refreshToken = stored.refreshToken;
+      let expiresAt = stored.expiresAt;
+      if (Date.now() > expiresAt - 60_000 && refreshToken !== null) {
+        const renewed = await client.refreshToken(refreshToken);
+        accessToken = renewed.accessToken;
+        refreshToken = renewed.refreshToken ?? refreshToken;
+        expiresAt = renewed.expiresAt;
+      }
+
+      const payload = await buildCipherUpdatePayload(
+        raw,
+        {
+          name: editForm.name.trim(),
+          username: editForm.username,
+          password: editForm.password,
+          totp: editForm.totp,
+          notes: editForm.notes,
+          uris: editForm.uris.split('\n'),
+        },
+        vault.keys,
+        editForm.password !== editOriginalPassword,
+      );
+
+      setBusy('Enregistrement…');
+      await client.updateCipher(accessToken, editing.id, payload);
+
+      setBusy('Synchronisation…');
+      const sync = await client.sync(accessToken);
+      await saveStoredSession({
+        userKeyB64: stored.userKeyB64,
+        accessToken,
+        refreshToken,
+        expiresAt,
+        serverUrl: stored.serverUrl,
+        email: stored.email,
+        cachedSync: sync,
+      });
+      await showVault(sync, vault.userKey, false);
+
+      setEditing(null);
+      setEditForm(EMPTY_EDIT);
+      setEditOriginalPassword('');
+      setRevealed(null);
+    } catch (err) {
+      setError(messageFor(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function onCancelEdit(): void {
+    setEditing(null);
+    setEditForm(EMPTY_EDIT);
+    setEditOriginalPassword('');
+    setError(null);
+  }
+
   function matchesNeedle(item: CipherOverview, needle: string): boolean {
     return (
       (item.name ?? '').toLowerCase().includes(needle) ||
@@ -693,6 +831,97 @@ function App() {
     );
   }
 
+  // --- Écran d'édition ------------------------------------------------------
+  if (editing !== null) {
+    const estLogin = editing.type === 1;
+    return (
+      <div>
+        <header>
+          <h1>Zwarden</h1>
+          <button class="discret" onClick={onCancelEdit}>
+            ← Annuler
+          </button>
+        </header>
+        <main>
+          <form onSubmit={(e) => void onSaveEdit(e)}>
+            <label>
+              Nom
+              <input
+                type="text"
+                value={editForm.name}
+                onInput={(e) => setEditForm({ ...editForm, name: e.currentTarget.value })}
+                required
+              />
+            </label>
+            {estLogin && (
+              <label>
+                Identifiant
+                <input
+                  type="text"
+                  value={editForm.username}
+                  onInput={(e) => setEditForm({ ...editForm, username: e.currentTarget.value })}
+                />
+              </label>
+            )}
+            {estLogin && (
+              <label>
+                Mot de passe
+                <div class="champ-mdp">
+                  <input
+                    type={editShowPassword ? 'text' : 'password'}
+                    value={editForm.password}
+                    onInput={(e) => setEditForm({ ...editForm, password: e.currentTarget.value })}
+                  />
+                  <button
+                    type="button"
+                    class="oeil"
+                    title={editShowPassword ? 'Masquer' : 'Afficher'}
+                    onClick={() => setEditShowPassword(!editShowPassword)}
+                  >
+                    <IconOeil barre={editShowPassword} />
+                  </button>
+                </div>
+              </label>
+            )}
+            {estLogin && (
+              <label>
+                TOTP (clé ou otpauth://)
+                <input
+                  type="text"
+                  value={editForm.totp}
+                  onInput={(e) => setEditForm({ ...editForm, totp: e.currentTarget.value })}
+                />
+              </label>
+            )}
+            {estLogin && (
+              <label>
+                URIs (une par ligne)
+                <textarea
+                  rows={2}
+                  value={editForm.uris}
+                  onInput={(e) => setEditForm({ ...editForm, uris: e.currentTarget.value })}
+                />
+              </label>
+            )}
+            <label>
+              Notes
+              <textarea
+                rows={3}
+                value={editForm.notes}
+                onInput={(e) => setEditForm({ ...editForm, notes: e.currentTarget.value })}
+              />
+            </label>
+            <button type="submit" disabled={busy !== null}>
+              Enregistrer
+            </button>
+          </form>
+          {busy !== null && <p class="statut">{busy}</p>}
+          {error !== null && <p class="erreur">{error}</p>}
+        </main>
+      </div>
+    );
+  }
+
   // --- Liste du coffre ------------------------------------------------------
   const needle = filter.trim().toLowerCase();
   const visible = needle === '' ? vault.items : vault.items.filter((i) => matchesNeedle(i, needle));
@@ -765,6 +994,13 @@ function App() {
                     onClick={() => void onToggleReveal(item)}
                   >
                     <IconOeil barre={revealed?.id === item.id} />
+                  </button>
+                  <button
+                    class="discret oeil-item"
+                    title="Modifier l’item"
+                    onClick={() => void onEdit(item)}
+                  >
+                    <IconCrayon />
                   </button>
                   {tabOrigin !== null && matchesOrigin(item.uris, tabOrigin) && (
                     <button

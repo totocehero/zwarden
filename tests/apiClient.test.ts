@@ -330,6 +330,29 @@ describe('refreshToken', () => {
   });
 });
 
+describe('updateCipher', () => {
+  it('émet un PUT complet sur l’item', async () => {
+    const captured: Captured[] = [];
+    const client = clientWith(() => jsonResponse(200, { id: 'id-1', type: 1 }), captured);
+    const corps = { type: 1, name: '2.aaa|bbb|ccc' };
+
+    const résultat = await client.updateCipher('jeton', 'id-1', corps);
+
+    expect(résultat.id).toBe('id-1');
+    expect(captured[0]!.url).toBe('https://vault.example.com/api/ciphers/id-1');
+    expect(captured[0]!.init?.method).toBe('PUT');
+    expect(String(captured[0]!.init?.body)).toBe(JSON.stringify(corps));
+  });
+
+  it('remonte les échecs', async () => {
+    const client = clientWith(() => new Response('interdit', { status: 403 }));
+
+    const erreur = await client.updateCipher('jeton', 'id-1', {}).catch((e: unknown) => e);
+    expect(erreur).toBeInstanceOf(ApiError);
+    expect((erreur as ApiError).status).toBe(403);
+  });
+});
+
 describe('deleteCipher', () => {
   it('traite un 404 comme un succès (idempotence)', async () => {
     const client = clientWith(() => new Response('', { status: 404 }));

@@ -31,7 +31,7 @@
  */
 
 import { EncString } from '../crypto/encString.js';
-import { decryptBytes, decryptStringOrNull } from '../crypto/cryptoService.js';
+import { decryptBytes, decryptStringOrNull, encryptString } from '../crypto/cryptoService.js';
 import { SymmetricCryptoKey } from '../crypto/symmetricCryptoKey.js';
 import { type CipherResponse, readField } from '../api/models.js';
 import { MissingOrgKeyError, type VaultKeys, keyForCipher } from './keyring.js';
@@ -238,4 +238,111 @@ export async function decryptCipherList(
 
   await Promise.all(workers);
   return out;
+}
+
+/** Champs modifiables d'un item. Chaîne vide = champ effacé. */
+export interface CipherEdit {
+  readonly name: string;
+  readonly username: string;
+  readonly password: string;
+  readonly totp: string;
+  readonly notes: string;
+  readonly uris: readonly string[];
+}
+
+/** Nombre d'entrées conservées dans l'historique de mots de passe. */
+const PASSWORD_HISTORY_LIMIT = 5;
+
+/**
+ * Construit le corps complet d'une mise à jour d'item.
+ *
+ * Le serveur **remplace** les données de l'item par ce qu'il reçoit : le corps
+ * est donc reconstruit à partir de l'item existant — les champs non édités
+ * (dossier, favori, champs personnalisés, clé d'item…) sont repris tels
+ * quels, déjà chiffrés — et seuls les champs édités sont rechiffrés.
+ *
+ * Le chiffrement utilise exactement le contexte du déchiffrement : clé
+ * d'organisation pour un item partagé, puis clé propre à l'item si elle
+ * existe (et elle est conservée dans le corps).
+ *
+ * Si le mot de passe change (`recordPasswordHistory`), l'ancien — encore
+ * chiffré, jamais relu en clair ici — est ajouté en tête de l'historique,
+ * plafonné à {@link PASSWORD_HISTORY_LIMIT} entrées.
+ *
+ * @param cipher Item brut existant, tel que renvoyé par la synchronisation.
+ * @param edit Nouvelles valeurs en clair.
+ * @param keys Clé du coffre seule, ou trousseau complet (organisations).
+ * @param recordPasswordHistory Consigner l'ancien mot de passe.
+ * @returns Corps prêt pour `ApiClient.updateCipher`.
+ * @throws {MissingOrgKeyError} Item d'organisation sans clé déballée.
+ */
+export async function buildCipherUpdatePayload(
+  cipher: CipherResponse,
+  edit: CipherEdit,
+  keys: CipherKeys,
+  recordPasswordHistory: boolean,
+): Promise<Record<string, unknown>> {
+  let baseKey: SymmetricCryptoKey;
+  if (keys instanceof SymmetricCryptoKey) {
+    baseKey = keys;
+  } else {
+    const resolved = keyForCipher(cipher, keys);
+    if (resolved === null) {
+      throw new MissingOrgKeyError(readField<string>(cipher, 'organizationId') ?? 'inconnue');
+    }
+    baseKey = resolved;
+  }
+  const itemKey = await resolveItemKey(cipher, baseKey);
+
+  const enc = async (text: string): Promise<string> =>
+    (await encryptString(text, itemKey)).toString();
+  const encOrNull = async (text: string): Promise<string | null> =>
+    text === '' ? null : enc(text);
+
+  const type = readField<number>(cipher, 'type') ?? 1;
+  const login = readLogin(cipher);
+  const wrappedItemKey = readField<string>(cipher, 'key');
+
+  const payload: Record<string, unknown> = {
+    type,
+    organizationId: readField<string | null>(cipher, 'organizationId') ?? null,
+    folderId: readField<string | null>(cipher, 'folderId') ?? null,
+    favorite: readField<boolean>(cipher, 'favorite') ?? false,
+    reprompt: readField<number>(cipher, 'reprompt') ?? 0,
+    name: await enc(edit.name),
+    notes: await encOrNull(edit.notes),
+    // Champs personnalisés : repris tels quels, déjà chiffrés.
+    fields: readField<unknown>(cipher, 'fields') ?? [],
+  };
+
+  if (wrappedItemKey != null && wrappedItemKey !== '') {
+    payload['key'] = wrappedItemKey;
+  }
+
+  if (type === 1) {
+    const uris = await Promise.all(
+      edit.uris
+        .map((uri) => uri.trim())
+        .filter((uri) => uri !== '')
+        .map(async (uri) => ({ uri: await enc(uri), match: null })),
+    );
+    payload['login'] = {
+      username: await encOrNull(edit.username),
+      password: await encOrNull(edit.password),
+      totp: await encOrNull(edit.totp),
+      uris,
+    };
+
+    const previousPassword = readField<string>(login, 'password');
+    const history = readField<readonly unknown[]>(cipher, 'passwordHistory') ?? [];
+    payload['passwordHistory'] =
+      recordPasswordHistory && previousPassword != null && previousPassword !== ''
+        ? [
+            { password: previousPassword, lastUsedDate: new Date().toISOString() },
+            ...history,
+          ].slice(0, PASSWORD_HISTORY_LIMIT)
+        : history;
+  }
+
+  return payload;
 }

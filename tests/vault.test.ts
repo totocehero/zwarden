@@ -16,6 +16,7 @@ import type { CipherResponse, SyncResponse } from '../src/core/api/models.js';
 import { toBase64 } from '../src/core/crypto/encoding.js';
 import {
   MacMismatchError,
+  decryptStringOrNull,
   encryptBytes,
   encryptString,
 } from '../src/core/crypto/cryptoService.js';
@@ -31,6 +32,7 @@ import {
 } from '../src/core/crypto/kdf.js';
 import { SymmetricCryptoKey } from '../src/core/crypto/symmetricCryptoKey.js';
 import {
+  buildCipherUpdatePayload,
   decryptCipherDetails,
   decryptCipherList,
   decryptCipherOverview,
@@ -218,6 +220,118 @@ describe('cipherService', () => {
         throw new Error('ne doit pas être appelé');
       }),
     ).toEqual([]);
+  });
+});
+
+describe('mise à jour d’item (buildCipherUpdatePayload)', () => {
+  let userKey: SymmetricCryptoKey;
+
+  beforeAll(() => {
+    userKey = SymmetricCryptoKey.generate();
+  });
+
+  /** Item existant, chiffré avec la clé fournie. */
+  async function rawCipher(key: SymmetricCryptoKey): Promise<CipherResponse> {
+    return {
+      id: 'item-1',
+      type: 1,
+      name: await enc('Ancien nom', key),
+      notes: await enc('anciennes notes', key),
+      login: {
+        username: await enc('ancien@exemple.fr', key),
+        password: await enc('ancien-mdp', key),
+        uris: [{ uri: await enc('https://ancien.fr', key) }],
+      },
+      organizationId: null,
+    };
+  }
+
+  const EDIT = {
+    name: 'Nouveau nom',
+    username: 'nouveau@exemple.fr',
+    password: 'nouveau-mdp',
+    totp: '',
+    notes: 'nouvelles notes',
+    uris: ['https://nouveau.fr', '  '],
+  };
+
+  async function dec(value: unknown, key: SymmetricCryptoKey): Promise<string | null> {
+    return decryptStringOrNull(value as string, key, (e) => {
+      throw e;
+    });
+  }
+
+  it('rechiffre les champs édités et préserve les autres', async () => {
+    const brut = {
+      ...(await rawCipher(userKey)),
+      folderId: 'dossier-1',
+      favorite: true,
+      reprompt: 1,
+      fields: [{ name: 'champ-perso' }],
+    } as unknown as CipherResponse;
+
+    const payload = await buildCipherUpdatePayload(brut, EDIT, userKey, false);
+
+    expect(await dec(payload['name'], userKey)).toBe('Nouveau nom');
+    expect(await dec(payload['notes'], userKey)).toBe('nouvelles notes');
+
+    const login = payload['login'] as Record<string, unknown>;
+    expect(await dec(login['username'], userKey)).toBe('nouveau@exemple.fr');
+    expect(await dec(login['password'], userKey)).toBe('nouveau-mdp');
+    expect(login['totp']).toBeNull();
+
+    const uris = login['uris'] as ReadonlyArray<Record<string, unknown>>;
+    expect(uris).toHaveLength(1); // la ligne vide est écartée
+    expect(await dec(uris[0]!['uri'], userKey)).toBe('https://nouveau.fr');
+
+    // Champs non édités : repris tels quels.
+    expect(payload['type']).toBe(1);
+    expect(payload['folderId']).toBe('dossier-1');
+    expect(payload['favorite']).toBe(true);
+    expect(payload['reprompt']).toBe(1);
+    expect(payload['fields']).toEqual([{ name: 'champ-perso' }]);
+    expect(payload['organizationId']).toBeNull();
+  });
+
+  it('conserve la clé d’item et chiffre avec elle', async () => {
+    const itemKey = SymmetricCryptoKey.generate();
+    const wrapped = (await encryptBytes(itemKey.key, userKey)).toString();
+    const brut: CipherResponse = { ...(await rawCipher(itemKey)), key: wrapped };
+
+    const payload = await buildCipherUpdatePayload(brut, EDIT, userKey, false);
+
+    expect(payload['key']).toBe(wrapped);
+    // Les champs se déchiffrent avec la clé de l'item, pas celle du coffre.
+    expect(await dec(payload['name'], itemKey)).toBe('Nouveau nom');
+  });
+
+  it('consigne l’ancien mot de passe, encore chiffré, dans l’historique', async () => {
+    const brut = await rawCipher(userKey);
+    const payload = await buildCipherUpdatePayload(brut, EDIT, userKey, true);
+
+    const histo = payload['passwordHistory'] as ReadonlyArray<Record<string, unknown>>;
+    expect(histo).toHaveLength(1);
+    expect(histo[0]!['password']).toBe(brut.login!.password);
+    expect(await dec(histo[0]!['password'], userKey)).toBe('ancien-mdp');
+  });
+
+  it('plafonne l’historique à 5 entrées', async () => {
+    const existant = Array.from({ length: 6 }, (_, i) => ({ password: `h${i}`, lastUsedDate: 'd' }));
+    const brut = { ...(await rawCipher(userKey)), passwordHistory: existant } as unknown as CipherResponse;
+
+    const payload = await buildCipherUpdatePayload(brut, EDIT, userKey, true);
+    expect(payload['passwordHistory'] as unknown[]).toHaveLength(5);
+  });
+
+  it('item d’organisation : chiffre avec la clé de l’organisation', async () => {
+    const orgKey = SymmetricCryptoKey.generate();
+    const keys = { userKey, orgKeys: new Map([['org-9', orgKey]]) };
+    const brut: CipherResponse = { ...(await rawCipher(orgKey)), organizationId: 'org-9' };
+
+    const payload = await buildCipherUpdatePayload(brut, EDIT, keys, false);
+
+    expect(payload['organizationId']).toBe('org-9');
+    expect(await dec(payload['name'], orgKey)).toBe('Nouveau nom');
   });
 });
 
