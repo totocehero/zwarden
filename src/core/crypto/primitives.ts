@@ -222,6 +222,41 @@ export async function hkdfExpandSha256(
 }
 
 /**
+ * Importe une clé privée RSA (PKCS#8) pour du déchiffrement RSA-OAEP.
+ *
+ * Le hash OAEP est fixé à l'import par WebCrypto : le type 4 de Bitwarden
+ * (le seul réellement émis pour le partage) utilise SHA-1, le type 3 SHA-256.
+ *
+ * SHA-1 est cassé pour les collisions, pas pour OAEP : la sécurité d'OAEP
+ * repose sur le masquage MGF1, pas sur la résistance aux collisions. C'est le
+ * format historique de Bitwarden, non négociable pour lire les coffres.
+ *
+ * @param pkcs8 Clé privée encodée DER/PKCS#8.
+ * @param hash Fonction de hachage OAEP.
+ * @returns Handle non extractible, limité au déchiffrement.
+ */
+export async function importRsaOaepPrivateKey(
+  pkcs8: Uint8Array,
+  hash: 'SHA-1' | 'SHA-256',
+): Promise<CryptoKey> {
+  return subtle.importKey('pkcs8', asBufferSource(pkcs8), { name: 'RSA-OAEP', hash }, false, [
+    'decrypt',
+  ]);
+}
+
+/**
+ * Déchiffre un bloc RSA-OAEP.
+ *
+ * @param privateKey Clé importée par {@link importRsaOaepPrivateKey}.
+ * @param data Bloc chiffré (256 octets pour RSA-2048).
+ * @returns Données en clair.
+ * @throws {DOMException} Si le bloc ne se déchiffre pas avec cette clé.
+ */
+export async function rsaOaepDecrypt(privateKey: CryptoKey, data: Uint8Array): Promise<Uint8Array> {
+  return new Uint8Array(await subtle.decrypt({ name: 'RSA-OAEP' }, privateKey, asBufferSource(data)));
+}
+
+/**
  * Chiffre en AES-256-CBC avec remplissage PKCS#7.
  *
  * CBC ne fournit **aucune authentification**. Ce mode ne doit jamais être

@@ -234,3 +234,30 @@ ul.items li {
   text-align: center;
   padding: 24px 0;
 }
+
+button.secondaire {
+  background: transparent;
+  border: 1px solid var(--bord);
+  color: var(--texte);
+  font-weight: 400;
+}
+
+.diagnostic {
+  margin: 4px 0 8px;
+  font-size: 12px;
+}
+
+.diagnostic summary {
+  cursor: pointer;
+}
+
+.diagnostic ul {
+  margin: 4px 0;
+  padding-left: 18px;
+  color: var(--texte-2);
+}
+
+.aide-diag {
+  color: var(--texte-2);
+  margin: 2px 0 0;
+}

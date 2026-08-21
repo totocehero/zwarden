@@ -12,7 +12,8 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { ApiClient, ApiError, TwoFactorRequiredError } from '../src/core/api/apiClient.js';
-import type { CipherResponse } from '../src/core/api/models.js';
+import type { CipherResponse, SyncResponse } from '../src/core/api/models.js';
+import { toBase64 } from '../src/core/crypto/encoding.js';
 import {
   MacMismatchError,
   encryptBytes,
@@ -35,6 +36,8 @@ import {
   decryptCipherOverview,
   resolveItemKey,
 } from '../src/core/vault/cipherService.js';
+import { MissingOrgKeyError, buildVaultKeys } from '../src/core/vault/keyring.js';
+import { matchesOrigin, uriOrigin } from '../src/core/vault/uriMatch.js';
 import { UnlockError, unlock } from '../src/core/vault/session.js';
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -215,6 +218,145 @@ describe('cipherService', () => {
         throw new Error('ne doit pas être appelé');
       }),
     ).toEqual([]);
+  });
+});
+
+describe('trousseau d’organisations (keyring)', () => {
+  let userKey: SymmetricCryptoKey;
+  let orgKey: SymmetricCryptoKey;
+  let profile: SyncResponse['profile'];
+
+  beforeAll(async () => {
+    userKey = SymmetricCryptoKey.generate();
+    orgKey = SymmetricCryptoKey.generate();
+
+    // Reconstitution fidèle du profil serveur : une paire RSA de membre, la
+    // clé privée enveloppée par la clé du coffre (type 2), et la clé de
+    // l'organisation chiffrée vers la clé publique (type 4, OAEP SHA-1).
+    const pair = await crypto.subtle.generateKey(
+      {
+        name: 'RSA-OAEP',
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: 'SHA-1',
+      },
+      true,
+      ['encrypt', 'decrypt'],
+    );
+    const pkcs8 = new Uint8Array(await crypto.subtle.exportKey('pkcs8', pair.privateKey));
+    const wrappedOrgKey = new Uint8Array(
+      await crypto.subtle.encrypt(
+        { name: 'RSA-OAEP' },
+        pair.publicKey,
+        orgKey.key as unknown as BufferSource,
+      ),
+    );
+
+    profile = {
+      privateKey: (await encryptBytes(pkcs8, userKey)).toString(),
+      organizations: [{ id: 'org-1', key: `4.${toBase64(wrappedOrgKey)}` }],
+    };
+  });
+
+  it('déballe la clé d’organisation via la clé privée RSA', async () => {
+    const erreurs: unknown[] = [];
+    const keys = await buildVaultKeys(profile, userKey, (e) => erreurs.push(e));
+
+    expect(erreurs).toHaveLength(0);
+    expect(keys.orgKeys.size).toBe(1);
+    expect(keys.orgKeys.get('org-1')?.toBase64()).toBe(orgKey.toBase64());
+  });
+
+  it('déchiffre côte à côte items personnels et items d’organisation', async () => {
+    const erreurs: unknown[] = [];
+    const keys = await buildVaultKeys(profile, userKey, (e) => erreurs.push(e));
+
+    const partagé: CipherResponse = {
+      id: 'partagé',
+      type: 1,
+      organizationId: 'org-1',
+      name: await enc('Compte partagé', orgKey),
+      login: { username: await enc('equipe@exemple.fr', orgKey) },
+    };
+    const perso: CipherResponse = {
+      id: 'perso',
+      type: 1,
+      name: await enc('Compte perso', userKey),
+      login: null,
+    };
+
+    const vues = await decryptCipherList([partagé, perso], keys, (e) => erreurs.push(e));
+
+    expect(erreurs).toHaveLength(0);
+    expect(vues[0]!.name).toBe('Compte partagé');
+    expect(vues[0]!.username).toBe('equipe@exemple.fr');
+    expect(vues[1]!.name).toBe('Compte perso');
+  });
+
+  it('signale MissingOrgKeyError pour une organisation inconnue', async () => {
+    const keys = await buildVaultKeys(profile, userKey, () => undefined);
+    const orphelin: CipherResponse = {
+      id: 'orphelin',
+      type: 1,
+      organizationId: 'org-inconnue',
+      name: await enc('Invisible', orgKey),
+    };
+
+    const erreurs: unknown[] = [];
+    const vue = await decryptCipherOverview(orphelin, keys, (e) => erreurs.push(e));
+
+    expect(vue.name).toBeNull();
+    expect(erreurs).toHaveLength(1);
+    expect(erreurs[0]).toBeInstanceOf(MissingOrgKeyError);
+    expect((erreurs[0] as MissingOrgKeyError).organizationId).toBe('org-inconnue');
+  });
+
+  it('un profil sans organisation ne touche jamais au RSA', async () => {
+    const erreurs: unknown[] = [];
+    const keys = await buildVaultKeys({}, userKey, (e) => erreurs.push(e));
+
+    expect(keys.orgKeys.size).toBe(0);
+    expect(erreurs).toHaveLength(0);
+  });
+
+  it('signale une clé privée illisible sans faire échouer le trousseau', async () => {
+    const erreurs: unknown[] = [];
+    const autreClé = SymmetricCryptoKey.generate();
+    const profilCassé: SyncResponse['profile'] = {
+      // Clé privée enveloppée par une autre clé : MAC invalide au déballage.
+      privateKey: (await encryptBytes(new Uint8Array(64), autreClé)).toString(),
+      organizations: [{ id: 'org-1', key: '4.AAAA' }],
+    };
+
+    const keys = await buildVaultKeys(profilCassé, userKey, (e) => erreurs.push(e));
+    expect(keys.orgKeys.size).toBe(0);
+    expect(erreurs).toHaveLength(1);
+  });
+});
+
+describe('correspondance d’origine (uriMatch)', () => {
+  it('normalise vers l’origine stricte', () => {
+    expect(uriOrigin('https://exemple.fr/chemin/login?x=1')).toBe('https://exemple.fr');
+    expect(uriOrigin('https://exemple.fr:8443/x')).toBe('https://exemple.fr:8443');
+    expect(uriOrigin('exemple.fr')).toBe('https://exemple.fr');
+    expect(uriOrigin('  exemple.fr/login  ')).toBe('https://exemple.fr');
+  });
+
+  it('rejette les URIs inexploitables', () => {
+    expect(uriOrigin('')).toBeNull();
+    expect(uriOrigin('androidapp://com.exemple')).toBeNull();
+  });
+
+  it('correspond exactement, jamais par sous-chaîne', () => {
+    expect(matchesOrigin(['https://exemple.fr/login'], 'https://exemple.fr')).toBe(true);
+    // L'attaque que la règle d'origine stricte neutralise :
+    expect(matchesOrigin(['https://banque.fr'], 'https://banque.fr.attaquant.com')).toBe(false);
+    // Sous-domaine ≠ origine.
+    expect(matchesOrigin(['https://exemple.fr'], 'https://mail.exemple.fr')).toBe(false);
+    // Port différent ≠ origine.
+    expect(matchesOrigin(['https://exemple.fr'], 'https://exemple.fr:8443')).toBe(false);
+    // HTTP ≠ HTTPS.
+    expect(matchesOrigin(['https://exemple.fr'], 'http://exemple.fr')).toBe(false);
   });
 });
 

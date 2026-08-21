@@ -87,6 +87,17 @@ export interface CipherResponse {
   readonly organizationId?: string | null;
 }
 
+/** Organisation dont le compte est membre, telle que listée dans le profil. */
+export interface ProfileOrganizationResponse {
+  readonly id?: string;
+  /**
+   * Clé de l'organisation (64 octets), chiffrée en RSA vers la clé publique
+   * du membre — `EncString` de type 4 (ou 3).
+   */
+  readonly key?: string | null;
+  readonly name?: string | null;
+}
+
 /** Réponse de `GET /api/sync`. */
 export interface SyncResponse {
   readonly profile?: {
@@ -94,6 +105,7 @@ export interface SyncResponse {
     readonly email?: string;
     readonly key?: string;
     readonly privateKey?: string | null;
+    readonly organizations?: readonly ProfileOrganizationResponse[] | null;
   };
   readonly ciphers?: readonly CipherResponse[];
   readonly folders?: readonly unknown[];

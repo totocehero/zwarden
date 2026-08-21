@@ -86,6 +86,13 @@ Architecture en deux étages (cf. README) : détecteur léger à `document_start
 moteur injecté seulement si un champ pertinent existe, et uniquement dans les
 pages `http(s)`.
 
+**État : v1 en place.** Le bouton « Remplir » de la popup injecte à la demande
+(`chrome.scripting`, cadre principal seulement) un remplisseur qui respecte
+les deux règles : geste explicite obligatoire, bouton visible uniquement quand
+l'origine de l'item correspond à celle de l'onglet (`uriMatch.ts`), et
+revérifiée au moment du clic. Restent pour la v2 : le détecteur en page, la
+suggestion inline et les iframes.
+
 ## 4 bis. Raccourcis clavier — parité avec l'extension officielle
 
 Pour que la vue « Bitwarden-like » aille au bout de sa promesse, les

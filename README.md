@@ -56,9 +56,13 @@ Le noyau cryptographique est implémenté et testé. Le reste est en cours.
 - [ ] Popup (déverrouillage, liste, recherche, copie) — deux vues commutables :
       « Bitwarden-like » (disposition classique, zéro réapprentissage pour les
       migrants) et « Zwarden » (filtrée sur l'onglet actif, pilotage clavier)
+- [x] Coffres d'organisation : clé privée RSA et clés d'organisation
+      déballées, items partagés lisibles
+- [x] Remplissage depuis la popup — geste explicite, correspondance
+      d'origine stricte
 - [ ] TOTP et générateur de mots de passe
 - [ ] Création / édition d'items
-- [ ] Autofill
+- [ ] Autofill automatique (détection de formulaire, suggestion en page)
 
 ## Modèle de sécurité
 

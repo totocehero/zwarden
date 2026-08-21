@@ -43,10 +43,14 @@ import {
 import { TwoFactorProvider, type CipherResponse } from '@core/api/models.js';
 import { SymmetricCryptoKey } from '@core/crypto/symmetricCryptoKey.js';
 import {
+  type CipherDetails,
+  type CipherKeys,
   type CipherOverview,
   decryptCipherDetails,
   decryptCipherList,
 } from '@core/vault/cipherService.js';
+import { buildVaultKeys } from '@core/vault/keyring.js';
+import { matchesOrigin } from '@core/vault/uriMatch.js';
 import { unlock } from '@core/vault/session.js';
 import {
   type AppSettings,
@@ -67,9 +71,22 @@ import {
 /** État d'un coffre déverrouillé, vivant uniquement tant que la popup l'est. */
 interface OpenVault {
   readonly userKey: SymmetricCryptoKey;
+  /** Trousseau complet : clé du coffre + clés d'organisation déballées. */
+  readonly keys: CipherKeys;
   readonly items: readonly CipherOverview[];
   readonly raw: ReadonlyMap<string, CipherResponse>;
-  readonly fieldErrors: number;
+  /** Échecs de déchiffrement rencontrés, pour le diagnostic à l'écran. */
+  readonly errors: readonly unknown[];
+}
+
+/** Regroupe les erreurs par nom, pour un diagnostic lisible. */
+function groupErrors(errors: readonly unknown[]): ReadonlyArray<readonly [string, number]> {
+  const grouped = new Map<string, number>();
+  for (const error of errors) {
+    const name = error instanceof Error ? error.name : 'Erreur inconnue';
+    grouped.set(name, (grouped.get(name) ?? 0) + 1);
+  }
+  return [...grouped.entries()].sort((a, b) => b[1] - a[1]);
 }
 
 /** Fournisseurs dont la popup sait recueillir le code. */
@@ -79,23 +96,61 @@ const PROVIDER_LABELS: Readonly<Record<string, string>> = {
   [String(TwoFactorProvider.YubiKey)]: 'YubiKey (mode OTP — toucher la clé)',
 };
 
-/** Domaine de l'onglet actif, ou `null` hors contexte pertinent. */
-async function activeTabHost(): Promise<string | null> {
+/** Onglet actif, s'il pointe une page web. */
+async function activeWebTab(): Promise<{ tabId: number; url: URL } | null> {
   if (typeof chrome === 'undefined' || typeof chrome.tabs?.query === 'undefined') {
     return null;
   }
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.url === undefined) {
+    if (tab?.id === undefined || tab.url === undefined) {
       return null;
     }
     const url = new URL(tab.url);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
       return null;
     }
-    return url.hostname.replace(/^www\./, '');
+    return { tabId: tab.id, url };
   } catch {
     return null;
+  }
+}
+
+/**
+ * Remplit le premier formulaire d'identification visible de la page.
+ *
+ * Cette fonction est **sérialisée** puis exécutée dans la page via
+ * `chrome.scripting` : elle ne doit référencer aucune variable extérieure.
+ * Uniquement le cadre principal, jamais de soumission automatique.
+ */
+function fillCredentials(username: string, password: string): void {
+  const visible = (el: HTMLElement): boolean => el.getClientRects().length > 0;
+  const setValue = (input: HTMLInputElement, value: string): void => {
+    // Passer par le setter natif du prototype, pour que les frameworks qui
+    // interceptent `value` (React, etc.) voient bien le changement.
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+
+  const passwordInput = Array.from(
+    document.querySelectorAll<HTMLInputElement>('input[type="password"]'),
+  ).find(visible);
+  if (passwordInput !== undefined && password !== '') {
+    setValue(passwordInput, password);
+  }
+
+  if (username !== '') {
+    const scope = passwordInput?.form ?? document;
+    const usernameInput = Array.from(
+      scope.querySelectorAll<HTMLInputElement>(
+        'input[type="email"], input[autocomplete="username"], input[type="text"], input:not([type])',
+      ),
+    ).find(visible);
+    if (usernameInput !== undefined) {
+      setValue(usernameInput, username);
+    }
   }
 }
 
@@ -145,6 +200,7 @@ function App() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [vault, setVault] = useState<OpenVault | null>(null);
+  const [tabOrigin, setTabOrigin] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedUserId, setCopiedUserId] = useState<string | null>(null);
@@ -230,23 +286,35 @@ function App() {
     const sync = await client.sync(accessToken);
     const ciphers = sync.ciphers ?? [];
 
+    // Les échecs sont journalisés dans la console DE LA POPUP (clic droit sur
+    // la popup → Inspecter) ET résumés à l'écran — la console de la page ne
+    // les voit jamais.
+    const errors: unknown[] = [];
+    const onDecryptError = (error: unknown): void => {
+      errors.push(error);
+      console.warn('[zwarden] champ illisible :', error);
+    };
+
+    setBusy('Déballage des clés d’organisation…');
+    const keys = await buildVaultKeys(sync.profile, userKey, onDecryptError);
+
     setBusy(`Déchiffrement de ${ciphers.length} item(s)…`);
-    let fieldErrors = 0;
-    const items = await decryptCipherList(ciphers, userKey, () => {
-      fieldErrors++;
-    });
+    const items = await decryptCipherList(ciphers, keys, onDecryptError);
 
     const raw = new Map<string, CipherResponse>();
     for (const cipher of ciphers) {
       raw.set(cipher.id, cipher);
     }
 
-    setVault({ userKey, items, raw, fieldErrors });
+    setVault({ userKey, keys, items, raw, errors });
 
-    // Filtre prérempli avec le domaine de l'onglet actif — seulement s'il
-    // correspond à quelque chose, une liste vide serait déroutante.
-    const host = await activeTabHost();
-    if (host !== null && items.some((item) => matchesNeedle(item, host))) {
+    // Onglet actif : origine stricte pour « Remplir », domaine pour le filtre
+    // prérempli — seulement s'il correspond à quelque chose, une liste vide
+    // serait déroutante.
+    const tab = await activeWebTab();
+    setTabOrigin(tab === null ? null : tab.url.origin);
+    const host = tab?.url.hostname.replace(/^www\./, '');
+    if (host !== undefined && items.some((item) => matchesNeedle(item, host))) {
       setFilter(host);
     }
   }
@@ -327,7 +395,7 @@ function App() {
     setRevealed(null);
   }
 
-  async function detailsOf(item: CipherOverview): Promise<string | null> {
+  async function detailsOf(item: CipherOverview): Promise<CipherDetails | null> {
     if (vault === null) {
       return null;
     }
@@ -335,14 +403,13 @@ function App() {
     if (cipher === undefined) {
       return null;
     }
-    const details = await decryptCipherDetails(cipher, vault.userKey, (err) => {
+    return decryptCipherDetails(cipher, vault.keys, (err) => {
       setError(messageFor(err));
     });
-    return details.password;
   }
 
   async function onCopyPassword(item: CipherOverview): Promise<void> {
-    const motDePasse = await detailsOf(item);
+    const motDePasse = (await detailsOf(item))?.password ?? null;
     if (motDePasse !== null) {
       await navigator.clipboard.writeText(motDePasse);
       setCopiedId(item.id);
@@ -371,10 +438,38 @@ function App() {
       setRevealed(null);
       return;
     }
-    const motDePasse = await detailsOf(item);
+    const motDePasse = (await detailsOf(item))?.password ?? null;
     if (motDePasse !== null) {
       setRevealed({ id: item.id, password: motDePasse });
     }
+  }
+
+  /**
+   * Remplit le formulaire de l'onglet actif avec les identifiants de l'item.
+   *
+   * Uniquement sur geste explicite, et uniquement si le bouton était visible —
+   * c'est-à-dire si l'origine de l'item correspond à celle de l'onglet
+   * (`docs/EXTENSION.md`, règles d'autofill). Revérifiée ici : l'onglet a pu
+   * changer depuis le rendu.
+   */
+  async function onFill(item: CipherOverview): Promise<void> {
+    const tab = await activeWebTab();
+    if (tab === null || !matchesOrigin(item.uris, tab.url.origin)) {
+      setError('L’onglet actif ne correspond plus à cet item.');
+      return;
+    }
+
+    const details = await detailsOf(item);
+    if (details === null || (details.username === null && details.password === null)) {
+      return;
+    }
+
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.tabId },
+      func: fillCredentials,
+      args: [details.username ?? '', details.password ?? ''],
+    });
+    window.close();
   }
 
   function matchesNeedle(item: CipherOverview, needle: string): boolean {
@@ -561,8 +656,20 @@ function App() {
           value={filter}
           onInput={(e) => setFilter(e.currentTarget.value)}
         />
-        {vault.fieldErrors > 0 && (
-          <p class="erreur">{vault.fieldErrors} champ(s) illisible(s) — voir la console.</p>
+        {vault.errors.length > 0 && (
+          <details class="diagnostic">
+            <summary class="erreur">{vault.errors.length} champ(s) illisible(s) — détails</summary>
+            <ul>
+              {groupErrors(vault.errors).map(([name, count]) => (
+                <li key={name}>
+                  {name} × {count}
+                </li>
+              ))}
+            </ul>
+            <p class="aide-diag">
+              Journal complet : clic droit sur la popup → « Inspecter » → Console.
+            </p>
+          </details>
         )}
         {error !== null && <p class="erreur">{error}</p>}
         {visible.length === 0 ? (
@@ -597,7 +704,15 @@ function App() {
                   >
                     <IconOeil barre={revealed?.id === item.id} />
                   </button>
-                  <button onClick={() => void onCopyPassword(item)}>
+                  {tabOrigin !== null && matchesOrigin(item.uris, tabOrigin) && (
+                    <button
+                      title="Remplir le formulaire de l’onglet actif"
+                      onClick={() => void onFill(item)}
+                    >
+                      Remplir
+                    </button>
+                  )}
+                  <button class="secondaire" onClick={() => void onCopyPassword(item)}>
                     {copiedId === item.id ? 'Copié !' : 'Copier'}
                   </button>
                 </div>

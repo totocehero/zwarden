@@ -34,6 +34,33 @@ import { EncString } from '../crypto/encString.js';
 import { decryptBytes, decryptStringOrNull } from '../crypto/cryptoService.js';
 import { SymmetricCryptoKey } from '../crypto/symmetricCryptoKey.js';
 import { type CipherResponse, readField } from '../api/models.js';
+import { MissingOrgKeyError, type VaultKeys, keyForCipher } from './keyring.js';
+
+/**
+ * Clés acceptées par les fonctions de déchiffrement : la clé du coffre seule
+ * (coffre sans organisation), ou le trousseau complet.
+ */
+export type CipherKeys = SymmetricCryptoKey | VaultKeys;
+
+/**
+ * Clé de base d'un item. Pour un item d'organisation sans clé déballée,
+ * notifie `onError` et rend `null` — l'item sera présenté illisible, sans
+ * faire échouer la liste.
+ */
+function baseKeyFor(
+  cipher: CipherResponse,
+  keys: CipherKeys,
+  onError: (error: unknown) => void,
+): SymmetricCryptoKey | null {
+  if (keys instanceof SymmetricCryptoKey) {
+    return keys;
+  }
+  const key = keyForCipher(cipher, keys);
+  if (key === null) {
+    onError(new MissingOrgKeyError(readField<string>(cipher, 'organizationId') ?? 'inconnue'));
+  }
+  return key;
+}
 
 /** Vue de liste : le nécessaire pour afficher, chercher et filtrer. */
 export interface CipherOverview {
@@ -69,9 +96,10 @@ type RawUriEntry = Record<string, unknown>;
  * Résout la clé qui déchiffre les champs d'un item.
  *
  * @param cipher Item brut, tel que renvoyé par la synchronisation.
- * @param userKey Clé du coffre.
+ * @param userKey Clé de base de l'item : celle du coffre, ou celle de son
+ *   organisation.
  * @returns La clé propre à l'item si `cipher.key` est présent, sinon la clé
- *   du coffre elle-même.
+ *   de base elle-même.
  * @throws {EncStringParseError | MacMismatchError} Si la clé enveloppée est
  *   malformée ou falsifiée — l'item entier est alors illisible.
  */
@@ -98,22 +126,27 @@ function readLogin(cipher: CipherResponse): Record<string, unknown> | undefined 
  * aux champs `null`, et l'échec est notifié via `onError`.
  *
  * @param cipher Item brut.
- * @param userKey Clé du coffre.
+ * @param keys Clé du coffre seule, ou trousseau complet (organisations).
  * @param onError Notification de chaque champ ou clé illisible.
  * @returns Vue de liste, champs illisibles à `null`.
  */
 export async function decryptCipherOverview(
   cipher: CipherResponse,
-  userKey: SymmetricCryptoKey,
+  keys: CipherKeys,
   onError: (error: unknown) => void,
 ): Promise<CipherOverview> {
   const id = readField<string>(cipher, 'id') ?? '';
   const type = readField<number>(cipher, 'type') ?? 0;
   const organizationId = readField<string | null>(cipher, 'organizationId') ?? null;
 
+  const baseKey = baseKeyFor(cipher, keys, onError);
+  if (baseKey === null) {
+    return { id, type, name: null, username: null, uris: [], organizationId };
+  }
+
   let itemKey: SymmetricCryptoKey;
   try {
-    itemKey = await resolveItemKey(cipher, userKey);
+    itemKey = await resolveItemKey(cipher, baseKey);
   } catch (error) {
     onError(error);
     return { id, type, name: null, username: null, uris: [], organizationId };
@@ -138,18 +171,23 @@ export async function decryptCipherOverview(
  * Déchiffre les champs sensibles d'un item, à la demande.
  *
  * @param cipher Item brut.
- * @param userKey Clé du coffre.
+ * @param keys Clé du coffre seule, ou trousseau complet (organisations).
  * @param onError Notification de chaque champ ou clé illisible.
  * @returns Champs sensibles, illisibles à `null`.
  */
 export async function decryptCipherDetails(
   cipher: CipherResponse,
-  userKey: SymmetricCryptoKey,
+  keys: CipherKeys,
   onError: (error: unknown) => void,
 ): Promise<CipherDetails> {
+  const baseKey = baseKeyFor(cipher, keys, onError);
+  if (baseKey === null) {
+    return { username: null, password: null, totp: null, notes: null };
+  }
+
   let itemKey: SymmetricCryptoKey;
   try {
-    itemKey = await resolveItemKey(cipher, userKey);
+    itemKey = await resolveItemKey(cipher, baseKey);
   } catch (error) {
     onError(error);
     return { username: null, password: null, totp: null, notes: null };
@@ -175,14 +213,14 @@ export async function decryptCipherDetails(
  * est préservé.
  *
  * @param ciphers Items bruts, typiquement `sync.ciphers`.
- * @param userKey Clé du coffre.
+ * @param keys Clé du coffre seule, ou trousseau complet (organisations).
  * @param onError Notification de chaque champ ou clé illisible.
  * @param concurrency Déchiffrements simultanés.
  * @returns Vues de liste, dans l'ordre d'entrée.
  */
 export async function decryptCipherList(
   ciphers: readonly CipherResponse[],
-  userKey: SymmetricCryptoKey,
+  keys: CipherKeys,
   onError: (error: unknown) => void,
   concurrency = DEFAULT_CONCURRENCY,
 ): Promise<CipherOverview[]> {
@@ -194,7 +232,7 @@ export async function decryptCipherList(
   const workers = Array.from({ length: Math.max(1, Math.min(concurrency, ciphers.length)) }, async () => {
     while (next < ciphers.length) {
       const index = next++;
-      out[index] = await decryptCipherOverview(ciphers[index]!, userKey, onError);
+      out[index] = await decryptCipherOverview(ciphers[index]!, keys, onError);
     }
   });
 

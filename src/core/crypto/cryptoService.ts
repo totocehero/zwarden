@@ -41,7 +41,15 @@
 
 import { EncString, EncryptionType } from './encString.js';
 import { concatBytes, fromUtf8Bytes, toUtf8Bytes } from './encoding.js';
-import { aesCbcDecrypt, aesCbcEncrypt, hmacSha256, hmacSha256Verify, randomBytes } from './primitives.js';
+import {
+  aesCbcDecrypt,
+  aesCbcEncrypt,
+  hmacSha256,
+  hmacSha256Verify,
+  importRsaOaepPrivateKey,
+  randomBytes,
+  rsaOaepDecrypt,
+} from './primitives.js';
 import type { SymmetricCryptoKey } from './symmetricCryptoKey.js';
 
 /**
@@ -225,6 +233,44 @@ async function decryptLegacyUnauthenticated(
   }
 
   return aesCbcDecrypt(await key.getEncCryptoKey(), encString.iv!, encString.ciphertext);
+}
+
+/**
+ * Déchiffre une donnée RSA (types 3 et 4) avec la clé privée du compte.
+ *
+ * Usage unique dans l'écosystème Bitwarden : déballer les **clés
+ * d'organisation**, que le serveur partage chiffrées vers la clé publique de
+ * chaque membre. Le type réellement émis est le 4 (OAEP SHA-1) ; le 3 (OAEP
+ * SHA-256) est accepté par complétude. Les types 5 et 6 (RSA + MAC) sont un
+ * legacy jamais généralisé : refusés.
+ *
+ * @param encString Donnée chiffrée analysée, de type 3 ou 4.
+ * @param pkcs8PrivateKey Clé privée RSA du compte, DER/PKCS#8 — elle-même
+ *   obtenue en déchiffrant `profile.privateKey` avec la clé du coffre.
+ * @returns Données en clair.
+ * @throws {UnsupportedEncryptionError} Si le type n'est pas 3 ou 4.
+ * @throws {DOMException} Si le bloc ne se déchiffre pas avec cette clé.
+ */
+export async function decryptRsaBytes(
+  encString: EncString,
+  pkcs8PrivateKey: Uint8Array,
+): Promise<Uint8Array> {
+  let hash: 'SHA-1' | 'SHA-256';
+  switch (encString.encryptionType) {
+    case EncryptionType.Rsa2048_OaepSha256_B64:
+      hash = 'SHA-256';
+      break;
+    case EncryptionType.Rsa2048_OaepSha1_B64:
+      hash = 'SHA-1';
+      break;
+    default:
+      throw new UnsupportedEncryptionError(
+        `Type ${encString.encryptionType} : déchiffrement RSA limité aux types 3 et 4`,
+      );
+  }
+
+  const privateKey = await importRsaOaepPrivateKey(pkcs8PrivateKey, hash);
+  return rsaOaepDecrypt(privateKey, encString.ciphertext);
 }
 
 /**

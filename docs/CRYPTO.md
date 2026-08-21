@@ -219,7 +219,12 @@ des bits arbitraires du premier bloc en clair ; il est donc authentifié.
 | 0 | AES-256-CBC, sans MAC | legacy ⚠ | refusé |
 | 1 | AES-128-CBC + HMAC | refusé | refusé |
 | 2 | AES-256-CBC + HMAC-SHA256 | oui | **oui** |
-| 3–6 | RSA-2048 OAEP | hors périmètre | hors périmètre |
+| 3–4 | RSA-2048 OAEP | clés d'organisation uniquement | refusé |
+| 5–6 | RSA-2048 OAEP + HMAC | refusé (legacy jamais généralisé) | refusé |
+
+Le RSA ne sert qu'à déballer les **clés d'organisation** (`keyring.ts`) : la
+clé privée du compte, elle-même enveloppée par la clé du coffre, déchiffre la
+clé de chaque organisation, qui déchiffre ensuite ses items en AES type 2.
 
 ---
 
@@ -376,5 +381,7 @@ des identifiants d'items.
 - Argon2id contre un vrai serveur (testé unitairement, pas en interopérabilité)
 - Items à clé propre (`cipher.key`) — le code les gère, aucun échantillon réel
   rencontré
-- Coffres d'organisation et déchiffrement RSA
+- Coffres d'organisation contre un vrai serveur — la chaîne RSA complète est
+  validée unitairement (paire RSA simulée, profil reconstitué), pas encore en
+  interopérabilité
 - Pièces jointes
