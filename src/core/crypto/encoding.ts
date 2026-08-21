@@ -1,127 +1,158 @@
 /**
- * Primitives d'encodage sans dépendance.
+ * @file Conversions d'encodage et comparaisons sûres.
  *
- * Tout est exprimé en Uint8Array. On n'expose jamais de `string` binaire
- * (« binary string ») en dehors de ce module : c'est une source classique de
- * corruption silencieuse sur les octets >= 0x80.
+ * Convention du projet : toute donnée binaire circule en `Uint8Array`. On ne
+ * laisse jamais fuiter de « binary string » (chaîne dont chaque code unit
+ * représente un octet) hors de ce module — c'est une source classique de
+ * corruption silencieuse dès qu'un octet dépasse 0x7f et qu'un `TextEncoder`
+ * repasse dessus.
+ *
+ * Ces fonctions manipulent du matériel de clé et des ciphertexts : toute
+ * modification ici doit être accompagnée d'un aller-retour sur les 256 valeurs
+ * d'octet (voir `tests/encoding.test.ts`).
  */
 
-const B64_LOOKUP = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+/**
+ * Découpage utilisé pour `String.fromCharCode(...)`.
+ *
+ * L'opérateur spread se traduit par un appel avec autant d'arguments que
+ * d'éléments ; au-delà de quelques dizaines de milliers, on déborde la pile.
+ * 8192 reste très en dessous de la limite tout en amortissant le coût d'appel.
+ */
+const FROM_CHAR_CODE_CHUNK = 8192;
 
-/** Table inverse construite une fois, indexée par code ASCII. */
-const B64_REVERSE = /* @__PURE__ */ (() => {
-  const table = new Uint8Array(256).fill(255);
-  for (let i = 0; i < B64_LOOKUP.length; i++) {
-    table[B64_LOOKUP.charCodeAt(i)] = i;
-  }
-  // Alphabet URL-safe accepté en entrée, par tolérance.
-  table['-'.charCodeAt(0)] = 62;
-  table['_'.charCodeAt(0)] = 63;
-  return table;
-})();
-
+/**
+ * Encode des octets en base64 standard (RFC 4648 §4), avec padding.
+ *
+ * S'appuie sur `btoa`, disponible dans tous les contextes d'extension
+ * (fenêtre, service worker, content script). Une implémentation manuelle a été
+ * mesurée : elle est plus lente que la primitive de la plateforme à l'encodage
+ * comme au décodage (voir `scripts/bench-base64.mjs`). Le code natif gagne sur
+ * les deux tableaux, il n'y a donc aucune raison de le réimplémenter.
+ *
+ * @param bytes Octets à encoder.
+ * @returns Chaîne base64 avec padding `=`.
+ */
 export function toBase64(bytes: Uint8Array): string {
-  let out = '';
-  const len = bytes.length;
-  const remainder = len % 3;
-  const limit = len - remainder;
-
-  for (let i = 0; i < limit; i += 3) {
-    const n = (bytes[i]! << 16) | (bytes[i + 1]! << 8) | bytes[i + 2]!;
-    out +=
-      B64_LOOKUP[(n >>> 18) & 63]! +
-      B64_LOOKUP[(n >>> 12) & 63]! +
-      B64_LOOKUP[(n >>> 6) & 63]! +
-      B64_LOOKUP[n & 63]!;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += FROM_CHAR_CODE_CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + FROM_CHAR_CODE_CHUNK));
   }
-
-  if (remainder === 1) {
-    const n = bytes[limit]!;
-    out += B64_LOOKUP[n >>> 2]! + B64_LOOKUP[(n << 4) & 63]! + '==';
-  } else if (remainder === 2) {
-    const n = (bytes[limit]! << 8) | bytes[limit + 1]!;
-    out += B64_LOOKUP[n >>> 10]! + B64_LOOKUP[(n >>> 4) & 63]! + B64_LOOKUP[(n << 2) & 63]! + '=';
-  }
-
-  return out;
+  return btoa(binary);
 }
 
+/**
+ * Décode une chaîne base64 vers des octets.
+ *
+ * Tolérant en entrée, volontairement : les espaces et retours ligne sont
+ * ignorés et l'alphabet URL-safe (`-` et `_`) est accepté. Les payloads
+ * transitent par plusieurs implémentations serveur et clients tiers ; refuser
+ * un coffre déchiffrable pour un `\n` parasite serait une régression
+ * fonctionnelle sans bénéfice de sécurité.
+ *
+ * Le padding manquant est reconstitué : `atob` le refuse, mais un base64
+ * non paddé reste décodable sans ambiguïté.
+ *
+ * @param input Chaîne base64, standard ou URL-safe.
+ * @returns Octets décodés.
+ * @throws {DOMException} Si l'entrée contient des caractères hors alphabet
+ *   après normalisation.
+ */
 export function fromBase64(input: string): Uint8Array {
-  // On ignore le padding et tout caractère hors alphabet plutôt que de jeter :
-  // les payloads serveur contiennent parfois des espaces parasites.
-  let clean = 0;
-  const codes = new Uint8Array(input.length);
-  for (let i = 0; i < input.length; i++) {
-    const v = B64_REVERSE[input.charCodeAt(i)]!;
-    if (v !== 255) {
-      codes[clean++] = v;
-    }
-  }
+  const normalized = input.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), '=');
 
-  const out = new Uint8Array((clean * 3) >>> 2);
-  let o = 0;
-  let i = 0;
-  for (; i + 4 <= clean; i += 4) {
-    const n = (codes[i]! << 18) | (codes[i + 1]! << 12) | (codes[i + 2]! << 6) | codes[i + 3]!;
-    out[o++] = (n >>> 16) & 255;
-    out[o++] = (n >>> 8) & 255;
-    out[o++] = n & 255;
+  const binary = atob(padded);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    out[i] = binary.charCodeAt(i);
   }
-  const tail = clean - i;
-  if (tail === 3) {
-    const n = (codes[i]! << 18) | (codes[i + 1]! << 12) | (codes[i + 2]! << 6);
-    out[o++] = (n >>> 16) & 255;
-    out[o++] = (n >>> 8) & 255;
-  } else if (tail === 2) {
-    const n = (codes[i]! << 18) | (codes[i + 1]! << 12);
-    out[o++] = (n >>> 16) & 255;
-  }
-
-  return o === out.length ? out : out.subarray(0, o);
+  return out;
 }
 
 const UTF8_ENCODER = /* @__PURE__ */ new TextEncoder();
 const UTF8_DECODER = /* @__PURE__ */ new TextDecoder('utf-8', { fatal: false });
 
+/**
+ * Encode du texte en UTF-8.
+ *
+ * @param text Texte source.
+ * @returns Octets UTF-8.
+ */
 export function toUtf8Bytes(text: string): Uint8Array {
   return UTF8_ENCODER.encode(text);
 }
 
+/**
+ * Décode des octets UTF-8 en texte.
+ *
+ * Le décodeur est non strict (`fatal: false`) : une séquence invalide produit
+ * U+FFFD plutôt qu'une exception. C'est délibéré — un champ de coffre corrompu
+ * doit rester affichable et signalable, pas faire échouer la synchronisation.
+ *
+ * @param bytes Octets UTF-8.
+ * @returns Texte décodé, caractères invalides remplacés par U+FFFD.
+ */
 export function fromUtf8Bytes(bytes: Uint8Array): string {
   return UTF8_DECODER.decode(bytes);
 }
 
+/**
+ * Concatène plusieurs tampons en un seul.
+ *
+ * @param parts Tampons à concaténer, dans l'ordre.
+ * @returns Nouveau tampon contenant la concaténation.
+ */
 export function concatBytes(...parts: Uint8Array[]): Uint8Array {
   let total = 0;
-  for (const p of parts) total += p.length;
+  for (const part of parts) {
+    total += part.length;
+  }
+
   const out = new Uint8Array(total);
   let offset = 0;
-  for (const p of parts) {
-    out.set(p, offset);
-    offset += p.length;
+  for (const part of parts) {
+    out.set(part, offset);
+    offset += part.length;
   }
   return out;
 }
 
 /**
- * Comparaison à temps constant.
+ * Compare deux tampons en temps constant.
  *
- * Indispensable pour la vérification de MAC : une comparaison naïve avec
- * court-circuit laisse fuiter la position du premier octet divergent, ce qui
- * suffit à forger un MAC octet par octet.
+ * Indispensable pour la vérification de MAC. Une comparaison naïve s'arrête au
+ * premier octet divergent : le temps de réponse révèle alors combien d'octets
+ * de tête sont corrects, ce qui permet de forger un MAC valide octet par octet
+ * en 256 × 32 requêtes au lieu de 2^256.
+ *
+ * La durée dépend uniquement de la longueur des entrées, jamais de leur
+ * contenu. Ici les MAC font toujours 32 octets, donc la longueur n'est pas un
+ * secret ; on évite malgré tout tout retour anticipé.
+ *
+ * @param a Premier tampon.
+ * @param b Second tampon.
+ * @returns `true` si les tampons sont identiques.
  */
 export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
-  // La longueur n'est pas un secret ici (toujours 32 octets pour HMAC-SHA256),
-  // mais on évite malgré tout un retour anticipé exploitable.
   let diff = a.length ^ b.length;
-  const len = Math.max(a.length, b.length);
-  for (let i = 0; i < len; i++) {
+  const length = Math.max(a.length, b.length);
+  for (let i = 0; i < length; i++) {
     diff |= (a[i] ?? 0) ^ (b[i] ?? 0);
   }
   return diff === 0;
 }
 
-/** Écrase un tampon sensible. Best-effort : le GC peut avoir déjà copié. */
+/**
+ * Écrase un tampon sensible en place.
+ *
+ * Best-effort assumé. Un moteur JS à GC générationnel a pu recopier le tampon
+ * lors d'une promotion mémoire, et rien en JavaScript ne permet de garantir
+ * l'effacement de ces copies. Cela réduit la fenêtre d'exposition (dumps
+ * mémoire, hibernation) sans l'éliminer.
+ *
+ * @param bytes Tampon à effacer.
+ */
 export function wipe(bytes: Uint8Array): void {
   bytes.fill(0);
 }

@@ -250,15 +250,15 @@ describe('vecteur figé (détection de régression de format)', () => {
     const { aesCbcEncrypt, hmacSha256 } = await import('../src/core/crypto/primitives.js');
     const { concatBytes, toUtf8Bytes } = await import('../src/core/crypto/encoding.js');
 
-    const ct = await aesCbcEncrypt(key.encKey, IV_FIXE, toUtf8Bytes('newvarden'));
+    const ct = await aesCbcEncrypt(key.encKey, IV_FIXE, toUtf8Bytes('zwarden'));
     const mac = await hmacSha256(key.macKey!, concatBytes(IV_FIXE, ct));
     const enc = EncString.fromParts(EncryptionType.AesCbc256_HmacSha256_B64, IV_FIXE, ct, mac);
 
     expect(enc.toString()).toBe(
       '2.paWlpaWlpaWlpaWlpaWlpQ==' +
-        '|FvtbUF97PEfpJBxjxZKE+g==' +
-        '|0n8phoFwQp6/XiVjOLk+KWmNCbbatnejsxWlKLtPmPw=',
+        '|zcMvGS9B2UbJTTRy/fUbZA==' +
+        '|dafCZJOaO0kn9JgId9yUPywdV0Hhs1p97HA2Rj9ltuk=',
     );
-    expect(await decryptString(enc, key)).toBe('newvarden');
+    expect(await decryptString(enc, key)).toBe('zwarden');
   });
 });

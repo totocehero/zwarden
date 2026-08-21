@@ -1,4 +1,4 @@
-# NewVarden
+# Zwarden
 
 Extension navigateur de gestion de mots de passe, open source, compatible
 [Vaultwarden](https://github.com/dani-garcia/vaultwarden) et l'API Bitwarden.
@@ -16,7 +16,7 @@ L'extension Bitwarden officielle (2026.7.0) mesurée sur disque :
 | `bootstrap-autofill-overlay.js` | 1,7 Mo | injecté dans **chaque frame** de **chaque page** visitée |
 | popup Angular | ~2 Mo | plusieurs centaines de ms avant le premier rendu |
 
-NewVarden vise **< 300 Ko** au total.
+Zwarden vise **< 300 Ko** au total.
 
 Les leviers, dans l'ordre d'impact :
 
@@ -41,7 +41,7 @@ Le noyau cryptographique est implémenté et testé. Le reste est en cours.
 - [x] `SymmetricCryptoKey` — clés 32/64 octets
 - [x] AES-256-CBC + HMAC-SHA256, Encrypt-then-MAC
 - [x] Dérivation de clé : PBKDF2-SHA256 et Argon2id
-- [x] 103 tests, dont les vecteurs RFC 4231 / 5869 / 7914
+- [x] 106 tests, dont les vecteurs RFC 4231 / 5869 / 7914
 - [ ] Client API Vaultwarden
 - [ ] Service worker et cycle de vie du verrouillage
 - [ ] Popup (déverrouillage, liste, recherche, copie)
@@ -66,7 +66,7 @@ Décisions notables, dont certaines sont plus strictes que Bitwarden :
   une erreur. Le type 0 reste lisible pour la migration d'anciens coffres.
 - **Paramètres KDF validés.** `iterations` et `memory` viennent du serveur
   *avant* authentification : un serveur compromis peut annoncer 1 itération pour
-  rendre la clé maître triviale à casser hors ligne. NewVarden rejette les
+  rendre la clé maître triviale à casser hors ligne. Zwarden rejette les
   configurations en dessous du plancher OWASP. Bitwarden ne fait pas cette
   vérification.
 - **AES-128 (type 1) refusé** en déchiffrement : ré-chiffrement requis.
@@ -88,10 +88,15 @@ interopérables dans les deux sens :
 
 ```bash
 npm install
-npm test          # 103 tests
+npm test          # 106 tests
 npm run typecheck # TypeScript strict
 npm run build
 ```
+
+## Documentation
+
+- [`docs/CRYPTO.md`](docs/CRYPTO.md) — modèle de menace, hiérarchie des clés,
+  schéma de chiffrement, durcissements et leurs justifications.
 
 ## Licence
 

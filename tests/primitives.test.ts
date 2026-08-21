@@ -83,8 +83,17 @@ describe('HKDF-Expand SHA-256 (vecteurs RFC 5869)', () => {
 });
 
 describe('fromBase64 sur des entrées adverses', () => {
-  it('ne jette pas sur des données tronquées', () => {
-    expect(() => fromBase64('Z')).not.toThrow();
-    expect(() => fromBase64('!!!!')).not.toThrow();
+  // Le décodage s'appuie sur `atob`, qui rejette les entrées invalides.
+  // C'est le comportement voulu : sur du matériel cryptographique, ignorer
+  // silencieusement des octets illisibles masquerait une corruption de coffre
+  // ou une réponse serveur falsifiée. `EncString.parse` traduit ensuite ces
+  // échecs en `EncStringParseError`.
+  it.each(['Z', '!!!!', 'a=b=c'])('rejette l’entrée invalide %j', (input) => {
+    expect(() => fromBase64(input)).toThrow();
+  });
+
+  it('accepte un base64 non paddé', () => {
+    expect(fromBase64('Zm9vYmE')).toEqual(toUtf8Bytes('fooba'));
+    expect(fromBase64('Zg')).toEqual(toUtf8Bytes('f'));
   });
 });

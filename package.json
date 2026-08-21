@@ -1,5 +1,5 @@
 {
-  "name": "newvarden",
+  "name": "zwarden",
   "version": "0.1.0",
   "description": "Gestionnaire de mots de passe open source, compatible Vaultwarden / API Bitwarden. Conçu pour la légèreté.",
   "license": "AGPL-3.0-only",

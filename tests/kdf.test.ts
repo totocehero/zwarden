@@ -5,9 +5,9 @@ import {
   KdfType,
   WeakKdfError,
   assertKdfIsAcceptable,
-  deriveLocalPasswordHash,
+  HashPurpose,
+  derivePasswordHash,
   deriveMasterKey,
-  deriveMasterPasswordHash,
   stretchMasterKey,
   type KdfConfig,
 } from '../src/core/crypto/kdf.js';
@@ -138,27 +138,27 @@ describe('étirement de la clé maître', () => {
 describe('hash du mot de passe maître', () => {
   it('produit 32 octets en base64', async () => {
     const master = await deriveMasterKey('mdp', 'a@b.c', PBKDF2_RAPIDE);
-    const hash = await deriveMasterPasswordHash(master, 'mdp');
+    const hash = await derivePasswordHash(master, 'mdp', HashPurpose.ServerAuthorization);
     expect(hash).toMatch(/^[A-Za-z0-9+/]{43}=$/);
   });
 
   it('diffère du hash local (le serveur ne peut pas rejouer le hash stocké)', async () => {
     const master = await deriveMasterKey('mdp', 'a@b.c', PBKDF2_RAPIDE);
-    const serveur = await deriveMasterPasswordHash(master, 'mdp');
-    const local = await deriveLocalPasswordHash(master, 'mdp');
+    const serveur = await derivePasswordHash(master, 'mdp', HashPurpose.ServerAuthorization);
+    const local = await derivePasswordHash(master, 'mdp', HashPurpose.LocalAuthorization);
     expect(serveur).not.toBe(local);
   });
 
   it('ne divulgue pas la clé maître', async () => {
     const master = await deriveMasterKey('mdp', 'a@b.c', PBKDF2_RAPIDE);
-    const hash = await deriveMasterPasswordHash(master, 'mdp');
+    const hash = await derivePasswordHash(master, 'mdp', HashPurpose.ServerAuthorization);
     expect(hash).not.toBe(master.toBase64());
   });
 
   it('change avec le mot de passe', async () => {
     const master = await deriveMasterKey('mdp', 'a@b.c', PBKDF2_RAPIDE);
-    expect(await deriveMasterPasswordHash(master, 'mdp')).not.toBe(
-      await deriveMasterPasswordHash(master, 'autre'),
+    expect(await derivePasswordHash(master, 'mdp', HashPurpose.ServerAuthorization)).not.toBe(
+      await derivePasswordHash(master, 'autre', HashPurpose.ServerAuthorization),
     );
   });
 });
