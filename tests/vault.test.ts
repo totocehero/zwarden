@@ -39,6 +39,7 @@ import {
   resolveItemKey,
 } from '../src/core/vault/cipherService.js';
 import { MissingOrgKeyError, buildVaultKeys } from '../src/core/vault/keyring.js';
+import { decryptLabels } from '../src/core/vault/labels.js';
 import { matchesOrigin, uriOrigin } from '../src/core/vault/uriMatch.js';
 import { UnlockError, unlock } from '../src/core/vault/session.js';
 
@@ -89,6 +90,8 @@ describe('cipherService', () => {
       uris: ['https://banque.exemple.fr'],
       hasPasskey: false,
       organizationId: null,
+      folderId: null,
+      collectionIds: [],
     });
     expect(erreurs).toHaveLength(0);
   });
@@ -496,6 +499,87 @@ describe('trousseau d’organisations (keyring)', () => {
     const keys = await buildVaultKeys(profilCassé, userKey, (e) => erreurs.push(e));
     expect(keys.orgKeys.size).toBe(0);
     expect(erreurs).toHaveLength(1);
+  });
+});
+
+describe('étiquettes : dossiers et collections (labels)', () => {
+  let userKey: SymmetricCryptoKey;
+  let orgKey: SymmetricCryptoKey;
+
+  beforeAll(() => {
+    userKey = SymmetricCryptoKey.generate();
+    orgKey = SymmetricCryptoKey.generate();
+  });
+
+  it('déchiffre dossiers (clé du coffre) et collections (clé d’organisation)', async () => {
+    const erreurs: unknown[] = [];
+    const sync: SyncResponse = {
+      profile: {
+        organizations: [{ id: 'org-1', name: 'Famille' }],
+      },
+      folders: [
+        { id: 'f-1', name: await enc('Travail', userKey) },
+        { id: 'f-2', name: await enc('Perso', userKey) },
+      ],
+      collections: [
+        { id: 'c-1', organizationId: 'org-1', name: await enc('Banque', orgKey), readOnly: false },
+        { id: 'c-2', organizationId: 'org-1', name: await enc('Archives', orgKey), readOnly: true },
+      ],
+    };
+    const keys = { userKey, orgKeys: new Map([['org-1', orgKey]]) };
+
+    const labels = await decryptLabels(sync, keys, (e) => erreurs.push(e));
+
+    expect(erreurs).toHaveLength(0);
+    expect(labels.folders.get('f-1')).toBe('Travail');
+    expect(labels.folders.get('f-2')).toBe('Perso');
+    expect(labels.collections.get('c-1')).toEqual({
+      name: 'Banque',
+      organizationId: 'org-1',
+      readOnly: false,
+    });
+    expect(labels.collections.get('c-2')?.readOnly).toBe(true);
+    expect(labels.organizations.get('org-1')).toBe('Famille');
+  });
+
+  it('ignore et signale une collection dont l’organisation n’a pas de clé', async () => {
+    const erreurs: unknown[] = [];
+    const sync: SyncResponse = {
+      collections: [
+        { id: 'c-x', organizationId: 'org-inconnue', name: await enc('Invisible', orgKey) },
+      ],
+    };
+
+    const labels = await decryptLabels(sync, userKey, (e) => erreurs.push(e));
+
+    expect(labels.collections.size).toBe(0);
+    expect(erreurs).toHaveLength(1);
+    expect(erreurs[0]).toBeInstanceOf(MissingOrgKeyError);
+  });
+
+  it('un coffre sans dossier ni collection rend des étiquettes vides', async () => {
+    const labels = await decryptLabels({}, userKey, (e) => {
+      throw e;
+    });
+    expect(labels.folders.size).toBe(0);
+    expect(labels.collections.size).toBe(0);
+    expect(labels.organizations.size).toBe(0);
+  });
+
+  it('la vue de liste transporte folderId et collectionIds', async () => {
+    const cipher: CipherResponse = {
+      id: 'item-x',
+      type: 1,
+      name: await enc('Étiqueté', userKey),
+      folderId: 'f-1',
+      collectionIds: ['c-1', 'c-2'],
+    };
+
+    const vue = await decryptCipherOverview(cipher, userKey, (e) => {
+      throw e;
+    });
+    expect(vue.folderId).toBe('f-1');
+    expect(vue.collectionIds).toEqual(['c-1', 'c-2']);
   });
 });
 

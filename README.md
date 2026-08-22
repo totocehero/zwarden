@@ -43,7 +43,7 @@ Le noyau cryptographique est implémenté et testé. Le reste est en cours.
 - [x] `SymmetricCryptoKey` — clés 32/64 octets
 - [x] AES-256-CBC + HMAC-SHA256, Encrypt-then-MAC
 - [x] Dérivation de clé : PBKDF2-SHA256 et Argon2id
-- [x] 197 tests, dont les vecteurs RFC 4231 / 5869 / 7914
+- [x] 225 tests, dont les vecteurs RFC 4231 / 5869 / 7914
 - [x] **Interopérabilité validée contre Vaultwarden 2026.6.0** — authentification,
       déchiffrement de la clé de coffre, et aller-retour écriture/lecture complet
 - [x] Client API : prelogin, authentification, rafraîchissement de session,
@@ -58,6 +58,8 @@ Le noyau cryptographique est implémenté et testé. Le reste est en cours.
       migrants) et « Zwarden » (filtrée sur l'onglet actif, pilotage clavier)
 - [x] Coffres d'organisation : clé privée RSA et clés d'organisation
       déballées, items partagés lisibles
+- [x] Tags : dossiers et collections déchiffrés, chips filtrantes (phase 1/3
+      — assignation puis partage par tag à venir)
 - [x] Remplissage depuis la popup — geste explicite, correspondance
       d'origine stricte
 - [x] Édition d'items depuis la popup — champs préservés, clé d'item et
@@ -107,7 +109,7 @@ interopérables dans les deux sens :
 
 ```bash
 npm install
-npm test          # 197 tests
+npm test          # 225 tests
 npm run typecheck # TypeScript strict
 npm run build
 ```

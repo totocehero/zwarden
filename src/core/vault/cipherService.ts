@@ -81,6 +81,10 @@ export interface CipherOverview {
    */
   readonly hasPasskey: boolean;
   readonly organizationId: string | null;
+  /** Dossier personnel de l'item, ou `null`. Nom à résoudre via `labels.ts`. */
+  readonly folderId: string | null;
+  /** Collections de l'item. Noms à résoudre via `labels.ts`. */
+  readonly collectionIds: readonly string[];
 }
 
 /**
@@ -157,13 +161,27 @@ export async function decryptCipherOverview(
   const id = readField<string>(cipher, 'id') ?? '';
   const type = readField<number>(cipher, 'type') ?? 0;
   const organizationId = readField<string | null>(cipher, 'organizationId') ?? null;
+  const folderId = readField<string | null>(cipher, 'folderId') ?? null;
+  const collectionIds = readField<readonly string[]>(cipher, 'collectionIds') ?? [];
   const login = readLogin(cipher);
   const hasPasskey =
     (readField<readonly unknown[]>(login, 'fido2Credentials') ?? []).length > 0;
 
+  const vide: CipherOverview = {
+    id,
+    type,
+    name: null,
+    username: null,
+    uris: [],
+    hasPasskey,
+    organizationId,
+    folderId,
+    collectionIds,
+  };
+
   const baseKey = baseKeyFor(cipher, keys, onError);
   if (baseKey === null) {
-    return { id, type, name: null, username: null, uris: [], hasPasskey, organizationId };
+    return vide;
   }
 
   let itemKey: SymmetricCryptoKey;
@@ -171,7 +189,7 @@ export async function decryptCipherOverview(
     itemKey = await resolveItemKey(cipher, baseKey);
   } catch (error) {
     onError(error);
-    return { id, type, name: null, username: null, uris: [], hasPasskey, organizationId };
+    return vide;
   }
 
   const rawUris = readField<readonly RawUriEntry[]>(login, 'uris') ?? [];
@@ -193,6 +211,8 @@ export async function decryptCipherOverview(
     uris,
     hasPasskey,
     organizationId,
+    folderId,
+    collectionIds,
   };
 }
 

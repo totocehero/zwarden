@@ -53,6 +53,7 @@ import {
   decryptCipherList,
 } from '@core/vault/cipherService.js';
 import { buildVaultKeys } from '@core/vault/keyring.js';
+import { type VaultLabels, decryptLabels } from '@core/vault/labels.js';
 import { matchesOrigin } from '@core/vault/uriMatch.js';
 import { unlock } from '@core/vault/session.js';
 import {
@@ -78,8 +79,43 @@ interface OpenVault {
   readonly keys: CipherKeys;
   readonly items: readonly CipherOverview[];
   readonly raw: ReadonlyMap<string, CipherResponse>;
+  /** Dossiers, collections et organisations, noms déchiffrés. */
+  readonly labels: VaultLabels;
   /** Échecs de déchiffrement rencontrés, pour le diagnostic à l'écran. */
   readonly errors: readonly unknown[];
+}
+
+/** Tag affichable sur un item : dossier ou collection. */
+interface Chip {
+  readonly kind: 'dossier' | 'collection';
+  readonly name: string;
+  readonly title: string;
+}
+
+/** Tags d'un item, noms résolus via les étiquettes du coffre. */
+function chipsFor(item: CipherOverview, labels: VaultLabels): Chip[] {
+  const chips: Chip[] = [];
+  if (item.folderId !== null) {
+    const name = labels.folders.get(item.folderId);
+    if (name !== undefined) {
+      chips.push({ kind: 'dossier', name, title: `Dossier : ${name}` });
+    }
+  }
+  for (const collectionId of item.collectionIds) {
+    const collection = labels.collections.get(collectionId);
+    if (collection !== undefined) {
+      const org =
+        collection.organizationId !== null
+          ? labels.organizations.get(collection.organizationId)
+          : undefined;
+      chips.push({
+        kind: 'collection',
+        name: collection.name,
+        title: `${org ?? 'Organisation'} — collection${collection.readOnly ? ' (lecture seule)' : ''}`,
+      });
+    }
+  }
+  return chips;
 }
 
 /** Regroupe les erreurs par nom, pour un diagnostic lisible. */
@@ -412,14 +448,17 @@ function App() {
       setBusy(`Déchiffrement de ${ciphers.length} item(s)…`);
     }
     const keys = await buildVaultKeys(sync.profile, userKey, onDecryptError);
-    const items = await decryptCipherList(ciphers, keys, onDecryptError);
+    const [items, labels] = await Promise.all([
+      decryptCipherList(ciphers, keys, onDecryptError),
+      decryptLabels(sync, keys, onDecryptError),
+    ]);
 
     const raw = new Map<string, CipherResponse>();
     for (const cipher of ciphers) {
       raw.set(cipher.id, cipher);
     }
 
-    setVault({ userKey, keys, items, raw, errors });
+    setVault({ userKey, keys, items, raw, labels, errors });
 
     // Onglet actif : origine stricte pour « Remplir », domaine pour le filtre
     // prérempli — sans écraser une recherche déjà saisie, et seulement s'il
@@ -427,7 +466,7 @@ function App() {
     const tab = await activeWebTab();
     setTabOrigin(tab === null ? null : tab.url.origin);
     const host = tab?.url.hostname.replace(/^www\./, '');
-    if (host !== undefined && items.some((item) => matchesNeedle(item, host))) {
+    if (host !== undefined && items.some((item) => matchesNeedle(item, host, labels))) {
       setFilter((current) => (current === '' ? host : current));
     }
   }
@@ -705,11 +744,12 @@ function App() {
     setError(null);
   }
 
-  function matchesNeedle(item: CipherOverview, needle: string): boolean {
+  function matchesNeedle(item: CipherOverview, needle: string, labels: VaultLabels): boolean {
     return (
       (item.name ?? '').toLowerCase().includes(needle) ||
       (item.username ?? '').toLowerCase().includes(needle) ||
-      item.uris.some((uri) => uri.toLowerCase().includes(needle))
+      item.uris.some((uri) => uri.toLowerCase().includes(needle)) ||
+      chipsFor(item, labels).some((chip) => chip.name.toLowerCase().includes(needle))
     );
   }
 
@@ -985,7 +1025,10 @@ function App() {
 
   // --- Liste du coffre ------------------------------------------------------
   const needle = filter.trim().toLowerCase();
-  const visible = needle === '' ? vault.items : vault.items.filter((i) => matchesNeedle(i, needle));
+  const visible =
+    needle === ''
+      ? vault.items
+      : vault.items.filter((i) => matchesNeedle(i, needle, vault.labels));
 
   return (
     <div>
@@ -1047,6 +1090,20 @@ function App() {
                       </div>
                     )}
                     {item.uris[0] !== undefined && <div class="item-uri">{item.uris[0]}</div>}
+                    {chipsFor(item, vault.labels).length > 0 && (
+                      <div class="chips">
+                        {chipsFor(item, vault.labels).map((chip) => (
+                          <button
+                            key={`${chip.kind}:${chip.name}`}
+                            class={`chip chip-${chip.kind}`}
+                            title={`${chip.title} — cliquer pour filtrer`}
+                            onClick={() => setFilter(chip.name)}
+                          >
+                            {chip.kind === 'dossier' ? `#${chip.name}` : `@${chip.name}`}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <button
                     class="discret oeil-item"

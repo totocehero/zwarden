@@ -110,6 +110,28 @@ export interface CipherResponse {
   /** Clé propre à l'item, si présente. Enveloppée par la clé du coffre. */
   readonly key?: string | null;
   readonly organizationId?: string | null;
+  /** Dossier personnel (un seul possible). */
+  readonly folderId?: string | null;
+  /** Collections d'organisation auxquelles l'item appartient. */
+  readonly collectionIds?: readonly string[] | null;
+}
+
+/** Dossier personnel. Le nom est chiffré avec la clé du coffre. */
+export interface FolderResponse {
+  readonly id?: string;
+  readonly name?: string | null;
+}
+
+/**
+ * Collection d'organisation — l'unité de contrôle d'accès du partage.
+ * Le nom est chiffré avec la clé de **l'organisation**, pas celle du coffre.
+ */
+export interface CollectionResponse {
+  readonly id?: string;
+  readonly organizationId?: string | null;
+  readonly name?: string | null;
+  readonly readOnly?: boolean;
+  readonly hidePasswords?: boolean;
 }
 
 /** Organisation dont le compte est membre, telle que listée dans le profil. */
@@ -133,7 +155,8 @@ export interface SyncResponse {
     readonly organizations?: readonly ProfileOrganizationResponse[] | null;
   };
   readonly ciphers?: readonly CipherResponse[];
-  readonly folders?: readonly unknown[];
+  readonly folders?: readonly FolderResponse[] | null;
+  readonly collections?: readonly CollectionResponse[] | null;
 }
 
 /**

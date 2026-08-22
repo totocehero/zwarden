@@ -307,3 +307,40 @@ button.secondaire {
   margin-left: 0;
   margin-right: 4px;
 }
+
+/* Tags (dossiers / collections) sur les items. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 3px;
+}
+
+button.chip {
+  padding: 0 6px;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 16px;
+  cursor: pointer;
+}
+
+button.chip-dossier {
+  border: 1px solid var(--bord);
+  color: var(--texte-2);
+}
+
+button.chip-dossier:hover {
+  color: var(--texte);
+}
+
+button.chip-collection {
+  border: 1px solid var(--accent);
+  color: var(--accent);
+}
+
+button.chip-collection:hover {
+  background: var(--accent);
+  color: #fff;
+}
