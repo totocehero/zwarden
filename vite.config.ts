@@ -1,11 +1,12 @@
 /**
  * @file Build de l'extension.
  *
- * Quatre entrées : les deux pages HTML (popup, options), le service worker
+ * Cinq entrées : les deux pages HTML (popup, options), le service worker
  * (module ES, nommé `background.js` à la racine de `dist/` pour correspondre
  * au manifest) et le détecteur d'identifiants (`content.js`, injecté à la
- * demande par le worker). `public/` — manifest inclus — est copié tel quel à
- * la racine de `dist/`.
+ * demande par le worker) et le document hors écran (`offscreen.js`, qui donne
+ * au worker l'accès au presse-papiers). `public/` — manifest et
+ * `offscreen.html` inclus — est copié tel quel à la racine de `dist/`.
  *
  * Le détecteur ne doit **importer personne** : un script de contenu n'est pas
  * un module ES, un `import` dans le fichier émis le casserait silencieusement
@@ -38,13 +39,19 @@ export default defineConfig({
         options: 'src/options/index.html',
         background: 'src/background/main.ts',
         content: 'src/content/detector.ts',
+        offscreen: 'src/offscreen/main.ts',
       },
       output: {
         entryFileNames: (chunk) => {
           if (chunk.name === 'background') {
             return 'background.js';
           }
-          return chunk.name === 'content' ? 'content.js' : 'assets/[name]-[hash].js';
+          if (chunk.name === 'content') {
+            return 'content.js';
+          }
+          // Nommé à la racine : `offscreen.html`, copié depuis `public/`, le
+          // référence par un chemin relatif.
+          return chunk.name === 'offscreen' ? 'offscreen.js' : 'assets/[name]-[hash].js';
         },
       },
     },

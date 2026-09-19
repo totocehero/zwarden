@@ -47,8 +47,11 @@
  * popup sans clé — remplacera progressivement ce fichier.
  */
 
+import { generatePassword } from '@core/generator/password.js';
 import {
   AUTOLOCK_ALARM_NAME,
+  CLIPBOARD_ALARM_NAME,
+  loadGeneratorOptions,
   loadLastActivity,
   loadNeverSaveHosts,
   loadSettings,
@@ -56,6 +59,7 @@ import {
   lockVault,
   recordActivity,
   savePendingSave,
+  scheduleClipboardWipe,
   setSaveBadge,
   shouldAutoLock,
   startAutoLockWatch,
@@ -111,6 +115,8 @@ async function tick(): Promise<void> {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === AUTOLOCK_ALARM_NAME) {
     void tick();
+  } else if (alarm.name === CLIPBOARD_ALARM_NAME) {
+    void writeClipboard('');
   }
 });
 
@@ -174,6 +180,88 @@ chrome.runtime.onInstalled.addListener((details) => {
 });
 
 export {};
+
+// --- Presse-papiers ----------------------------------------------------------
+
+/** Chemin du document hors écran, relatif à la racine de `dist/`. */
+const OFFSCREEN_PATH = 'offscreen.html';
+
+/** Type des messages adressés au document hors écran. */
+const CLIPBOARD_MESSAGE = 'zwarden-clipboard';
+
+/**
+ * Écrit dans le presse-papiers depuis le service worker.
+ *
+ * Un worker MV3 n'a pas de DOM, et le presse-papiers en exige un : on ouvre donc
+ * un document hors écran le temps de l'écriture, puis on le referme. Le garder
+ * ouvert coûterait un processus permanent pour une opération qui dure des
+ * millisecondes.
+ *
+ * Silencieux en cas d'échec, et c'est délibéré : l'API `offscreen` peut manquer
+ * (autre navigateur, version ancienne), auquel cas le minuteur de la popup reste
+ * le seul effacement — le comportement d'avant, jamais moins.
+ *
+ * @param text Texte à placer dans le presse-papiers. Vide = effacement.
+ */
+async function writeClipboard(text: string): Promise<void> {
+  if (typeof chrome.offscreen === 'undefined') {
+    return;
+  }
+  try {
+    await chrome.offscreen.createDocument({
+      url: OFFSCREEN_PATH,
+      reasons: [chrome.offscreen.Reason.CLIPBOARD],
+      justification:
+        'Effacement différé du presse-papiers après la copie d’un secret du coffre.',
+    });
+  } catch {
+    // Déjà ouvert : un seul document hors écran est permis par extension, et
+    // c'est exactement celui dont on a besoin.
+  }
+
+  try {
+    // Attendue : le document doit avoir confirmé avant qu'on le referme.
+    await chrome.runtime.sendMessage({ type: CLIPBOARD_MESSAGE, text });
+  } catch {
+    // Document absent ou déjà fermé : rien à rattraper.
+  } finally {
+    try {
+      await chrome.offscreen.closeDocument();
+    } catch {
+      // Déjà fermé.
+    }
+  }
+}
+
+// --- Raccourcis clavier ------------------------------------------------------
+
+/**
+ * Commandes du manifest.
+ *
+ * Seules celles qui peuvent aboutir **sans la clé du coffre** sont déclarées :
+ * le worker ne la détient pas. Le remplissage automatique par raccourci
+ * (`Ctrl+Shift+L` chez l'extension officielle) attend donc la dérivation dans le
+ * worker décrite en cible dans `docs/EXTENSION.md` — déclarer un raccourci qui
+ * ne fait rien serait pire que ne pas le déclarer.
+ */
+async function onCommand(command: string): Promise<void> {
+  if (command === 'lock-vault') {
+    await lockNow();
+    return;
+  }
+  if (command === 'generate-password') {
+    // Engendrer ne demande aucune clé : c'est ce qui rend ce raccourci possible
+    // dès maintenant.
+    const password = generatePassword(await loadGeneratorOptions());
+    await writeClipboard(password);
+    const { clipboardClearSeconds } = await loadSettings();
+    await scheduleClipboardWipe(clipboardClearSeconds);
+  }
+}
+
+if (typeof chrome.commands !== 'undefined') {
+  chrome.commands.onCommand.addListener((command) => void onCommand(command));
+}
 
 // --- Capture d'identifiants --------------------------------------------------
 

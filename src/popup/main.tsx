@@ -39,8 +39,9 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { EcranDeverrouillage, EcranSecondFacteur } from './components/EcransConnexion.js';
 import { type EditForm, EMPTY_EDIT, FormulaireEdition } from './components/FormulaireEdition.js';
 import { chipsFor, LigneItem } from './components/LigneItem.js';
-import { GardeReprompt, type RepromptState } from './components/GardeReprompt.js';
-import { PanneauGenerateur, type GeneratorState } from './components/PanneauGenerateur.js';
+import { useGenerateur } from './hooks/useGenerateur.js';
+import { useReprompt } from './hooks/useReprompt.js';
+import { GardeReprompt } from './components/GardeReprompt.js';
 import { Proposition, type SaveProposal } from './components/Proposition.js';
 
 import {
@@ -62,24 +63,23 @@ import {
   decryptCipherDetails,
   decryptCipherList,
   findSaveCandidate,
+  reuseByRevision,
   sortByLastUsed,
 } from '@core/vault/cipherService.js';
-import { deriveMasterKey, verifyLocalPasswordHash } from '@core/crypto/kdf.js';
 import { buildVaultKeys, destroyVaultKeys } from '@core/vault/keyring.js';
 import { type VaultLabels, decryptLabels } from '@core/vault/labels.js';
 import { matchesOrigin } from '@core/vault/uriMatch.js';
 import { type TotpConfig, generateTotp, parseTotp } from '@core/vault/totp.js';
-import { type PasswordOptions, generatePassword } from '@core/generator/password.js';
-import { unlock } from '@core/vault/session.js';
+import { type UnlockResult, unlock } from '@core/vault/session.js';
 import {
   type AppSettings,
+  type PendingSave,
   type StoredSession,
   DEFAULT_SETTINGS,
   addNeverSaveHost,
   clearPendingSave,
   clearRememberToken,
   getDeviceId,
-  loadGeneratorOptions,
   loadLastUsed,
   loadPendingSave,
   loadRememberToken,
@@ -89,10 +89,10 @@ import {
   markUsed,
   recordActivity,
   setSaveBadge,
-  saveGeneratorOptions,
   saveRememberToken,
   saveSettings,
   saveStoredSession,
+  scheduleClipboardWipe,
   startAutoLockWatch,
 } from '@shared/storage.js';
 
@@ -224,13 +224,6 @@ const REVEAL_HIDE_MS = 20_000;
  */
 const ACTIVITY_PING_MS = 30_000;
 
-/**
- * Délai avant d'enregistrer les options du générateur. Assez court pour que
- * la préférence survive à la fermeture de la popup dans un usage normal,
- * assez long pour qu'un glissement de curseur ne compte que pour une écriture.
- */
-const GENERATOR_SAVE_DELAY_MS = 400;
-
 /** Message d'erreur à afficher. Les codes stables priment sur les messages. */
 function messageFor(err: unknown): string {
   if (err instanceof DOMException && err.name === 'TimeoutError') {
@@ -259,15 +252,23 @@ function App() {
   const [revealed, setRevealed] = useState<{ id: string; password: string } | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [proposal, setProposal] = useState<SaveProposal | null>(null);
-  const [reprompt, setReprompt] = useState<RepromptState<void | Promise<void>> | null>(null);
+  const reprompt = useReprompt(messageFor);
 
-  // Code à usage unique affiché, et générateur de mots de passe. `generator`
-  // à `null` = panneau fermé ; sa cible dit où repartira le mot de passe
-  // engendré : dans le formulaire d'édition, ou nulle part (copie seule).
+  // Code à usage unique ouvert : `App` ne retient que l'item et les paramètres
+  // résolus, le battement appartient à `CodeOtp`.
   const [otp, setOtp] = useState<OtpView | null>(null);
   const [copiedOtp, setCopiedOtp] = useState(false);
-  const [generator, setGenerator] = useState<GeneratorState | null>(null);
-  const [copiedGenerated, setCopiedGenerated] = useState(false);
+
+  const generateur = useGenerateur({
+    onError: setError,
+    onUse: (password) => {
+      setEditForm((courant) => ({ ...courant, password }));
+      // Affiché : on vient de le fabriquer, le masquer n'a plus de sens et
+      // laisserait un doute sur ce qui sera enregistré.
+      setEditShowPassword(true);
+    },
+    onCopied: scheduleClipboardClear,
+  });
 
   // Édition : item en cours, valeurs du formulaire, mot de passe d'origine
   // (pour l'historique), visibilité du champ.
@@ -342,65 +343,101 @@ function App() {
     const userKey = SymmetricCryptoKey.fromBase64(stored.userKeyB64);
     void startAutoLockWatch(s.autoLockMinutes);
 
-    let displayed = false;
-    if (stored.cachedSync !== null) {
-      try {
-        await showVault(stored.cachedSync, userKey, false);
-        displayed = true;
-        setInitializing(false);
-      } catch {
-        // Cache inexploitable : le chemin réseau ci-dessous tranchera.
-      }
-    }
+    // Le cache d'abord : il s'affiche sans réseau, donc immédiatement. Le
+    // rafraîchissement qui suit corrigera ce qui a changé.
+    const displayed = await showCachedVault(stored, userKey);
 
     try {
-      const client = makeClient(s, stored.serverUrl, await getDeviceId());
-
-      let accessToken = stored.accessToken;
-      let refreshToken = stored.refreshToken;
-      let expiresAt = stored.expiresAt;
-      if (Date.now() > expiresAt - 60_000) {
-        if (refreshToken === null) {
-          throw new ApiError('Session expirée sans jeton de rafraîchissement', 401, '');
-        }
-        const renewed = await client.refreshToken(refreshToken);
-        accessToken = renewed.accessToken;
-        refreshToken = renewed.refreshToken ?? refreshToken;
-        expiresAt = renewed.expiresAt;
-      }
-
-      if (!displayed) {
-        setBusy('Ouverture du coffre…');
-      }
-      const sync = await client.sync(accessToken);
-      await saveStoredSession({
-        userKeyB64: stored.userKeyB64,
-        accessToken,
-        refreshToken,
-        expiresAt,
-        serverUrl: stored.serverUrl,
-        email: stored.email,
-        cachedSync: sync,
-        localPasswordHash: stored.localPasswordHash,
-        kdfConfig: stored.kdfConfig,
-      });
-      await showVault(sync, userKey, !displayed);
+      await refreshFromServer(s, stored, userKey, displayed);
     } catch (err) {
-      // Jeton refusé : la session est morte côté serveur, verrouillage net.
-      const authFailure = err instanceof ApiError && (err.status === 400 || err.status === 401);
-      if (authFailure) {
-        await lockVault();
-        userKey.destroy();
-        resetVaultState();
-      } else if (!displayed) {
-        // Panne réseau sans cache : la session est conservée pour un essai
-        // ultérieur, mais il n'y a rien à montrer.
-        setError('Serveur injoignable — réessayer, ou déverrouiller à nouveau.');
-      }
-      // Panne réseau avec cache affiché : on reste simplement sur le cache.
+      await onRestoreFailure(err, userKey, displayed);
     } finally {
       setBusy(null);
       setInitializing(false);
+    }
+  }
+
+  /**
+   * Affiche le dernier état synchronisé, s'il y en a un d'exploitable.
+   *
+   * @returns Vrai si le coffre est à l'écran — ce qui change la suite : sans
+   *   affichage, une panne réseau doit se dire ; avec, elle peut se taire.
+   */
+  async function showCachedVault(
+    stored: StoredSession,
+    userKey: SymmetricCryptoKey,
+  ): Promise<boolean> {
+    if (stored.cachedSync === null) {
+      return false;
+    }
+    try {
+      await showVault(stored.cachedSync, userKey, false);
+      setInitializing(false);
+      return true;
+    } catch {
+      // Cache inexploitable : le chemin réseau tranchera.
+      return false;
+    }
+  }
+
+  /** Renouvelle les jetons au besoin, resynchronise, et réaffiche. */
+  async function refreshFromServer(
+    s: AppSettings,
+    stored: StoredSession,
+    userKey: SymmetricCryptoKey,
+    displayed: boolean,
+  ): Promise<void> {
+    const client = makeClient(s, stored.serverUrl, await getDeviceId());
+
+    let accessToken = stored.accessToken;
+    let refreshToken = stored.refreshToken;
+    let expiresAt = stored.expiresAt;
+    if (Date.now() > expiresAt - 60_000) {
+      if (refreshToken === null) {
+        throw new ApiError('Session expirée sans jeton de rafraîchissement', 401, '');
+      }
+      const renewed = await client.refreshToken(refreshToken);
+      accessToken = renewed.accessToken;
+      refreshToken = renewed.refreshToken ?? refreshToken;
+      expiresAt = renewed.expiresAt;
+    }
+
+    if (!displayed) {
+      setBusy('Ouverture du coffre…');
+    }
+    const sync = await client.sync(accessToken);
+    await saveStoredSession({
+      ...stored,
+      accessToken,
+      refreshToken,
+      expiresAt,
+      cachedSync: sync,
+    });
+    await showVault(sync, userKey, !displayed);
+  }
+
+  /**
+   * Décide quoi faire d'un échec de restauration. Trois cas, trois conduites :
+   *
+   * - jeton refusé (400/401) : la session est morte côté serveur, verrouillage
+   *   net — la garder donnerait un coffre qui paraît ouvert et ne peut rien ;
+   * - panne réseau sans rien à l'écran : il faut le dire, la session est gardée
+   *   pour un essai ultérieur ;
+   * - panne réseau avec le cache affiché : se taire. L'utilisateur a son coffre.
+   */
+  async function onRestoreFailure(
+    err: unknown,
+    userKey: SymmetricCryptoKey,
+    displayed: boolean,
+  ): Promise<void> {
+    if (err instanceof ApiError && (err.status === 400 || err.status === 401)) {
+      await lockVault();
+      userKey.destroy();
+      resetVaultState();
+      return;
+    }
+    if (!displayed) {
+      setError('Serveur injoignable — réessayer, ou déverrouiller à nouveau.');
     }
   }
 
@@ -425,8 +462,12 @@ function App() {
       setBusy(`Déchiffrement de ${ciphers.length} item(s)…`);
     }
     const keys = await buildVaultKeys(sync.profile, userKey, onDecryptError);
+    // Les items dont la date de révision n'a pas bougé depuis l'affichage
+    // précédent sont réutilisés tels quels : après une écriture, seul l'item
+    // écrit est redéchiffré au lieu du coffre entier.
+    const reuse = vault === null ? undefined : reuseByRevision(vault.items, vault.raw);
     const [items, labels] = await Promise.all([
-      decryptCipherList(ciphers, keys, onDecryptError),
+      decryptCipherList(ciphers, keys, onDecryptError, undefined, reuse),
       decryptLabels(sync, keys, onDecryptError),
     ]);
 
@@ -462,72 +503,98 @@ function App() {
     setError(null);
     setBusy('Dérivation de la clé…');
 
-    // Persistés dès la tentative, pas seulement au succès : un échec de mot
-    // de passe ou de second facteur ne doit pas faire retaper le serveur et
+    // Persistés dès la tentative, pas seulement au succès : un échec de mot de
+    // passe ou de second facteur ne doit pas faire retaper le serveur et
     // l'e-mail à la prochaine ouverture. Jamais le mot de passe.
     await saveSettings({ serverUrl, email });
 
-    let submission = twoFactor;
-    if (submission === undefined) {
-      const remembered = await loadRememberToken(serverUrl, email);
-      if (remembered !== null) {
-        submission = { provider: TwoFactorProvider.Remember, token: remembered };
-      }
-    }
+    const submission = twoFactor ?? (await rememberedSubmission());
 
     try {
       const client = makeClient(settings, serverUrl, await getDeviceId());
       const result = await unlock(client, email, password, submission);
-      setPassword('');
-      setShowPassword(false);
-      setTwoFaProviders(null);
-      setTwoFaCode('');
-
-      if (result.twoFactorRememberToken !== undefined) {
-        await saveRememberToken(serverUrl, email, result.twoFactorRememberToken);
-      }
-
-      setBusy('Synchronisation…');
-      const sync = await client.sync(result.session.accessToken);
-
-      // La session survit à la fermeture de la popup, jusqu'à la fermeture du
-      // navigateur, l'échéance d'inactivité ou le verrouillage manuel. La
-      // synchronisation est mise en cache pour un affichage immédiat à la
-      // prochaine ouverture.
-      await saveStoredSession({
-        userKeyB64: result.userKey.toBase64(),
-        accessToken: result.session.accessToken,
-        refreshToken: result.session.refreshToken ?? null,
-        expiresAt: result.session.expiresAt,
-        serverUrl,
-        email,
-        cachedSync: sync,
-        // Conservés pour vérifier le mot de passe maître sans réseau quand un
-        // item exige de le redemander.
-        localPasswordHash: result.localPasswordHash,
-        kdfConfig: result.kdfConfig,
-      });
-      await startAutoLockWatch(settings.autoLockMinutes);
-
-      await showVault(sync, result.userKey, true);
+      await onUnlocked(client, result);
     } catch (err) {
-      if (err instanceof TwoFactorRequiredError) {
-        // Un jeton de dispense refusé est expiré : on l'oublie et on repasse
-        // par la saisie.
-        if (submission?.provider === TwoFactorProvider.Remember) {
-          await clearRememberToken(serverUrl, email);
-        }
-        const saisissables = err.providers.filter((p) => p in PROVIDER_LABELS);
-        setTwoFaProviders(err.providers);
-        setTwoFaChoice(saisissables[0] ?? '');
-        if (twoFactor !== undefined) {
-          setError('Second facteur refusé — réessayer.');
-        }
-      } else {
-        setError(messageFor(err));
-      }
+      await onUnlockFailure(err, twoFactor, submission);
     } finally {
       setBusy(null);
+    }
+  }
+
+  /** Jeton de dispense 2FA conservé pour cet appareil, s'il en existe un. */
+  async function rememberedSubmission(): Promise<TwoFactorSubmission | undefined> {
+    const remembered = await loadRememberToken(serverUrl, email);
+    return remembered === null
+      ? undefined
+      : { provider: TwoFactorProvider.Remember, token: remembered };
+  }
+
+  /** Range la session ouverte et affiche le coffre. */
+  async function onUnlocked(client: ApiClient, result: UnlockResult): Promise<void> {
+    setPassword('');
+    setShowPassword(false);
+    setTwoFaProviders(null);
+    setTwoFaCode('');
+
+    if (result.twoFactorRememberToken !== undefined) {
+      await saveRememberToken(serverUrl, email, result.twoFactorRememberToken);
+    }
+
+    setBusy('Synchronisation…');
+    const sync = await client.sync(result.session.accessToken);
+
+    // La session survit à la fermeture de la popup, jusqu'à la fermeture du
+    // navigateur, l'échéance d'inactivité ou le verrouillage manuel. La
+    // synchronisation est mise en cache pour un affichage immédiat à la
+    // prochaine ouverture.
+    await saveStoredSession({
+      userKeyB64: result.userKey.toBase64(),
+      accessToken: result.session.accessToken,
+      refreshToken: result.session.refreshToken ?? null,
+      expiresAt: result.session.expiresAt,
+      serverUrl,
+      email,
+      cachedSync: sync,
+      // Conservés pour vérifier le mot de passe maître sans réseau quand un item
+      // exige de le redemander.
+      localPasswordHash: result.localPasswordHash,
+      kdfConfig: result.kdfConfig,
+    });
+    await startAutoLockWatch(settings.autoLockMinutes);
+
+    await showVault(sync, result.userKey, true);
+  }
+
+  /**
+   * Route un échec de déverrouillage.
+   *
+   * Une demande de second facteur n'est pas une erreur : c'est une étape, et
+   * l'afficher comme un échec ferait croire à un mauvais mot de passe. Tout le
+   * reste passe par `messageFor`, qui distingue les cas sur le champ `code`.
+   *
+   * @param twoFactor Second facteur fourni par l'utilisateur, s'il y en avait un.
+   * @param submission Ce qui a réellement été envoyé — éventuellement un jeton
+   *   de dispense repris du stockage.
+   */
+  async function onUnlockFailure(
+    err: unknown,
+    twoFactor: TwoFactorSubmission | undefined,
+    submission: TwoFactorSubmission | undefined,
+  ): Promise<void> {
+    if (!(err instanceof TwoFactorRequiredError)) {
+      setError(messageFor(err));
+      return;
+    }
+    // Un jeton de dispense refusé est expiré : on l'oublie et on repasse par la
+    // saisie.
+    if (submission?.provider === TwoFactorProvider.Remember) {
+      await clearRememberToken(serverUrl, email);
+    }
+    const saisissables = err.providers.filter((p) => p in PROVIDER_LABELS);
+    setTwoFaProviders(err.providers);
+    setTwoFaChoice(saisissables[0] ?? '');
+    if (twoFactor !== undefined) {
+      setError('Second facteur refusé — réessayer.');
     }
   }
 
@@ -552,13 +619,13 @@ function App() {
     setRevealed(null);
     setProposal(null);
     setOtp(null);
-    setGenerator(null);
+    generateur.close();
     setEditing(null);
     setEditForm(EMPTY_EDIT);
     setEditOriginalPassword('');
     setEditShowPassword(false);
     setEditPasskeys([]);
-    setReprompt(null);
+    reprompt.cancel();
   }
 
   function onLock(): void {
@@ -660,54 +727,20 @@ function App() {
     if (vault === null || proposal === null) {
       return;
     }
+    const ouvert = vault;
     const { capture, existing } = proposal;
 
     setError(null);
     setBusy('Chiffrement…');
     try {
       const auth = await authorize();
-
       if (existing === null) {
-        const payload = await buildCipherCreatePayload(
-          {
-            name: capture.host,
-            username: capture.username,
-            password: capture.password,
-            totp: '',
-            notes: '',
-            uris: [capture.origin],
-          },
-          vault.userKey,
-        );
-        setBusy('Enregistrement…');
-        await auth.client.createCipher(auth.accessToken, payload);
+        await createFromCapture(auth, ouvert, capture);
       } else {
-        const cipher = vault.raw.get(existing.id);
-        if (cipher === undefined) {
-          throw new Error('Item introuvable — resynchroniser puis réessayer.');
-        }
-        const details = await decryptCipherDetails(cipher, vault.keys, (err) => {
-          throw err;
-        });
-        const payload = await buildCipherUpdatePayload(
-          cipher,
-          {
-            name: existing.name ?? capture.host,
-            username: details.username ?? capture.username,
-            password: capture.password,
-            totp: details.totp ?? '',
-            notes: details.notes ?? '',
-            uris: existing.uris.length > 0 ? existing.uris : [capture.origin],
-          },
-          vault.keys,
-          true,
-        );
-        setBusy('Enregistrement…');
-        await auth.client.updateCipher(auth.accessToken, existing.id, payload);
+        await updateFromCapture(auth, ouvert, capture, existing);
       }
-
       await dismissProposal();
-      await refreshAfterWrite(auth, vault.userKey);
+      await refreshAfterWrite(auth, ouvert.userKey);
     } catch (err) {
       setError(messageFor(err));
     } finally {
@@ -716,72 +749,70 @@ function App() {
   }
 
   /**
-   * Vérifie une saisie du mot de passe maître, **sans réseau**.
+   * Crée un item depuis une capture.
    *
-   * Le hash local conservé au déverrouillage sert de témoin : on redérive la
-   * clé maître depuis la saisie et on compare en temps constant
-   * (`verifyLocalPasswordHash`). Rien ne part vers le serveur — un `reprompt`
-   * doit fonctionner hors ligne, et le faire valider à distance offrirait à
-   * qui contrôle le réseau le pouvoir de le désarmer.
-   *
-   * La clé maître redérivée est détruite aussitôt : elle ne sert qu'à comparer.
+   * Volontairement pauvre : ni dossier, ni organisation, ni champs
+   * personnalisés. Un item né d'une saisie observée porte ce qui a été observé,
+   * et rien de plus — l'utilisateur complétera s'il le souhaite.
    */
-  async function verifyMasterPassword(candidate: string): Promise<boolean> {
-    const stored = await loadStoredSession();
-    if (stored === null) {
-      throw new Error('Session expirée — verrouiller puis déverrouiller.');
-    }
-    const masterKey = await deriveMasterKey(candidate, stored.email, stored.kdfConfig);
-    try {
-      return await verifyLocalPasswordHash(masterKey, candidate, stored.localPasswordHash);
-    } finally {
-      masterKey.destroy();
-    }
+  async function createFromCapture(
+    auth: AuthorizedSession,
+    ouvert: OpenVault,
+    capture: PendingSave,
+  ): Promise<void> {
+    const payload = await buildCipherCreatePayload(
+      {
+        name: capture.host,
+        username: capture.username,
+        password: capture.password,
+        totp: '',
+        notes: '',
+        uris: [capture.origin],
+      },
+      ouvert.userKey,
+    );
+    setBusy('Enregistrement…');
+    await auth.client.createCipher(auth.accessToken, payload);
   }
 
   /**
-   * Exécute une action qui sort un secret du coffre, derrière la garde de
-   * l'item.
+   * Met à jour le mot de passe d'un item rapproché, et lui seul.
    *
-   * Item sans garde : l'action part immédiatement, rien ne change. Item marqué
-   * `reprompt` : elle est suspendue jusqu'à vérification. Le point important
-   * est que la garde se pose **avant** `detailsOf` — donc avant tout
-   * déchiffrement : un secret protégé n'est pas déchiffré puis caché, il n'est
-   * pas déchiffré du tout.
+   * Nom, dossier, notes, TOTP et champs personnalisés sont relus de l'item
+   * existant et réécrits tels quels : une mise à jour remplace l'item entier
+   * côté serveur, donc tout champ non transmis serait perdu. Un enregistrement
+   * quasi automatique ne doit jamais faire disparaître ce qui était là.
    */
-  function guarded(item: CipherOverview, run: () => void | Promise<void>): void {
-    if (!item.reprompt) {
-      void run();
-      return;
+  async function updateFromCapture(
+    auth: AuthorizedSession,
+    ouvert: OpenVault,
+    capture: PendingSave,
+    existing: CipherOverview,
+  ): Promise<void> {
+    const cipher = ouvert.raw.get(existing.id);
+    if (cipher === undefined) {
+      throw new Error('Item introuvable — resynchroniser puis réessayer.');
     }
-    setReprompt({ item, run, password: '', error: null, busy: false });
-  }
-
-  /** Valide la saisie et relance l'action suspendue. */
-  async function onConfirmReprompt(event: Event): Promise<void> {
-    event.preventDefault();
-    const en_cours = reprompt;
-    if (en_cours === null || en_cours.busy) {
-      return;
-    }
-    // La dérivation dure : sans cet état, un second envoi lancerait un
-    // deuxième KDF pendant que le premier tourne.
-    setReprompt({ ...en_cours, busy: true, error: null });
-    try {
-      if (!(await verifyMasterPassword(en_cours.password))) {
-        setReprompt({
-          ...en_cours,
-          busy: false,
-          password: '',
-          error: 'Mot de passe incorrect.',
-        });
-        return;
-      }
-      setReprompt(null);
-      await en_cours.run();
-    } catch (err) {
-      setReprompt({ ...en_cours, busy: false, password: '', error: messageFor(err) });
-    }
+    // `onError` qui relance : sur une écriture, un champ illisible doit arrêter
+    // l'opération, pas la laisser écraser ce qu'elle n'a pas su lire.
+    const details = await decryptCipherDetails(cipher, ouvert.keys, (err) => {
+      throw err;
+    });
+    const payload = await buildCipherUpdatePayload(
+      cipher,
+      {
+        name: existing.name ?? capture.host,
+        username: details.username ?? capture.username,
+        password: capture.password,
+        totp: details.totp ?? '',
+        notes: details.notes ?? '',
+        uris: existing.uris.length > 0 ? existing.uris : [capture.origin],
+      },
+      ouvert.keys,
+      true,
+    );
+    setBusy('Enregistrement…');
+    await auth.client.updateCipher(auth.accessToken, existing.id, payload);
   }
 
   /**
@@ -801,7 +832,7 @@ function App() {
       setOtp(null);
       return;
     }
-    guarded(item, () => doShowOtp(item));
+    reprompt.guarded(item, () => doShowOtp(item));
   }
 
   async function doShowOtp(item: CipherOverview): Promise<void> {
@@ -826,19 +857,23 @@ function App() {
   /**
    * Programme l'effacement du presse-papiers après le délai configuré.
    *
-   * Best-effort, et c'est assumé : le minuteur meurt avec la popup.
-   * L'effacement fiable après fermeture passera par un document offscreen
-   * (`docs/EXTENSION.md`). Factorisé parce que les trois copies — mot de
-   * passe, code à usage unique, mot de passe engendré — doivent suivre la même
-   * règle, et qu'en dupliquer la condition était déjà la raison pour laquelle
-   * le code à usage unique y échappait.
+   * Factorisé parce que les trois copies — mot de passe, code à usage unique,
+   * mot de passe engendré — doivent suivre la même règle, et qu'en dupliquer la
+   * condition était déjà la raison pour laquelle le code à usage unique y
+   * échappait.
    */
   function scheduleClipboardClear(): void {
-    if (settings.clipboardClearSeconds > 0) {
-      setTimeout(() => {
-        void navigator.clipboard.writeText('');
-      }, settings.clipboardClearSeconds * 1000);
+    if (settings.clipboardClearSeconds <= 0) {
+      return;
     }
+    // Deux effacements, délibérément. Le minuteur local respecte le délai exact
+    // tant que la popup vit ; l'alarme survit à sa fermeture mais est ramenée à
+    // trente secondes minimum par Chrome. Le premier qui aboutit gagne, et
+    // aucun des deux n'a besoin de l'autre.
+    setTimeout(() => {
+      void navigator.clipboard.writeText('');
+    }, settings.clipboardClearSeconds * 1000);
+    void scheduleClipboardWipe(settings.clipboardClearSeconds);
   }
 
   async function copyOtp(code: string): Promise<void> {
@@ -846,96 +881,6 @@ function App() {
     setCopiedOtp(true);
     setTimeout(() => setCopiedOtp(false), 1500);
     scheduleClipboardClear();
-  }
-
-  /**
-   * Enregistre les options du générateur, une fois la main relevée.
-   *
-   * Le curseur de longueur émet un événement par cran : glisser de 8 à 128
-   * déclencherait cent vingt écritures de stockage pour une seule intention. Le
-   * tirage, lui, reste immédiat — c'est le retour visuel.
-   */
-  function persistGeneratorOptions(options: PasswordOptions): void {
-    if (generatorSaveTimer.current !== undefined) {
-      clearTimeout(generatorSaveTimer.current);
-    }
-    generatorSaveTimer.current = window.setTimeout(() => {
-      generatorSaveTimer.current = undefined;
-      void saveGeneratorOptions(options);
-    }, GENERATOR_SAVE_DELAY_MS);
-  }
-
-  /** Ouvre le générateur, options persistées rechargées, premier tirage fait. */
-  async function openGenerator(target: 'edit' | 'standalone'): Promise<void> {
-    const options = await loadGeneratorOptions();
-    setError(null);
-    try {
-      setGenerator({ options, password: generatePassword(options), target });
-    } catch (err) {
-      setError(messageFor(err));
-    }
-  }
-
-  /**
-   * Applique un changement d'options : nouveau tirage immédiat, réglages
-   * persistés. Régénérer à chaque coche évite l'état incohérent où l'écran
-   * montre un mot de passe qui ne correspond plus aux cases affichées.
-   */
-  function patchGenerator(patch: Partial<PasswordOptions>): void {
-    if (generator === null) {
-      return;
-    }
-    const options = { ...generator.options, ...patch };
-    persistGeneratorOptions(options);
-    try {
-      setGenerator({ ...generator, options, password: generatePassword(options) });
-      setError(null);
-    } catch (err) {
-      // Toutes les cases décochées : on garde les options (l'utilisateur est
-      // en train d'en recocher une) mais on ne prétend pas avoir engendré.
-      setGenerator({ ...generator, options, password: '' });
-      setError(messageFor(err));
-    }
-  }
-
-  async function onCopyGenerated(): Promise<void> {
-    if (generator === null || generator.password === '') {
-      return;
-    }
-    await navigator.clipboard.writeText(generator.password);
-    setCopiedGenerated(true);
-    setTimeout(() => setCopiedGenerated(false), 1500);
-    scheduleClipboardClear();
-  }
-
-  /** Réinjecte le mot de passe engendré dans le formulaire d'édition ouvert. */
-  function onUseGenerated(): void {
-    if (generator === null || generator.password === '') {
-      return;
-    }
-    setEditForm({ ...editForm, password: generator.password });
-    // Affiché : on vient de le fabriquer, le masquer n'a plus de sens et
-    // laisserait un doute sur ce qui sera enregistré.
-    setEditShowPassword(true);
-    setGenerator(null);
-  }
-
-  /** Rend le panneau du générateur, ou rien. Même outil dans les deux vues. */
-  function renderGenerator() {
-    if (generator === null) {
-      return null;
-    }
-    return (
-      <PanneauGenerateur
-        state={generator}
-        copie={copiedGenerated}
-        onPatch={patchGenerator}
-        onRegenerate={() => patchGenerator({})}
-        onCopy={() => void onCopyGenerated()}
-        onUse={onUseGenerated}
-        onClose={() => setGenerator(null)}
-      />
-    );
   }
 
   /**
@@ -950,7 +895,7 @@ function App() {
   }
 
   function onCopyPassword(item: CipherOverview): void {
-    guarded(item, () => doCopyPassword(item));
+    reprompt.guarded(item, () => doCopyPassword(item));
   }
 
   async function doCopyPassword(item: CipherOverview): Promise<void> {
@@ -975,7 +920,6 @@ function App() {
 
   /** Minuteur d'auto-masquage du mot de passe révélé. */
   const revealTimer = useRef<number | undefined>(undefined);
-  const generatorSaveTimer = useRef<number | undefined>(undefined);
 
   function clearRevealTimer(): void {
     if (revealTimer.current !== undefined) {
@@ -991,7 +935,7 @@ function App() {
       setRevealed(null);
       return;
     }
-    guarded(item, () => doReveal(item));
+    reprompt.guarded(item, () => doReveal(item));
   }
 
   async function doReveal(item: CipherOverview): Promise<void> {
@@ -1021,7 +965,7 @@ function App() {
     }
     // L'origine d'abord, la garde ensuite : demander un mot de passe pour
     // ensuite refuser le remplissage serait le pire des deux ordres.
-    guarded(item, () => doFill(item, tab));
+    reprompt.guarded(item, () => doFill(item, tab));
   }
 
   async function doFill(item: CipherOverview, tab: { tabId: number }): Promise<void> {
@@ -1046,7 +990,7 @@ function App() {
   function onEdit(item: CipherOverview): void {
     // Le formulaire affiche le mot de passe en clair dans son champ : c'est
     // une sortie de secret comme une autre.
-    guarded(item, () => doEdit(item));
+    reprompt.guarded(item, () => doEdit(item));
   }
 
   async function doEdit(item: CipherOverview): Promise<void> {
@@ -1259,10 +1203,10 @@ function App() {
         passkeys={editPasskeys}
         busy={busy}
         error={error}
-        generateur={renderGenerator()}
+        generateur={generateur.render()}
         onPatch={(patch) => setEditForm({ ...editForm, ...patch })}
         onToggleShowPassword={() => setEditShowPassword(!editShowPassword)}
-        onOpenGenerator={() => void openGenerator('edit')}
+        onOpenGenerator={() => void generateur.open('edit')}
         onSubmit={(e) => void onSaveEdit(e)}
         onCancel={onCancelEdit}
       />
@@ -1289,7 +1233,7 @@ function App() {
           <button
             class="discret"
             title="Générer un mot de passe"
-            onClick={() => void openGenerator('standalone')}
+            onClick={() => void generateur.open('standalone')}
           >
             Générer
           </button>
@@ -1302,15 +1246,15 @@ function App() {
         </div>
       </header>
       <main>
-        {reprompt !== null && (
+        {reprompt.state !== null && (
           <GardeReprompt
-            state={reprompt}
-            onPassword={(password) => setReprompt({ ...reprompt, password })}
-            onConfirm={(e) => void onConfirmReprompt(e)}
-            onCancel={() => setReprompt(null)}
+            state={reprompt.state}
+            onPassword={reprompt.setPassword}
+            onConfirm={(e) => void reprompt.confirm(e)}
+            onCancel={reprompt.cancel}
           />
         )}
-        {renderGenerator()}
+        {generateur.render()}
         {proposal !== null && (
           <Proposition
             proposal={proposal}

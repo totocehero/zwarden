@@ -26,9 +26,39 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": ["storage", "clipboardWrite", "alarms", "idle", "activeTab", "scripting"],
-  "host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
+  "permissions": [
+    "storage",
+    "clipboardWrite",
+    "alarms",
+    "idle",
+    "offscreen",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Y",
+        "linux": "Ctrl+Shift+U"
+      },
+      "description": "Ouvrir Zwarden"
+    },
+    "generate-password": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+9"
+      },
+      "description": "Engendrer un mot de passe et le copier"
+    },
+    "lock-vault": {
+      "description": "Verrouiller le coffre"
+    }
   }
 }

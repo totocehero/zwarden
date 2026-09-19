@@ -666,6 +666,48 @@ export async function stopAutoLockWatch(): Promise<void> {
   }
 }
 
+// --- Effacement du presse-papiers --------------------------------------------
+
+/**
+ * Nom de l'alarme d'effacement du presse-papiers.
+ *
+ * Portée par `chrome.alarms` et non par un `setTimeout` de la popup : un
+ * `setTimeout` meurt avec la popup, et c'est précisément quand l'utilisateur
+ * referme la popup que l'effacement compte. La popup garde tout de même son
+ * minuteur — le premier des deux qui aboutit gagne, et si l'alarme échoue le
+ * comportement d'avant subsiste.
+ */
+export const CLIPBOARD_ALARM_NAME = 'zwarden-clipboard';
+
+/**
+ * Délai minimal d'une alarme MV3, en secondes.
+ *
+ * Chrome ramène à trente secondes toute alarme plus courte. Le réglage de dix
+ * secondes reste donc tenu par la popup tant qu'elle est ouverte, et l'alarme ne
+ * sert que de filet — plus tard que demandé, mais là où il n'y avait rien.
+ */
+export const ALARM_MIN_SECONDS = 30;
+
+/** Programme l'écrasement du presse-papiers. `seconds <= 0` annule. */
+export async function scheduleClipboardWipe(seconds: number): Promise<void> {
+  if (!hasAlarms) {
+    return;
+  }
+  if (seconds <= 0) {
+    await cancelClipboardWipe();
+    return;
+  }
+  await chrome.alarms.create(CLIPBOARD_ALARM_NAME, {
+    delayInMinutes: Math.max(seconds, ALARM_MIN_SECONDS) / 60,
+  });
+}
+
+export async function cancelClipboardWipe(): Promise<void> {
+  if (hasAlarms) {
+    await chrome.alarms.clear(CLIPBOARD_ALARM_NAME);
+  }
+}
+
 // --- Verrouillage complet ----------------------------------------------------
 
 /**
@@ -685,4 +727,8 @@ export async function lockVault(): Promise<void> {
   await clearPendingSave();
   await stopAutoLockWatch();
   await setSaveBadge(false);
+  // Le presse-papiers peut contenir un secret sorti du coffre : verrouiller sans
+  // l'effacer laisserait dehors ce qu'on vient de ranger. L'alarme est avancée
+  // au plus tôt plutôt qu'annulée.
+  await scheduleClipboardWipe(1);
 }

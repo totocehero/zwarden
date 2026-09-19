@@ -35,6 +35,10 @@ passe en extension. Les énoncer évite de fausses attentes.
 - **Métadonnées.** Le serveur connaît le nombre d'items, leurs dates de
   modification et leur taille approximative. Ces informations ne sont pas
   chiffrées dans le format Bitwarden.
+- **Presse-papiers.** Un secret copié y séjourne jusqu'à l'écrasement différé
+  (30 s par défaut). Tout programme du poste peut le lire pendant ce temps, et
+  l'historique de presse-papiers du système d'exploitation, s'il est actif, peut
+  en garder une trace que l'extension n'atteint pas.
 - **Traces locales d'usage.** Le classement « dernier utilisé » persiste sur
   disque des identifiants d'items (UUID opaques) et des horodatages — jamais
   un nom, une URL, un identifiant de connexion ni un secret. Qui lit le profil

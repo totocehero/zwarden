@@ -32,11 +32,13 @@ import {
 } from '../src/core/crypto/kdf.js';
 import { SymmetricCryptoKey } from '../src/core/crypto/symmetricCryptoKey.js';
 import {
+  type CipherOverview,
   buildCipherUpdatePayload,
   decryptCipherDetails,
   decryptCipherList,
   decryptCipherOverview,
   resolveItemKey,
+  reuseByRevision,
 } from '../src/core/vault/cipherService.js';
 import { MissingOrgKeyError, buildVaultKeys } from '../src/core/vault/keyring.js';
 import { decryptLabels } from '../src/core/vault/labels.js';
@@ -602,6 +604,47 @@ describe('étiquettes : dossiers et collections (labels)', () => {
     });
     expect(vue.folderId).toBe('f-1');
     expect(vue.collectionIds).toEqual(['c-1', 'c-2']);
+  });
+});
+
+describe('reuseByRevision', () => {
+  const apercu = (id: string, name: string): CipherOverview =>
+    ({ id, name }) as CipherOverview;
+  const chiffre = (id: string, revisionDate: string): CipherResponse =>
+    ({ id, revisionDate }) as unknown as CipherResponse;
+
+  it('réutilise l’aperçu à révision inchangée', () => {
+    const reuse = reuseByRevision(
+      [apercu('i1', 'Ma banque')],
+      new Map([['i1', chiffre('i1', '2026-09-01T10:00:00Z')]]),
+    );
+    expect(reuse(chiffre('i1', '2026-09-01T10:00:00Z'))?.name).toBe('Ma banque');
+  });
+
+  /** Modifié ici ou depuis un autre appareil : il faut le redéchiffrer. */
+  it('refuse de réutiliser quand la révision a changé', () => {
+    const reuse = reuseByRevision(
+      [apercu('i1', 'Ma banque')],
+      new Map([['i1', chiffre('i1', '2026-09-01T10:00:00Z')]]),
+    );
+    expect(reuse(chiffre('i1', '2026-09-02T11:00:00Z'))).toBeUndefined();
+  });
+
+  it('ne réutilise rien pour un item inconnu', () => {
+    const reuse = reuseByRevision([], new Map());
+    expect(reuse(chiffre('i9', '2026-09-01T10:00:00Z'))).toBeUndefined();
+  });
+
+  /**
+   * Sans date, rien ne prouve que le contenu n'a pas bougé : l'identifiant seul
+   * ne suffit jamais.
+   */
+  it('ne réutilise rien sans date de révision', () => {
+    const reuse = reuseByRevision(
+      [apercu('i1', 'Ma banque')],
+      new Map([['i1', chiffre('i1', '2026-09-01T10:00:00Z')]]),
+    );
+    expect(reuse({ id: 'i1' } as unknown as CipherResponse)).toBeUndefined();
   });
 });
 

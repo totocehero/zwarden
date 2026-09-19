@@ -1,0 +1,13 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Zwarden — presse-papiers</title>
+<!--
+  Document hors écran, jamais visible. Il n'existe que pour donner au service
+  worker MV3 un accès au presse-papiers : un worker n'a pas de DOM, et le
+  presse-papiers en exige un.
+
+  Le `<textarea>` est le tampon de `document.execCommand('copy')`, seule méthode
+  qui fonctionne sans document au premier plan.
+-->
+<textarea id="tampon" aria-hidden="true"></textarea>
+<script type="module" src="offscreen.js"></script>

@@ -57,7 +57,7 @@ Le noyau cryptographique est implémenté et testé. Le reste est en cours.
 - [x] `SymmetricCryptoKey` — clés 32/64 octets
 - [x] AES-256-CBC + HMAC-SHA256, Encrypt-then-MAC
 - [x] Dérivation de clé : PBKDF2-SHA256 et Argon2id
-- [x] 267 tests, dont les vecteurs RFC 4231 / 5869 / 6238 / 7914
+- [x] 297 tests, dont les vecteurs RFC 4231 / 5869 / 6238 / 7914
 - [x] **Interopérabilité validée contre Vaultwarden 2026.6.0** — authentification,
       déchiffrement de la clé de coffre, et aller-retour écriture/lecture complet
 - [x] Client API : prelogin, authentification, rafraîchissement de session,
@@ -87,7 +87,12 @@ Le noyau cryptographique est implémenté et testé. Le reste est en cours.
 - [x] Garde par item (`reprompt`) — un item marqué « redemander le mot de passe
       maître » ne livre aucun secret sans une nouvelle saisie, vérifiée hors
       réseau
+- [x] Raccourcis clavier — ouvrir, engendrer et copier, verrouiller
+- [x] Écrasement du presse-papiers qui survit à la fermeture de la popup
+      (document hors écran + alarme)
 - [ ] Création d'items depuis la popup (formulaire complet)
+- [ ] Dérivation de clé dans le service worker (popup sans clé) — et, avec elle,
+      le raccourci d'autofill
 - [ ] Autofill automatique (détection de formulaire, suggestion en page)
 
 ## Modèle de sécurité
@@ -131,7 +136,7 @@ interopérables dans les deux sens :
 
 ```bash
 npm install
-npm test          # 267 tests
+npm test          # 297 tests
 npm run typecheck # TypeScript strict
 npm run lint      # ESLint : promesses perdues, comparaisons laxistes
 npm run build

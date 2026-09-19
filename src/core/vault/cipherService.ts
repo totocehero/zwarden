@@ -143,6 +143,52 @@ export function findSaveCandidate(
 }
 
 /**
+ * Construit le test de réutilisation à passer à {@link decryptCipherList}.
+ *
+ * ## Le problème
+ *
+ * Modifier un mot de passe déclenchait une resynchronisation, et donc le
+ * redéchiffrement de **tous** les aperçus : deux mille items déchiffrés pour un
+ * champ changé. Le coût est invisible sur un coffre de démonstration et
+ * dominant sur un vrai.
+ *
+ * ## Pourquoi c'est sûr
+ *
+ * `revisionDate` est estampillée par le serveur à chaque écriture. À identifiant
+ * et date de révision inchangés, le contenu chiffré est le même — donc le clair
+ * aussi. On ne réutilise jamais sur la seule foi de l'identifiant : un item
+ * modifié depuis un autre appareil porte une date différente et sera
+ * redéchiffré.
+ *
+ * Une réponse d'écriture serait une source plus directe, mais tous les serveurs
+ * ne renvoient pas l'item complet — un `collectionIds` absent effacerait
+ * silencieusement ses collections de l'affichage. La synchronisation reste donc
+ * la référence ; seul le déchiffrement est évité.
+ *
+ * @param previous Aperçus déjà déchiffrés.
+ * @param previousRaw Items chiffrés correspondants, pour lire leur révision.
+ */
+export function reuseByRevision(
+  previous: readonly CipherOverview[],
+  previousRaw: ReadonlyMap<string, CipherResponse>,
+): (cipher: CipherResponse) => CipherOverview | undefined {
+  const parId = new Map(previous.map((item) => [item.id, item]));
+
+  return (cipher) => {
+    const id = readField<string>(cipher, 'id');
+    if (id == null) {
+      return undefined;
+    }
+    const revision = readField<string>(cipher, 'revisionDate');
+    const ancien = previousRaw.get(id);
+    if (revision == null || ancien === undefined) {
+      return undefined;
+    }
+    return revision === readField<string>(ancien, 'revisionDate') ? parId.get(id) : undefined;
+  };
+}
+
+/**
  * Issue d'une capture d'identifiants, une fois le coffre consulté.
  *
  * Trois cas, et le premier est le plus fréquent : une connexion ordinaire, où
@@ -420,6 +466,7 @@ export async function decryptCipherList(
   keys: CipherKeys,
   onError: (error: unknown) => void,
   concurrency = DEFAULT_CONCURRENCY,
+  reuse: (cipher: CipherResponse) => CipherOverview | undefined = () => undefined,
 ): Promise<CipherOverview[]> {
   const out = new Array<CipherOverview>(ciphers.length);
   let next = 0;
@@ -429,7 +476,8 @@ export async function decryptCipherList(
   const workers = Array.from({ length: Math.max(1, Math.min(concurrency, ciphers.length)) }, async () => {
     while (next < ciphers.length) {
       const index = next++;
-      out[index] = await decryptCipherOverview(ciphers[index]!, keys, onError);
+      const cipher = ciphers[index]!;
+      out[index] = reuse(cipher) ?? (await decryptCipherOverview(cipher, keys, onError));
     }
   });
 

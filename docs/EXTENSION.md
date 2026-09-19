@@ -9,11 +9,18 @@ demandera un argument, pas un oubli.
 
 ## 1. Déverrouillage
 
-**La dérivation s'exécute dans le service worker, jamais dans la popup.**
-Fermer la popup ne doit pas annuler un déverrouillage en cours, et le matériel
-de clé n'a rien à faire dans un contexte d'interface. La popup envoie le mot de
-passe au worker, affiche la progression, et reçoit un signal de succès — pas de
-clé.
+**Cible : la dérivation s'exécute dans le service worker, jamais dans la
+popup.** ⏳ *Non encore implémenté — aujourd'hui `unlock()` tourne dans la
+popup, qui détient donc la clé.* Fermer la popup ne doit pas annuler un
+déverrouillage en cours, et le matériel de clé n'a rien à faire dans un contexte
+d'interface. La popup enverra le mot de passe au worker, affichera la
+progression, et recevra un signal de succès — pas de clé.
+
+Ce déplacement n'est pas un réglage mais une refonte : « popup sans clé »
+implique que **chaque** déchiffrement devienne un aller-retour vers le worker,
+donc une couche de messages sur tout le chemin de données. C'est pourquoi il
+attend une couverture de tests de l'interface plutôt que d'être tenté à l'aveugle
+— et c'est aussi ce qui bloque le raccourci d'autofill (§4 ter).
 
 **Le chemin de déverrouillage est unique : `core/vault/unlock()`.**
 L'enchaînement prelogin → dérivation → hashs → login → étirement → déballage,
@@ -99,7 +106,17 @@ Règles communes :
   déchiffrés (`CipherOverview`). Mot de passe, TOTP et notes le sont à
   l'ouverture de l'item (`CipherDetails`). Latence d'ouverture minimale, moins
   de secrets en clair simultanément.
-- **Presse-papiers effacé ~30 s** après la copie d'un secret.
+- **Presse-papiers écrasé ~30 s** après la copie d'un secret, par **deux**
+  mécanismes délibérément redondants : un minuteur dans la popup, qui respecte le
+  délai exact tant qu'elle vit, et une alarme `chrome.alarms` qui lui survit et
+  déclenche un document hors écran (`src/offscreen/`). La popup seule ne
+  suffisait pas — son minuteur mourait avec elle, c'est-à-dire précisément quand
+  l'effacement compte. Deux réserves, dites franchement : Chrome ramène toute
+  alarme à trente secondes minimum, donc le réglage « 10 secondes » n'est tenu
+  que par la popup ; et `execCommand('copy')` ignorant une sélection vide, le
+  presse-papiers est **écrasé par une espace**, non vidé. L'effet utile est le
+  même, le mot juste n'est pas « effacé ». Verrouiller déclenche l'écrasement
+  immédiatement.
 - Mot de passe masqué par défaut ; révélation sur geste explicite.
 - **Garde par item (`reprompt`).** Un item marqué « redemander le mot de passe
   maître » côté Bitwarden ne livre rien — copie, révélation, code à usage
@@ -207,17 +224,17 @@ rattrape à la main ; un identifiant capturé à tort ne coûte qu'un « Ignorer
 
 ## 4 ter. Raccourcis clavier — parité avec l'extension officielle
 
-**Cible, non encore implémentée** — aucune section `commands` dans le manifest
-à ce stade. Pour que la vue « Bitwarden-like » aille au bout de sa promesse,
-les raccourcis par défaut reprendront ceux de l'extension officielle (relevés
-dans son manifest 2026.7.0) :
+Les raccourcis reprennent ceux de l'extension officielle (relevés dans son
+manifest 2026.7.0). Seuls sont déclarés ceux qui **peuvent aboutir sans la clé du
+coffre**, que le service worker ne détient pas : déclarer un raccourci qui ne
+fait rien serait pire que ne pas le déclarer.
 
-| Commande | Raccourci |
-|---|---|
-| Ouvrir la popup | `Ctrl+Shift+Y` (`Ctrl+Shift+U` sous Linux) |
-| Autofill identifiants | `Ctrl+Shift+L` |
-| Générer un mot de passe | `Ctrl+Shift+9` |
-| Verrouiller le coffre | sans défaut, configurable |
+| Commande | Raccourci | État |
+|---|---|---|
+| Ouvrir la popup | `Ctrl+Shift+Y` (`Ctrl+Shift+U` sous Linux) | ✅ `_execute_action` |
+| Générer un mot de passe et le copier | `Ctrl+Shift+9` | ✅ engendrer ne demande aucune clé |
+| Verrouiller le coffre | sans défaut, configurable | ✅ purge, aucune clé requise |
+| Autofill identifiants | `Ctrl+Shift+L` | ⏳ exige la clé dans le worker (§1) |
 
 ## 4 quater. Manifest — notes relevées sur l'extension officielle
 
@@ -227,16 +244,17 @@ dans son manifest 2026.7.0) :
   production alors qu'il passe en tests Node.
 - **Permissions** : l'officielle demande 16 permissions dont `webRequest`,
   `tabs`, `unlimitedStorage` et `http(s)://*/*`. Zwarden vise le minimum :
-  `storage`, `alarms`, `idle`, `activeTab`, `scripting`, `clipboardWrite`,
+  `storage`, `alarms`, `idle`, `offscreen`, `activeTab`, `scripting`,
+  `clipboardWrite`,
   plus les hôtes strictement nécessaires à l'autofill — et le modèle
   `optional_permissions` pour le reste. `idle` ne donne que les transitions
   actif / inactif / verrouillé de la session : elle sert au verrouillage sur
   écran verrouillé, rien d'autre. Le suivi de l'activité de navigation se
   contente des événements `tabs` et `windows` accessibles sans permission —
   d'où l'absence de `tabs`, dont l'unique apport serait de lire les URL.
-- **Presse-papiers** : l'effacement différé du presse-papiers passe par un
-  document offscreen (`offscreen`), le service worker MV3 n'ayant pas accès au
-  DOM.
+- **Presse-papiers** : l'effacement différé passe par un document offscreen
+  (`offscreen`), le service worker MV3 n'ayant pas accès au DOM. Implémenté —
+  voir §3.
 
 ## 5. Premier lancement
 
