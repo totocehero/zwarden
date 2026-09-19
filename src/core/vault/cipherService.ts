@@ -143,6 +143,47 @@ export function findSaveCandidate(
 }
 
 /**
+ * Issue d'une capture d'identifiants, une fois le coffre consulté.
+ *
+ * Trois cas, et le premier est le plus fréquent : une connexion ordinaire, où
+ * le coffre sait déjà tout. Le taire est ce qui donne du sens à la pastille —
+ * s'allumer à chaque connexion réussie la rendrait insignifiante.
+ */
+export type ProposalOutcome =
+  | { readonly kind: 'aucune' }
+  | { readonly kind: 'creation' }
+  | { readonly kind: 'miseAJour'; readonly item: CipherOverview };
+
+/**
+ * Tranche ce qu'il faut proposer à l'utilisateur.
+ *
+ * Seule cette fonction porte la règle, et elle est pure : le déchiffrement du
+ * mot de passe existant est fait par l'appelant, qui détient les clés. C'est ce
+ * découpage qui rend la règle vérifiable — elle vivait auparavant au milieu
+ * d'un composant, mêlée à des appels réseau et à de l'état d'interface.
+ *
+ * @param existing Item rapproché par {@link findSaveCandidate}, ou `null`.
+ * @param capturedPassword Mot de passe que l'utilisateur vient de saisir.
+ * @param existingPassword Mot de passe déchiffré de l'item rapproché. `null` si
+ *   l'item est illisible — on propose alors la mise à jour plutôt que de se
+ *   taire : ne rien dire sur la foi d'une comparaison impossible ferait perdre
+ *   la saisie.
+ */
+export function decideProposal(
+  existing: CipherOverview | null,
+  capturedPassword: string,
+  existingPassword: string | null,
+): ProposalOutcome {
+  if (existing === null) {
+    return { kind: 'creation' };
+  }
+  if (existingPassword === capturedPassword) {
+    return { kind: 'aucune' };
+  }
+  return { kind: 'miseAJour', item: existing };
+}
+
+/**
  * Classe les items les plus récemment utilisés en tête.
  *
  * Ce qu'on cherche à reproduire est un réflexe : le compte dont on vient de

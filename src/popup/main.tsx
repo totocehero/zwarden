@@ -34,7 +34,14 @@
  */
 
 import { render } from 'preact';
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+
+import { EcranDeverrouillage, EcranSecondFacteur } from './components/EcransConnexion.js';
+import { type EditForm, EMPTY_EDIT, FormulaireEdition } from './components/FormulaireEdition.js';
+import { chipsFor, LigneItem } from './components/LigneItem.js';
+import { GardeReprompt, type RepromptState } from './components/GardeReprompt.js';
+import { PanneauGenerateur, type GeneratorState } from './components/PanneauGenerateur.js';
+import { Proposition, type SaveProposal } from './components/Proposition.js';
 
 import {
   ApiClient,
@@ -51,32 +58,21 @@ import {
   type PasskeyView,
   buildCipherCreatePayload,
   buildCipherUpdatePayload,
+  decideProposal,
   decryptCipherDetails,
   decryptCipherList,
   findSaveCandidate,
   sortByLastUsed,
 } from '@core/vault/cipherService.js';
 import { deriveMasterKey, verifyLocalPasswordHash } from '@core/crypto/kdf.js';
-import { buildVaultKeys } from '@core/vault/keyring.js';
+import { buildVaultKeys, destroyVaultKeys } from '@core/vault/keyring.js';
 import { type VaultLabels, decryptLabels } from '@core/vault/labels.js';
 import { matchesOrigin } from '@core/vault/uriMatch.js';
-import {
-  type TotpConfig,
-  formatTotp,
-  generateTotp,
-  parseTotp,
-  secondsRemaining,
-} from '@core/vault/totp.js';
-import {
-  type PasswordOptions,
-  MAX_LENGTH,
-  MIN_LENGTH,
-  generatePassword,
-} from '@core/generator/password.js';
+import { type TotpConfig, generateTotp, parseTotp } from '@core/vault/totp.js';
+import { type PasswordOptions, generatePassword } from '@core/generator/password.js';
 import { unlock } from '@core/vault/session.js';
 import {
   type AppSettings,
-  type PendingSave,
   type StoredSession,
   DEFAULT_SETTINGS,
   addNeverSaveHost,
@@ -114,25 +110,16 @@ interface OpenVault {
 }
 
 /**
- * Code à usage unique affiché sur une ligne de la liste.
+ * Code à usage unique ouvert sur une ligne de la liste.
  *
- * Le `config` est conservé — pas seulement le code — parce que le
- * rafraîchissement à la seconde doit pouvoir recalculer sans redéchiffrer le
- * secret à chaque battement.
+ * `App` ne retient que l'item concerné et les paramètres résolus — le code et
+ * son décompte appartiennent à {@link CodeOtp}, qui les recalcule chaque
+ * seconde. Les garder ici faisait réafficher la popup entière à chaque
+ * battement.
  */
 interface OtpView {
   readonly id: string;
   readonly config: TotpConfig;
-  readonly code: string;
-  readonly remaining: number;
-}
-
-/** Panneau du générateur : ses options, sa production, et sa destination. */
-interface GeneratorState {
-  readonly options: PasswordOptions;
-  readonly password: string;
-  /** `'edit'` : un bouton « Utiliser » réinjecte dans le formulaire ouvert. */
-  readonly target: 'edit' | 'standalone';
 }
 
 /** Session prête à écrire : client API et jetons valides. */
@@ -142,64 +129,6 @@ interface AuthorizedSession {
   readonly accessToken: string;
   readonly refreshToken: string | null;
   readonly expiresAt: number;
-}
-
-/**
- * Proposition d'enregistrement en attente : ce que l'utilisateur a saisi, et
- * l'item que cela mettrait à jour — `null` s'il s'agit d'un nouvel item.
- */
-interface SaveProposal {
-  readonly capture: PendingSave;
-  readonly existing: CipherOverview | null;
-}
-
-/**
- * Action suspendue en attente d'une nouvelle saisie du mot de passe maître.
- *
- * L'action est portée telle quelle (`run`) plutôt que reconstruite après
- * vérification : la garde n'a ainsi rien à savoir de ce qu'elle protège, et
- * ajouter une action protégée ne demande pas de la modifier.
- */
-interface RepromptState {
-  readonly item: CipherOverview;
-  readonly run: () => void | Promise<void>;
-  readonly password: string;
-  readonly error: string | null;
-  /** Vrai pendant la dérivation, qui dure — le KDF est lent par construction. */
-  readonly busy: boolean;
-}
-
-/** Tag affichable sur un item : dossier ou collection. */
-interface Chip {
-  readonly kind: 'dossier' | 'collection';
-  readonly name: string;
-  readonly title: string;
-}
-
-/** Tags d'un item, noms résolus via les étiquettes du coffre. */
-function chipsFor(item: CipherOverview, labels: VaultLabels): Chip[] {
-  const chips: Chip[] = [];
-  if (item.folderId !== null) {
-    const name = labels.folders.get(item.folderId);
-    if (name !== undefined) {
-      chips.push({ kind: 'dossier', name, title: `Dossier : ${name}` });
-    }
-  }
-  for (const collectionId of item.collectionIds) {
-    const collection = labels.collections.get(collectionId);
-    if (collection !== undefined) {
-      const org =
-        collection.organizationId !== null
-          ? labels.organizations.get(collection.organizationId)
-          : undefined;
-      chips.push({
-        kind: 'collection',
-        name: collection.name,
-        title: `${org ?? 'Organisation'} — collection${collection.readOnly ? ' (lecture seule)' : ''}`,
-      });
-    }
-  }
-  return chips;
 }
 
 /** Regroupe les erreurs par nom, pour un diagnostic lisible. */
@@ -284,18 +213,6 @@ function openOptions(): void {
 }
 
 /** Formulaire d'édition d'un item. Chaîne vide = champ effacé. */
-interface EditForm {
-  name: string;
-  username: string;
-  password: string;
-  totp: string;
-  notes: string;
-  /** Une URI par ligne. */
-  uris: string;
-}
-
-const EMPTY_EDIT: EditForm = { name: '', username: '', password: '', totp: '', notes: '', uris: '' };
-
 /** Durée d'affichage d'un mot de passe révélé avant masquage automatique. */
 const REVEAL_HIDE_MS = 20_000;
 
@@ -313,250 +230,6 @@ const ACTIVITY_PING_MS = 30_000;
  * assez long pour qu'un glissement de curseur ne compte que pour une écriture.
  */
 const GENERATOR_SAVE_DELAY_MS = 400;
-
-/** Icône crayon, pour l'édition. */
-function IconCrayon() {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
-    </svg>
-  );
-}
-
-/** Icône copie (coche quand la copie vient d'aboutir). */
-function IconCopie({ fait }: { fait: boolean }) {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      {fait ? (
-        <polyline points="20 6 9 17 4 12" />
-      ) : (
-        <>
-          <rect x="9" y="9" width="13" height="13" rx="2" />
-          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-        </>
-      )}
-    </svg>
-  );
-}
-
-/** Icône œil (barré quand le secret est visible, pour proposer de le cacher). */
-function IconOeil({ barre }: { barre: boolean }) {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z" />
-      <circle cx="12" cy="12" r="3" />
-      {barre && <line x1="4" y1="3" x2="20" y2="21" />}
-    </svg>
-  );
-}
-
-/** Icône « code à usage unique » : une horloge. */
-function IconOtp() {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 7v5l3 2" />
-    </svg>
-  );
-}
-
-/**
- * Anneau de décompte du code à usage unique.
- *
- * Un nombre de secondes se lit ; une jauge se voit. Comme le code est
- * recopié sous contrainte de temps, l'information « il me reste de quoi » doit
- * être saisie du coin de l'œil, sans lire. L'anneau se vide, et le chiffre
- * reste au centre pour qui veut la valeur exacte.
- *
- * @param remaining Secondes restantes.
- * @param period Durée totale de la fenêtre, pour l'échelle.
- */
-function AnneauOtp({ remaining, period }: { remaining: number; period: number }) {
-  const rayon = 8;
-  const circonference = 2 * Math.PI * rayon;
-  const part = Math.max(0, Math.min(1, remaining / period));
-  const urgent = remaining <= 5;
-
-  return (
-    <svg
-      class={`anneau${urgent ? ' anneau-urgent' : ''}`}
-      width="22"
-      height="22"
-      viewBox="0 0 22 22"
-      aria-hidden="true"
-    >
-      {/* Piste : l'anneau vide reste visible, sinon la jauge semble disparaître. */}
-      <circle cx="11" cy="11" r={rayon} fill="none" stroke="currentColor" stroke-width="2" opacity="0.22" />
-      <circle
-        cx="11"
-        cy="11"
-        r={rayon}
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-dasharray={circonference}
-        stroke-dashoffset={circonference * (1 - part)}
-        // Départ à midi, sens horaire : le sens de lecture d'une horloge.
-        transform="rotate(-90 11 11)"
-      />
-      <text x="11" y="11" class="anneau-texte" text-anchor="middle" dominant-baseline="central">
-        {remaining}
-      </text>
-    </svg>
-  );
-}
-
-/** Icône du générateur : un dé. */
-function IconDe() {
-  return (
-    <svg
-      width="15"
-      height="15"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      stroke-width="2"
-      stroke-linecap="round"
-      stroke-linejoin="round"
-      aria-hidden="true"
-    >
-      <rect x="3" y="3" width="18" height="18" rx="3" />
-      <circle cx="8.5" cy="8.5" r="1.2" fill="currentColor" />
-      <circle cx="15.5" cy="15.5" r="1.2" fill="currentColor" />
-      <circle cx="15.5" cy="8.5" r="1.2" fill="currentColor" />
-      <circle cx="8.5" cy="15.5" r="1.2" fill="currentColor" />
-    </svg>
-  );
-}
-
-/**
- * Panneau du générateur de mots de passe.
- *
- * Composant à part, rendu aussi bien au-dessus de la liste qu'au-dessus du
- * formulaire d'édition : c'est le même outil, appelé depuis deux endroits.
- * Il ne connaît ni le coffre ni le réseau — il reçoit son état et rend ses
- * gestes, ce qui le laisse hors de la logique de coffre (§3).
- */
-function PanneauGenerateur({
-  state,
-  onPatch,
-  onRegenerate,
-  onCopy,
-  onUse,
-  onClose,
-  copie,
-}: {
-  state: GeneratorState;
-  onPatch: (patch: Partial<PasswordOptions>) => void;
-  onRegenerate: () => void;
-  onCopy: () => void;
-  onUse: () => void;
-  onClose: () => void;
-  copie: boolean;
-}) {
-  const { options, password } = state;
-  const classes: ReadonlyArray<readonly [keyof PasswordOptions, string]> = [
-    ['lowercase', 'a-z'],
-    ['uppercase', 'A-Z'],
-    ['digits', '0-9'],
-    ['symbols', '!@#$%^&*'],
-  ];
-
-  return (
-    <section class="generateur">
-      <div class="generateur-sortie" title="Cliquer pour copier" onClick={onCopy}>
-        {password === '' ? '—' : password}
-      </div>
-      <div class="generateur-actions">
-        <button type="button" onClick={onRegenerate} disabled={password === ''}>
-          Régénérer
-        </button>
-        <button type="button" class="secondaire" onClick={onCopy} disabled={password === ''}>
-          {copie ? 'Copié !' : 'Copier'}
-        </button>
-        {state.target === 'edit' && (
-          <button type="button" class="secondaire" onClick={onUse} disabled={password === ''}>
-            Utiliser
-          </button>
-        )}
-        <button type="button" class="discret" onClick={onClose}>
-          Fermer
-        </button>
-      </div>
-      <label class="generateur-longueur">
-        Longueur : {options.length}
-        <input
-          type="range"
-          min={MIN_LENGTH}
-          max={MAX_LENGTH}
-          value={options.length}
-          onInput={(e) => onPatch({ length: e.currentTarget.valueAsNumber })}
-        />
-      </label>
-      <div class="generateur-classes">
-        {classes.map(([cle, libelle]) => (
-          <label key={cle} class="ligne">
-            <input
-              type="checkbox"
-              checked={options[cle] as boolean}
-              onInput={(e) => onPatch({ [cle]: e.currentTarget.checked })}
-            />
-            {libelle}
-          </label>
-        ))}
-        <label class="ligne">
-          <input
-            type="checkbox"
-            checked={options.avoidAmbiguous}
-            onInput={(e) => onPatch({ avoidAmbiguous: e.currentTarget.checked })}
-          />
-          Éviter l’ambigu (l 1 I O 0 o)
-        </label>
-      </div>
-    </section>
-  );
-}
 
 /** Message d'erreur à afficher. Les codes stables priment sur les messages. */
 function messageFor(err: unknown): string {
@@ -586,7 +259,7 @@ function App() {
   const [revealed, setRevealed] = useState<{ id: string; password: string } | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [proposal, setProposal] = useState<SaveProposal | null>(null);
-  const [reprompt, setReprompt] = useState<RepromptState | null>(null);
+  const [reprompt, setReprompt] = useState<RepromptState<void | Promise<void>> | null>(null);
 
   // Code à usage unique affiché, et générateur de mots de passe. `generator`
   // à `null` = panneau fermé ; sa cible dit où repartira le mot de passe
@@ -889,7 +562,11 @@ function App() {
   }
 
   function onLock(): void {
-    vault?.userKey.destroy();
+    if (vault !== null) {
+      // Tout le trousseau, pas seulement la clé du coffre : les clés
+      // d'organisation déchiffrent les items partagés.
+      destroyVaultKeys(vault.keys);
+    }
     void lockVault();
     resetVaultState();
   }
@@ -933,17 +610,26 @@ function App() {
     }
 
     const existing = findSaveCandidate(items, capture.origin, capture.username, matchesOrigin);
+
+    // Le mot de passe de l'item rapproché est déchiffré ici — c'est la popup qui
+    // détient les clés — puis la règle est appliquée par `decideProposal`, pure
+    // et testée. Un item introuvable dans `raw` donne `null`, que la règle
+    // traite comme « illisible » : elle propose plutôt que de se taire.
+    let existingPassword: string | null = null;
     if (existing !== null) {
       const cipher = raw.get(existing.id);
-      if (cipher !== undefined) {
-        const details = await decryptCipherDetails(cipher, keys, onDecryptError);
-        if (details.password === capture.password) {
-          await dismissProposal();
-          return;
-        }
-      }
+      existingPassword =
+        cipher === undefined
+          ? null
+          : (await decryptCipherDetails(cipher, keys, onDecryptError)).password;
     }
-    setProposal({ capture, existing });
+
+    const issue = decideProposal(existing, capture.password, existingPassword);
+    if (issue.kind === 'aucune') {
+      await dismissProposal();
+      return;
+    }
+    setProposal({ capture, existing: issue.kind === 'miseAJour' ? issue.item : null });
   }
 
   /** Oublie la proposition en cours : capture purgée, pastille éteinte. */
@@ -1125,10 +811,13 @@ function App() {
     }
     try {
       const config = parseTotp(secret);
-      const code = await generateTotp(config);
-      setOtp({ id: item.id, config, code, remaining: secondsRemaining(config) });
+      setOtp({ id: item.id, config });
       void noteUsage(item);
-      await copyOtp(code);
+      // Copie immédiate : un code à six chiffres n'est jamais consulté pour le
+      // plaisir, et il aura expiré avant qu'on ait fini de le recopier à la
+      // main. Le calcul est refait ici plutôt que réclamé au composant — ce
+      // serait la seule raison pour lui de remonter son état.
+      await copyOtp(await generateTotp(config));
     } catch (err) {
       setError(messageFor(err));
     }
@@ -1160,36 +849,11 @@ function App() {
   }
 
   /**
-   * Rafraîchit le code affiché à la seconde.
-   *
-   * Recalculé plutôt que décompté : un minuteur JavaScript dérive, et la
-   * popup peut être gelée par le navigateur. Se caler sur l'horloge à chaque
-   * battement garantit qu'un code affiché est bien celui de la fenêtre en
-   * cours — afficher un code périmé serait pire que ne rien afficher.
-   */
-  useEffect(() => {
-    if (otp === null) {
-      return;
-    }
-    const timer = setInterval(() => {
-      void (async () => {
-        const code = await generateTotp(otp.config);
-        setOtp((current) =>
-          current === null || current.id !== otp.id
-            ? current
-            : { ...current, code, remaining: secondsRemaining(current.config) },
-        );
-      })();
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [otp?.id, otp?.config]);
-
-  /**
    * Enregistre les options du générateur, une fois la main relevée.
    *
    * Le curseur de longueur émet un événement par cran : glisser de 8 à 128
-   * déclencherait cent vingt écritures de stockage pour une seule intention.
-   * Le tirage, lui, reste immédiat — c'est le retour visuel.
+   * déclencherait cent vingt écritures de stockage pour une seule intention. Le
+   * tirage, lui, reste immédiat — c'est le retour visuel.
    */
   function persistGeneratorOptions(options: PasswordOptions): void {
     if (generatorSaveTimer.current !== undefined) {
@@ -1536,278 +1200,86 @@ function App() {
 
   // --- Écran second facteur -------------------------------------------------
   if (vault === null && twoFaProviders !== null) {
-    const saisissables = twoFaProviders.filter((p) => p in PROVIDER_LABELS);
-    const seulementWebAuthn = saisissables.length === 0;
-
     return (
-      <div>
-        <header>
-          <h1>Zwarden</h1>
-          <button class="discret" onClick={openOptions}>
-            Paramètres
-          </button>
-        </header>
-        <main>
-          <p class="statut">Authentification à deux facteurs requise.</p>
-          {seulementWebAuthn ? (
-            <p class="erreur">
-              Seul WebAuthn est proposé par ce compte, et il n’est pas encore pris en charge.
-              Activer le mode OTP de la YubiKey ou le TOTP sur le serveur.
-            </p>
-          ) : (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                void attemptUnlock({
-                  provider: Number(twoFaChoice),
-                  token: twoFaCode.trim(),
-                  remember: rememberDevice,
-                });
-              }}
-            >
-              <label>
-                Méthode
-                <select
-                  value={twoFaChoice}
-                  onInput={(e) => setTwoFaChoice(e.currentTarget.value)}
-                >
-                  {saisissables.map((p) => (
-                    <option key={p} value={p}>
-                      {PROVIDER_LABELS[p]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Code
-                <input
-                  type="text"
-                  autocomplete="one-time-code"
-                  autofocus
-                  value={twoFaCode}
-                  onInput={(e) => setTwoFaCode(e.currentTarget.value)}
-                  required
-                />
-              </label>
-              <label class="ligne">
-                <input
-                  type="checkbox"
-                  checked={rememberDevice}
-                  onInput={(e) => setRememberDevice(e.currentTarget.checked)}
-                />
-                Se souvenir de cet appareil
-              </label>
-              <button type="submit" disabled={busy !== null || twoFaCode.trim() === ''}>
-                Valider
-              </button>
-            </form>
-          )}
-          <button
-            class="discret"
-            onClick={() => {
-              setTwoFaProviders(null);
-              setTwoFaCode('');
-              setError(null);
-            }}
-          >
-            ← Retour
-          </button>
-          {busy !== null && <p class="statut">{busy}</p>}
-          {error !== null && <p class="erreur">{error}</p>}
-        </main>
-      </div>
+      <EcranSecondFacteur
+        saisissables={twoFaProviders.filter((p) => p in PROVIDER_LABELS)}
+        libelles={PROVIDER_LABELS}
+        choice={twoFaChoice}
+        code={twoFaCode}
+        remember={rememberDevice}
+        busy={busy}
+        error={error}
+        onChoice={setTwoFaChoice}
+        onCode={setTwoFaCode}
+        onRemember={setRememberDevice}
+        onSubmit={() =>
+          void attemptUnlock({
+            provider: Number(twoFaChoice),
+            token: twoFaCode.trim(),
+            remember: rememberDevice,
+          })
+        }
+        onBack={() => {
+          setTwoFaProviders(null);
+          setTwoFaCode('');
+          setError(null);
+        }}
+        onOptions={openOptions}
+      />
     );
   }
 
   // --- Écran de déverrouillage ----------------------------------------------
   if (vault === null) {
     return (
-      <div>
-        <header>
-          <h1>Zwarden</h1>
-          <button class="discret" onClick={openOptions}>
-            Paramètres
-          </button>
-        </header>
-        <main>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void attemptUnlock();
-            }}
-          >
-            <label>
-              Serveur
-              <input
-                type="url"
-                placeholder="https://coffre.exemple.fr"
-                value={serverUrl}
-                onInput={(e) => setServerUrl(e.currentTarget.value)}
-                required
-              />
-            </label>
-            <label>
-              E-mail
-              <input
-                type="email"
-                value={email}
-                onInput={(e) => setEmail(e.currentTarget.value)}
-                required
-              />
-            </label>
-            <label>
-              Mot de passe maître
-              <div class="champ-mdp">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onInput={(e) => setPassword(e.currentTarget.value)}
-                  required
-                />
-                <button
-                  type="button"
-                  class="oeil"
-                  title={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
-                  onClick={() => setShowPassword(!showPassword)}
-                >
-                  <IconOeil barre={showPassword} />
-                </button>
-              </div>
-            </label>
-            <button type="submit" disabled={busy !== null}>
-              Déverrouiller
-            </button>
-          </form>
-          {busy !== null && <p class="statut">{busy}</p>}
-          {error !== null && <p class="erreur">{error}</p>}
-        </main>
-      </div>
+      <EcranDeverrouillage
+        serverUrl={serverUrl}
+        email={email}
+        password={password}
+        showPassword={showPassword}
+        busy={busy}
+        error={error}
+        onServerUrl={setServerUrl}
+        onEmail={setEmail}
+        onPassword={setPassword}
+        onToggleShowPassword={() => setShowPassword(!showPassword)}
+        onSubmit={() => void attemptUnlock()}
+        onOptions={openOptions}
+      />
     );
   }
 
   // --- Écran d'édition ------------------------------------------------------
   if (editing !== null) {
-    const estLogin = editing.type === 1;
     return (
-      <div>
-        <header>
-          <h1>Zwarden</h1>
-          <button class="discret" onClick={onCancelEdit}>
-            ← Annuler
-          </button>
-        </header>
-        <main>
-          <form onSubmit={(e) => void onSaveEdit(e)}>
-            <label>
-              Nom
-              <input
-                type="text"
-                value={editForm.name}
-                onInput={(e) => setEditForm({ ...editForm, name: e.currentTarget.value })}
-                required
-              />
-            </label>
-            {estLogin && (
-              <label>
-                Identifiant
-                <input
-                  type="text"
-                  value={editForm.username}
-                  onInput={(e) => setEditForm({ ...editForm, username: e.currentTarget.value })}
-                />
-              </label>
-            )}
-            {estLogin && (
-              <label>
-                Mot de passe
-                <div class="champ-mdp">
-                  <input
-                    type={editShowPassword ? 'text' : 'password'}
-                    value={editForm.password}
-                    onInput={(e) => setEditForm({ ...editForm, password: e.currentTarget.value })}
-                  />
-                  <button
-                    type="button"
-                    class="oeil"
-                    title={editShowPassword ? 'Masquer' : 'Afficher'}
-                    onClick={() => setEditShowPassword(!editShowPassword)}
-                  >
-                    <IconOeil barre={editShowPassword} />
-                  </button>
-                  <button
-                    type="button"
-                    class="oeil de"
-                    title="Générer un mot de passe"
-                    onClick={() => void openGenerator('edit')}
-                  >
-                    <IconDe />
-                  </button>
-                </div>
-              </label>
-            )}
-            {/* Hors du `<label>` : imbriquer des champs dans le libellé d'un
-                autre ferait basculer la case cochée dans le panneau sur le
-                champ mot de passe. */}
-            {renderGenerator()}
-            {estLogin && (
-              <label>
-                TOTP (clé ou otpauth://)
-                <input
-                  type="text"
-                  value={editForm.totp}
-                  onInput={(e) => setEditForm({ ...editForm, totp: e.currentTarget.value })}
-                />
-              </label>
-            )}
-            {estLogin && (
-              <label>
-                URIs (une par ligne)
-                <textarea
-                  rows={2}
-                  value={editForm.uris}
-                  onInput={(e) => setEditForm({ ...editForm, uris: e.currentTarget.value })}
-                />
-              </label>
-            )}
-            <label>
-              Notes
-              <textarea
-                rows={3}
-                value={editForm.notes}
-                onInput={(e) => setEditForm({ ...editForm, notes: e.currentTarget.value })}
-              />
-            </label>
-            {editPasskeys.length > 0 && (
-              <div class="passkeys-info">
-                {editPasskeys.map((pk, i) => (
-                  <p key={i}>
-                    <span class="badge">passkey</span> {pk.rpId ?? 'site inconnu'}
-                    {pk.userName !== null ? ` — ${pk.userName}` : ''}
-                  </p>
-                ))}
-                <p class="aide-diag">
-                  Passkey conservée telle quelle — la signature WebAuthn arrivera dans une
-                  prochaine version.
-                </p>
-              </div>
-            )}
-            <button type="submit" disabled={busy !== null}>
-              Enregistrer
-            </button>
-          </form>
-          {busy !== null && <p class="statut">{busy}</p>}
-          {error !== null && <p class="erreur">{error}</p>}
-        </main>
-      </div>
+      <FormulaireEdition
+        form={editForm}
+        estLogin={editing.type === 1}
+        showPassword={editShowPassword}
+        passkeys={editPasskeys}
+        busy={busy}
+        error={error}
+        generateur={renderGenerator()}
+        onPatch={(patch) => setEditForm({ ...editForm, ...patch })}
+        onToggleShowPassword={() => setEditShowPassword(!editShowPassword)}
+        onOpenGenerator={() => void openGenerator('edit')}
+        onSubmit={(e) => void onSaveEdit(e)}
+        onCancel={onCancelEdit}
+      />
     );
   }
 
   // --- Liste du coffre ------------------------------------------------------
+  // Mémoïsé : le filtrage parcourait tout le coffre à chaque réaffichage, et
+  // un code à usage unique ouvert en provoquait un par seconde.
   const needle = filter.trim().toLowerCase();
-  const visible =
-    needle === ''
-      ? vault.items
-      : vault.items.filter((i) => matchesNeedle(i, needle, vault.labels));
+  const visible = useMemo(
+    () =>
+      needle === ''
+        ? vault.items
+        : vault.items.filter((i) => matchesNeedle(i, needle, vault.labels)),
+    [vault.items, vault.labels, needle],
+  );
 
   return (
     <div>
@@ -1831,74 +1303,22 @@ function App() {
       </header>
       <main>
         {reprompt !== null && (
-          /* Superposition, pas un bandeau : une demande de mot de passe maître
-             doit être sans ambiguïté sur ce qu'elle protège et sur ce qui
-             attend derrière. */
-          <div class="voile">
-            <form class="reprompt" onSubmit={(e) => void onConfirmReprompt(e)}>
-              <p class="reprompt-titre">Mot de passe maître requis</p>
-              <p class="reprompt-detail">
-                « {reprompt.item.name ?? 'Cet item'} » est protégé par une nouvelle saisie.
-              </p>
-              <input
-                type="password"
-                autofocus
-                autocomplete="off"
-                value={reprompt.password}
-                disabled={reprompt.busy}
-                placeholder="Mot de passe maître"
-                onInput={(e) => setReprompt({ ...reprompt, password: e.currentTarget.value })}
-              />
-              {reprompt.error !== null && <p class="reprompt-erreur">{reprompt.error}</p>}
-              <div class="reprompt-actions">
-                <button type="submit" disabled={reprompt.busy || reprompt.password === ''}>
-                  {reprompt.busy ? 'Vérification…' : 'Déverrouiller'}
-                </button>
-                <button
-                  type="button"
-                  class="discret"
-                  disabled={reprompt.busy}
-                  onClick={() => setReprompt(null)}
-                >
-                  Annuler
-                </button>
-              </div>
-            </form>
-          </div>
+          <GardeReprompt
+            state={reprompt}
+            onPassword={(password) => setReprompt({ ...reprompt, password })}
+            onConfirm={(e) => void onConfirmReprompt(e)}
+            onCancel={() => setReprompt(null)}
+          />
         )}
         {renderGenerator()}
         {proposal !== null && (
-          <section class="proposition">
-            <p class="proposition-titre">
-              {proposal.existing === null
-                ? `Enregistrer les identifiants pour ${proposal.capture.host} ?`
-                : `Mettre à jour le mot de passe de « ${proposal.existing.name ?? proposal.capture.host} » ?`}
-            </p>
-            <p class="proposition-detail">
-              {proposal.capture.username === ''
-                ? '(identifiant non détecté — à compléter après enregistrement)'
-                : proposal.capture.username}
-              {' — '}
-              {/* Longueur plafonnée : elle n'apprend rien à l'utilisateur et
-                  en dit trop à qui regarde par-dessus son épaule. */}
-              {'•'.repeat(Math.min(proposal.capture.password.length, 12))}
-            </p>
-            <div class="proposition-actions">
-              <button disabled={busy !== null} onClick={() => void onSaveProposal()}>
-                Enregistrer
-              </button>
-              <button class="discret" onClick={() => void dismissProposal()}>
-                Ignorer
-              </button>
-              <button
-                class="discret"
-                title={`Ne plus rien proposer pour ${proposal.capture.host}`}
-                onClick={() => void onNeverForHost()}
-              >
-                Ne plus proposer ici
-              </button>
-            </div>
-          </section>
+          <Proposition
+            proposal={proposal}
+            busy={busy !== null}
+            onSave={() => void onSaveProposal()}
+            onDismiss={() => void dismissProposal()}
+            onNever={() => void onNeverForHost()}
+          />
         )}
         <input
           class="recherche"
@@ -1928,98 +1348,25 @@ function App() {
         ) : (
           <ul class="items">
             {visible.map((item) => (
-              <li key={item.id}>
-                <div class="item-ligne">
-                  <div class="item-texte">
-                    <div class="item-nom" title={item.name ?? ''}>
-                      {item.name ?? '(sans nom)'}
-                      {item.hasPasskey && <span class="badge">passkey</span>}
-                    </div>
-                    {item.username !== null && (
-                      <div
-                        class="item-user"
-                        title={`Copier : ${item.username}`}
-                        onClick={() => void onCopyUsername(item)}
-                      >
-                        {item.username}
-                        {copiedUserId === item.id ? ' — copié !' : ''}
-                      </div>
-                    )}
-                    {item.uris[0] !== undefined && <div class="item-uri">{item.uris[0]}</div>}
-                    {chipsFor(item, vault.labels).length > 0 && (
-                      <div class="chips">
-                        {chipsFor(item, vault.labels).map((chip) => (
-                          <button
-                            key={`${chip.kind}:${chip.name}`}
-                            class={`chip chip-${chip.kind}`}
-                            title={`${chip.title} — cliquer pour filtrer`}
-                            onClick={() => setFilter(chip.name)}
-                          >
-                            {chip.kind === 'dossier' ? `#${chip.name}` : `@${chip.name}`}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  {item.hasTotp && (
-                    <button
-                      class="discret oeil-item"
-                      title={
-                        otp?.id === item.id
-                          ? 'Masquer le code'
-                          : 'Code à usage unique — l’affiche et le copie'
-                      }
-                      onClick={() => void onToggleOtp(item)}
-                    >
-                      <IconOtp />
-                    </button>
-                  )}
-                  <button
-                    class="discret oeil-item"
-                    title={
-                      revealed?.id === item.id
-                        ? 'Masquer le mot de passe'
-                        : 'Voir le mot de passe'
-                    }
-                    onClick={() => void onToggleReveal(item)}
-                  >
-                    <IconOeil barre={revealed?.id === item.id} />
-                  </button>
-                  <button
-                    class="discret oeil-item"
-                    title="Modifier l’item"
-                    onClick={() => void onEdit(item)}
-                  >
-                    <IconCrayon />
-                  </button>
-                  <button
-                    class={`icone${copiedId === item.id ? ' copie-ok' : ''}`}
-                    title={copiedId === item.id ? 'Mot de passe copié !' : 'Copier le mot de passe'}
-                    onClick={() => void onCopyPassword(item)}
-                  >
-                    <IconCopie fait={copiedId === item.id} />
-                  </button>
-                  {tabOrigin !== null && matchesOrigin(item.uris, tabOrigin) && (
-                    <button
-                      class="remplir"
-                      title="Remplir le formulaire de l’onglet actif"
-                      onClick={() => void onFill(item)}
-                    >
-                      Remplir
-                    </button>
-                  )}
-                </div>
-                {revealed?.id === item.id && <div class="secret">{revealed.password}</div>}
-                {otp?.id === item.id && (
-                  <div class="otp" title="Copier le code" onClick={() => void copyOtp(otp.code)}>
-                    <span class="otp-code">{formatTotp(otp.code)}</span>
-                    <span class="otp-fin">
-                      {copiedOtp && <span class="otp-copie">copié !</span>}
-                      <AnneauOtp remaining={otp.remaining} period={otp.config.period} />
-                    </span>
-                  </div>
-                )}
-              </li>
+              <LigneItem
+                key={item.id}
+                item={item}
+                labels={vault.labels}
+                copiePassword={copiedId === item.id}
+                copieUsername={copiedUserId === item.id}
+                revele={revealed?.id === item.id ? revealed.password : null}
+                otpConfig={otp?.id === item.id ? otp.config : null}
+                copieOtp={copiedOtp}
+                remplissable={tabOrigin !== null && matchesOrigin(item.uris, tabOrigin)}
+                onCopyUsername={() => void onCopyUsername(item)}
+                onCopyPassword={() => onCopyPassword(item)}
+                onToggleReveal={() => onToggleReveal(item)}
+                onToggleOtp={() => onToggleOtp(item)}
+                onEdit={() => onEdit(item)}
+                onFill={() => void onFill(item)}
+                onCopyOtp={(code) => void copyOtp(code)}
+                onFilter={setFilter}
+              />
             ))}
           </ul>
         )}

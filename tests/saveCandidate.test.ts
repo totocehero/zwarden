@@ -11,7 +11,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { CipherOverview } from '../src/core/vault/cipherService.js';
-import { findSaveCandidate } from '../src/core/vault/cipherService.js';
+import { decideProposal, findSaveCandidate } from '../src/core/vault/cipherService.js';
 import { matchesOrigin } from '../src/core/vault/uriMatch.js';
 
 function item(id: string, username: string, uris: string[]): CipherOverview {
@@ -70,5 +70,43 @@ describe('findSaveCandidate', () => {
   it('ne rapproche rien sans identifiant détecté', () => {
     expect(chercher('https://github.com', '')).toBeNull();
     expect(chercher('https://github.com', '   ')).toBeNull();
+  });
+});
+
+describe('decideProposal', () => {
+  const capture = 'nouveau-secret';
+
+  it('propose la création quand rien ne se rapproche', () => {
+    expect(decideProposal(null, capture, null)).toEqual({ kind: 'creation' });
+  });
+
+  /**
+   * Le cas le plus fréquent : une connexion ordinaire. Le taire est ce qui donne
+   * du sens à la pastille — s'allumer à chaque connexion réussie la rendrait
+   * insignifiante.
+   */
+  it('se tait quand le coffre a déjà ce mot de passe', () => {
+    const existant = item('i1', 'alice', ['https://exemple.fr']);
+    expect(decideProposal(existant, capture, capture)).toEqual({ kind: 'aucune' });
+  });
+
+  it('propose la mise à jour quand le mot de passe a changé', () => {
+    const existant = item('i1', 'alice', ['https://exemple.fr']);
+    expect(decideProposal(existant, capture, 'ancien')).toEqual({
+      kind: 'miseAJour',
+      item: existant,
+    });
+  });
+
+  /**
+   * Item illisible : se taire sur la foi d'une comparaison impossible ferait
+   * perdre la saisie. On propose, l'utilisateur tranche.
+   */
+  it('propose la mise à jour quand l’item existant est illisible', () => {
+    const existant = item('i1', 'alice', ['https://exemple.fr']);
+    expect(decideProposal(existant, capture, null)).toEqual({
+      kind: 'miseAJour',
+      item: existant,
+    });
   });
 });
