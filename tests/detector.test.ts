@@ -215,6 +215,70 @@ describe('guessUsername', () => {
     expect(guessUsername(f, f.querySelector('[name="p"]')!, TOUT_VISIBLE)).toBe('alice');
   });
 
+  /**
+   * Le bogue constaté à l'usage : « il m'a mis le mot de passe dans le login ».
+   *
+   * Motif « afficher le mot de passe » à deux champs — un `password` et un `text`
+   * miroir dont le site bascule la visibilité. Le miroir est rempli, visible, et
+   * placé avant le champ mot de passe : c'était donc le candidat parfait pour la
+   * règle de proximité, qui livrait le mot de passe comme identifiant. L'item
+   * créé portait alors le mot de passe en clair dans son champ identifiant.
+   */
+  it('n’accepte jamais un champ qui contient le mot de passe', () => {
+    const f = fragment(`
+      <form>
+        <input name="u" type="text">
+        <input name="miroir" type="text">
+        <input name="p" type="password">
+      </form>`);
+    saisir(f, { u: 'alice@exemple.fr', miroir: 'S3cret!', p: 'S3cret!' });
+
+    expect(findCapture(f, null, TOUT_VISIBLE)).toEqual({
+      username: 'alice@exemple.fr',
+      password: 'S3cret!',
+    });
+  });
+
+  /** Même piège, sans identifiant à récupérer : mieux vaut vide que faux. */
+  it('rend vide plutôt que le mot de passe quand le miroir est seul', () => {
+    const f = fragment(`
+      <form>
+        <input name="miroir" type="text">
+        <input name="p" type="password">
+      </form>`);
+    saisir(f, { miroir: 'S3cret!', p: 'S3cret!' });
+
+    expect(findCapture(f, null, TOUT_VISIBLE)?.username).toBe('');
+  });
+
+  /** Le site annonce lui-même le champ comme un mot de passe : on le croit. */
+  it('écarte un champ annoté comme mot de passe', () => {
+    const f = fragment(`
+      <form>
+        <input name="nouveau" type="text" autocomplete="new-password">
+        <input name="p" type="password">
+      </form>`);
+    saisir(f, { nouveau: 'autre-chose', p: 'S3cret!' });
+
+    expect(findCapture(f, null, TOUT_VISIBLE)?.username).toBe('');
+  });
+
+  /**
+   * Hors formulaire, le balayage porte sur tout le document : un champ de
+   * recherche où l'utilisateur aurait collé son mot de passe ne doit pas
+   * ressortir comme identifiant.
+   */
+  it('ne reprend pas le mot de passe trouvé ailleurs dans la page', () => {
+    fragment(`
+      <div>
+        <input name="recherche" type="text">
+        <div><input name="p" type="password"></div>
+      </div>`);
+    saisir(document, { recherche: 'S3cret!', p: 'S3cret!' });
+
+    expect(findCapture(document, null, TOUT_VISIBLE)?.username).toBe('');
+  });
+
   it('rend une chaîne vide quand rien ne ressemble à un identifiant', () => {
     const f = fragment('<form><input name="p" type="password"></form>');
     saisir(f, { p: 'x' });

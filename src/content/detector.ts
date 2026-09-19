@@ -29,6 +29,11 @@
  * couvre les plus courantes ; il ne prétend pas être exhaustif. Un identifiant
  * non capturé se rattrape par « Ajouter » dans la popup — un identifiant
  * capturé à tort ne coûte qu'un « Ignorer ».
+ *
+ * L'identifiant, lui, est **deviné** : aucun site n'est obligé de l'annoncer. Le
+ * deviner faux est possible ; le deviner *égal au mot de passe* ne l'est plus
+ * (`heuristics.ts`), parce que c'était le seul cas où une erreur de devinette
+ * écrivait un secret dans un champ qui n'est pas fait pour lui.
  */
 
 import { findCapture } from './heuristics.js';

@@ -57,7 +57,7 @@ Le noyau cryptographique est implémenté et testé. Le reste est en cours.
 - [x] `SymmetricCryptoKey` — clés 32/64 octets
 - [x] AES-256-CBC + HMAC-SHA256, Encrypt-then-MAC
 - [x] Dérivation de clé : PBKDF2-SHA256 et Argon2id
-- [x] 297 tests, dont les vecteurs RFC 4231 / 5869 / 6238 / 7914
+- [x] 301 tests, dont les vecteurs RFC 4231 / 5869 / 6238 / 7914
 - [x] **Interopérabilité validée contre Vaultwarden 2026.6.0** — authentification,
       déchiffrement de la clé de coffre, et aller-retour écriture/lecture complet
 - [x] Client API : prelogin, authentification, rafraîchissement de session,
@@ -136,7 +136,7 @@ interopérables dans les deux sens :
 
 ```bash
 npm install
-npm test          # 297 tests
+npm test          # 301 tests
 npm run typecheck # TypeScript strict
 npm run lint      # ESLint : promesses perdues, comparaisons laxistes
 npm run build

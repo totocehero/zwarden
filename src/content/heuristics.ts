@@ -79,6 +79,29 @@ export function estBasculeAffichage(control: Element, password: HTMLInputElement
 }
 
 /**
+ * Écarte un champ texte qui n'est pas un identifiant mais un mot de passe.
+ *
+ * Deux marques, et la première suffit presque toujours :
+ *
+ * - **sa valeur est exactement le mot de passe capturé.** C'est le motif
+ *   « afficher le mot de passe » à deux champs : le site garde un `password` et
+ *   un `text` miroir, et bascule la visibilité entre les deux. Le miroir est un
+ *   champ texte rempli, visible, souvent placé juste avant le champ mot de
+ *   passe — donc le candidat idéal pour la règle de proximité, qui livrait alors
+ *   le mot de passe comme identifiant. Un identifiant égal au mot de passe n'est
+ *   jamais ce que l'utilisateur voulait : le refuser ne coûte rien et ferme
+ *   toutes les variantes du motif d'un coup ;
+ * - le site l'annonce lui-même comme un mot de passe (`autocomplete`).
+ */
+function estMotDePasseDeguise(input: HTMLInputElement, motDePasse: string): boolean {
+  if (input.value === motDePasse) {
+    return true;
+  }
+  const auto = input.getAttribute('autocomplete');
+  return auto === 'current-password' || auto === 'new-password';
+}
+
+/**
  * Devine l'identifiant associé à un champ mot de passe.
  *
  * Par ordre de fiabilité : l'annotation explicite du site
@@ -86,6 +109,9 @@ export function estBasculeAffichage(control: Element, password: HTMLInputElement
  * texte rempli **avant** le mot de passe — l'ordre visuel est le seul indice
  * quand le site n'annote rien. Faute de mieux : chaîne vide, l'utilisateur
  * complétera dans la popup.
+ *
+ * Dans tous les cas, un champ qui porte le mot de passe est écarté — voir
+ * {@link estMotDePasseDeguise}.
  */
 export function guessUsername(
   scope: ParentNode,
@@ -95,13 +121,20 @@ export function guessUsername(
   const annotated = scope.querySelector<HTMLInputElement>(
     'input[autocomplete="username"], input[autocomplete="email"]',
   );
-  if (annotated !== null && annotated.value !== '') {
+  if (
+    annotated !== null &&
+    annotated.value !== '' &&
+    !estMotDePasseDeguise(annotated, password.value)
+  ) {
     return annotated.value;
   }
 
   const candidates = [
     ...scope.querySelectorAll<HTMLInputElement>('input[type="email"], input[type="text"]'),
-  ].filter((input) => input.value !== '' && visible(input));
+  ].filter(
+    (input) =>
+      input.value !== '' && visible(input) && !estMotDePasseDeguise(input, password.value),
+  );
 
   let best = '';
   for (const candidate of candidates) {

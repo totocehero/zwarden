@@ -218,6 +218,18 @@ ne voudrait plus rien dire), mise à jour, ou création.
   domaine : un rapprochement laxiste n'afficherait pas une mauvaise ligne, il
   écraserait un mot de passe valide depuis un site voisin.
 
+- **L'identifiant est deviné, jamais garanti.** Aucun site n'est obligé de
+  l'annoncer (`autocomplete="username"`). La règle de repli — le dernier champ
+  texte rempli avant le mot de passe — se trompe sur les mises en page tordues,
+  et l'utilisateur corrige alors dans la popup. Une seule erreur de devinette
+  était inacceptable : reprendre le mot de passe lui-même. Le motif « afficher
+  le mot de passe » à deux champs (un `password` et un `text` miroir dont le site
+  bascule la visibilité) plaçait un champ texte rempli, visible, juste avant le
+  champ mot de passe — le candidat parfait pour la règle de proximité. L'item
+  créé portait alors le mot de passe en clair dans son champ identifiant. Un
+  candidat dont la valeur est exactement le mot de passe est désormais écarté,
+  ainsi qu'un champ que le site annonce comme mot de passe.
+
 Limites connues : cadre principal seulement, et les connexions sans `<form>`
 ni bouton identifiable échappent au détecteur. Un identifiant manqué se
 rattrape à la main ; un identifiant capturé à tort ne coûte qu'un « Ignorer ».
