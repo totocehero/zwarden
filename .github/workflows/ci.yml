@@ -1,10 +1,9 @@
-# Vérifications de base sur chaque poussée et chaque demande de fusion.
+# Baseline checks on every push and every pull request.
 #
-# Les quatre commandes sont celles qu'un contributeur lance en local, dans le
-# même ordre : rien à découvrir dans ce fichier qui ne soit pas dans le README.
-# Le budget de poids en fait partie — une extension qui grossit le fait par
-# petits ajouts dont aucun ne semble coûteux, et c'est cette accumulation que
-# la vérification attrape.
+# The six commands are the ones a contributor runs locally, in the same order:
+# nothing to discover in this file that is not already in the README. The size
+# budget is part of it — an extension grows through small additions none of
+# which seems costly, and it is that accumulation this check catches.
 name: CI
 
 on:
@@ -13,7 +12,7 @@ on:
   pull_request:
 
 jobs:
-  verifier:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

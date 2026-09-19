@@ -1,9 +1,9 @@
 /**
- * @file Classement « dernier utilisé en tête ».
+ * @file The "most recently used first" ordering.
  *
- * Deux fonctions pures portent tout le comportement observable : l'ordre de
- * la liste (`sortByLastUsed`) et le plafond du journal d'usage
- * (`pruneLastUsed`). Le reste n'est que du stockage.
+ * Two pure functions carry all the observable behaviour: the list's order
+ * (`sortByLastUsed`) and the use log's cap (`pruneLastUsed`). The rest is just
+ * storage.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -31,44 +31,44 @@ function item(id: string): CipherOverview {
 const ids = (items: readonly CipherOverview[]): string[] => items.map((i) => i.id);
 
 describe('sortByLastUsed', () => {
-  const liste = [item('a'), item('b'), item('c'), item('d')];
+  const list = [item('a'), item('b'), item('c'), item('d')];
 
-  it('laisse la liste intacte sans aucun usage', () => {
-    expect(sortByLastUsed(liste, {})).toBe(liste);
+  it('leaves the list untouched when nothing has been used', () => {
+    expect(sortByLastUsed(list, {})).toBe(list);
   });
 
-  it('remonte l’item utilisé en tête', () => {
-    expect(ids(sortByLastUsed(liste, { c: 1000 }))).toEqual(['c', 'a', 'b', 'd']);
+  it('floats the used item to the top', () => {
+    expect(ids(sortByLastUsed(list, { c: 1000 }))).toEqual(['c', 'a', 'b', 'd']);
   });
 
-  it('classe les items utilisés du plus récent au plus ancien', () => {
-    expect(ids(sortByLastUsed(liste, { a: 10, c: 30, d: 20 }))).toEqual(['c', 'd', 'a', 'b']);
+  it('orders used items from most to least recent', () => {
+    expect(ids(sortByLastUsed(list, { a: 10, c: 30, d: 20 }))).toEqual(['c', 'd', 'a', 'b']);
   });
 
-  it('préserve l’ordre d’origine des items jamais utilisés', () => {
-    expect(ids(sortByLastUsed(liste, { d: 1 }))).toEqual(['d', 'a', 'b', 'c']);
+  it('preserves the original order of items never used', () => {
+    expect(ids(sortByLastUsed(list, { d: 1 }))).toEqual(['d', 'a', 'b', 'c']);
   });
 
-  it('ignore les usages d’items absents du coffre', () => {
-    // Item supprimé depuis, ou appartenant à un autre compte.
-    expect(ids(sortByLastUsed(liste, { zzz: 999 }))).toEqual(['a', 'b', 'c', 'd']);
+  it('ignores uses of items absent from the vault', () => {
+    // An item deleted since, or belonging to another account.
+    expect(ids(sortByLastUsed(list, { zzz: 999 }))).toEqual(['a', 'b', 'c', 'd']);
   });
 });
 
 describe('pruneLastUsed', () => {
-  it('laisse passer un journal court', () => {
+  it('lets a short log through', () => {
     expect(pruneLastUsed({ a: 1, b: 2 })).toEqual({ a: 1, b: 2 });
   });
 
-  it('ne garde que les 100 usages les plus récents', () => {
-    const gros: Record<string, number> = {};
+  it('keeps only the 100 most recent uses', () => {
+    const large: Record<string, number> = {};
     for (let i = 0; i < 150; i += 1) {
-      gros[`id${i}`] = i;
+      large[`id${i}`] = i;
     }
-    const élagué = pruneLastUsed(gros);
-    expect(Object.keys(élagué)).toHaveLength(100);
-    expect(élagué['id149']).toBe(149);
-    expect(élagué['id50']).toBe(50);
-    expect(élagué['id49']).toBeUndefined();
+    const pruned = pruneLastUsed(large);
+    expect(Object.keys(pruned)).toHaveLength(100);
+    expect(pruned['id149']).toBe(149);
+    expect(pruned['id50']).toBe(50);
+    expect(pruned['id49']).toBeUndefined();
   });
 });

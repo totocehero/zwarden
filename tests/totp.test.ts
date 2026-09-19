@@ -1,10 +1,10 @@
 /**
- * @file Codes à usage unique.
+ * @file One-time codes.
  *
- * Les vecteurs de la RFC 6238 (annexe B) sont la seule preuve qui vaille :
- * un générateur TOTP qui se trompe ne plante pas, il affiche un code refusé
- * par le site — et l'utilisateur accuse le site. On les rejoue donc tels
- * quels, pour les trois algorithmes.
+ * RFC 6238's vectors (appendix B) are the only proof worth having: a TOTP
+ * generator that gets it wrong does not crash, it shows a code the site refuses
+ * — and the user blames the site. We therefore replay them as they stand, for
+ * all three algorithms.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -19,17 +19,17 @@ import {
 } from '../src/core/vault/totp.js';
 
 /**
- * Secrets de la RFC : `12345678901234567890` répété jusqu'à la longueur du
- * bloc de l'algorithme, puis encodé en base32.
+ * The RFC's secrets: `12345678901234567890` repeated up to the algorithm's block
+ * length, then base32-encoded.
  */
 function secretBase32(bytes: number): string {
-  const graine = '12345678901234567890';
-  const étendu = graine.repeat(Math.ceil(bytes / graine.length)).slice(0, bytes);
+  const seed = '12345678901234567890';
+  const extended = seed.repeat(Math.ceil(bytes / seed.length)).slice(0, bytes);
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
   let buffer = 0;
   let bits = 0;
   let out = '';
-  for (const char of étendu) {
+  for (const char of extended) {
     buffer = (buffer << 8) | char.charCodeAt(0);
     bits += 8;
     while (bits >= 5) {
@@ -47,9 +47,9 @@ const SHA1 = secretBase32(20);
 const SHA256 = secretBase32(32);
 const SHA512 = secretBase32(64);
 
-describe('vecteurs RFC 6238', () => {
-  // Annexe B : instant (secondes), code attendu sur 8 chiffres.
-  const cas: ReadonlyArray<readonly [number, string, string, string]> = [
+describe('RFC 6238 vectors', () => {
+  // Appendix B: instant (seconds), expected 8-digit code.
+  const cases: ReadonlyArray<readonly [number, string, string, string]> = [
     [59, SHA1, 'SHA1', '94287082'],
     [59, SHA256, 'SHA256', '46119246'],
     [59, SHA512, 'SHA512', '90693936'],
@@ -62,25 +62,25 @@ describe('vecteurs RFC 6238', () => {
     [1234567890, SHA512, 'SHA512', '93441116'],
   ];
 
-  for (const [secondes, secret, algo, attendu] of cas) {
-    it(`${algo} à T=${secondes} donne ${attendu}`, async () => {
+  for (const [seconds, secret, algo, expected] of cases) {
+    it(`${algo} at T=${seconds} gives ${expected}`, async () => {
       const config = parseTotp(
         `otpauth://totp/Test?secret=${secret}&digits=8&algorithm=${algo}&period=30`,
       );
-      expect(await generateTotp(config, secondes * 1000)).toBe(attendu);
+      expect(await generateTotp(config, seconds * 1000)).toBe(expected);
     });
   }
 
-  it('reste juste au-delà de 2^31 secondes', async () => {
-    // Le compteur y dépasse la plage des opérateurs binaires 32 bits de
-    // JavaScript : c'est le cas qui casse une implémentation naïve.
+  it('stays correct beyond 2^31 seconds', async () => {
+    // There the counter exceeds the range of JavaScript's 32-bit bitwise
+    // operators: this is the case that breaks a naive implementation.
     const config = parseTotp(`otpauth://totp/Test?secret=${SHA1}&digits=8`);
     expect(await generateTotp(config, 20000000000 * 1000)).toBe('65353130');
   });
 });
 
 describe('parseTotp', () => {
-  it('accepte un secret base32 nu, avec les défauts de la RFC', () => {
+  it('accepts a bare base32 secret, with the RFC defaults', () => {
     const config = parseTotp('JBSWY3DPEHPK3PXP');
     expect(config.digits).toBe(6);
     expect(config.period).toBe(30);
@@ -88,12 +88,12 @@ describe('parseTotp', () => {
     expect(config.secret).toEqual(fromBase32('JBSWY3DPEHPK3PXP'));
   });
 
-  it('tolère espaces, tirets et minuscules dans le secret', () => {
-    // Ces secrets sont recopiés à la main depuis une page web.
+  it('tolerates spaces, dashes and lowercase in the secret', () => {
+    // These secrets get copied by hand from a web page.
     expect(parseTotp('jbsw y3dp-ehpk 3pxp').secret).toEqual(parseTotp('JBSWY3DPEHPK3PXP').secret);
   });
 
-  it('lit digits, period et algorithm depuis l’URI', () => {
+  it('reads digits, period and algorithm from the URI', () => {
     const config = parseTotp(
       'otpauth://totp/Site:moi?secret=JBSWY3DPEHPK3PXP&digits=8&period=60&algorithm=SHA256',
     );
@@ -102,44 +102,44 @@ describe('parseTotp', () => {
     expect(config.algorithm).toBe('SHA-256');
   });
 
-  it('retombe sur les défauts pour un paramètre aberrant', () => {
+  it('falls back to the defaults for an absurd parameter', () => {
     const config = parseTotp('otpauth://totp/Site?secret=JBSWY3DPEHPK3PXP&digits=99&period=0');
     expect(config.digits).toBe(6);
     expect(config.period).toBe(30);
   });
 
-  it('refuse ce qu’il ne sait pas calculer', () => {
+  it('refuses what it cannot compute', () => {
     expect(() => parseTotp('')).toThrow(TotpError);
     expect(() => parseTotp('   ')).toThrow(TotpError);
-    // HOTP est un compteur, pas une horloge : un code TOTP y serait faux.
+    // HOTP is a counter, not a clock: a TOTP code there would be wrong.
     expect(() => parseTotp('otpauth://hotp/Site?secret=JBSWY3DPEHPK3PXP')).toThrow(TotpError);
     expect(() => parseTotp('otpauth://totp/Site?digits=6')).toThrow(TotpError);
     expect(() => parseTotp('otpauth://totp/Site?secret=JBSW&algorithm=MD5')).toThrow(TotpError);
-    expect(() => parseTotp('pas!du!base32')).toThrow(TotpError);
+    expect(() => parseTotp('not!base32!')).toThrow(TotpError);
   });
 });
 
 describe('secondsRemaining', () => {
   const config = parseTotp('JBSWY3DPEHPK3PXP');
 
-  it('décompte jusqu’à la fin de la fenêtre', () => {
+  it('counts down to the end of the window', () => {
     expect(secondsRemaining(config, 0)).toBe(30);
     expect(secondsRemaining(config, 1_000)).toBe(29);
     expect(secondsRemaining(config, 29_000)).toBe(1);
     expect(secondsRemaining(config, 30_000)).toBe(30);
   });
 
-  it('ne renvoie jamais zéro — un code affiché est valide au moins 1 s', () => {
+  it('never returns zero — a displayed code is valid for at least 1 s', () => {
     for (let s = 0; s < 120; s++) {
-      const restant = secondsRemaining(config, s * 1000);
-      expect(restant).toBeGreaterThan(0);
-      expect(restant).toBeLessThanOrEqual(30);
+      const remaining = secondsRemaining(config, s * 1000);
+      expect(remaining).toBeGreaterThan(0);
+      expect(remaining).toBeLessThanOrEqual(30);
     }
   });
 });
 
 describe('formatTotp', () => {
-  it('coupe le code en deux moitiés lisibles', () => {
+  it('splits the code into two readable halves', () => {
     expect(formatTotp('123456')).toBe('123 456');
     expect(formatTotp('12345678')).toBe('1234 5678');
   });

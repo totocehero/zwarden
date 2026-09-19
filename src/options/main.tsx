@@ -1,26 +1,21 @@
 /**
- * @file Page de paramètres.
+ * @file The settings page.
  *
- * Édite les préférences durables (`chrome.storage.local`) et offre les actions
- * d'hygiène : verrouiller, oublier les dispenses 2FA ou le classement d'usage,
- * régénérer l'identifiant d'appareil. Aucune clé ni mot de passe ne transite par
- * cette page.
+ * Edits the durable preferences (`chrome.storage.local`) and offers the hygiene
+ * actions: lock, forget 2FA exemptions or the use ordering, regenerate the
+ * device identifier. No key and no password passes through this page.
  *
- * Ce fichier ne fait qu'assembler : l'état et les actions vivent dans
- * `useParametres`, le rendu dans `components/`.
+ * This file only assembles: the state and the actions live in `useSettings`, the
+ * rendering in `components/`.
  */
 
 import { render } from 'preact';
 
-import { SectionActions, SectionAppareil } from './components/SectionsActions.js';
-import {
-  SectionEnregistrement,
-  SectionSecurite,
-  SectionServeur,
-} from './components/SectionsParametres.js';
-import { useParametres } from './hooks/useParametres.js';
+import { ActionsSection, DeviceSection } from './components/ActionSections.js';
+import { SaveSection, SecuritySection, ServerSection } from './components/SettingsSections.js';
+import { useSettings } from './hooks/useSettings.js';
 
-/** Version affichée. `dev` hors contexte d'extension (aperçu Vite). */
+/** Displayed version. `dev` outside an extension context (Vite preview). */
 function appVersion(): string {
   if (typeof chrome !== 'undefined' && typeof chrome.runtime?.getManifest === 'function') {
     return chrome.runtime.getManifest().version;
@@ -29,30 +24,30 @@ function appVersion(): string {
 }
 
 function App() {
-  const p = useParametres();
+  const s = useSettings();
 
   return (
     <div class="page">
-      <h1>Zwarden — Paramètres</h1>
+      <h1>Zwarden — Settings</h1>
       <p class="version">Version {appVersion()}</p>
 
-      <form onSubmit={(e) => void p.save(e)}>
-        <SectionServeur settings={p.settings} patch={p.patch} />
-        <SectionSecurite settings={p.settings} patch={p.patch} />
-        <SectionEnregistrement settings={p.settings} patch={p.patch} />
+      <form onSubmit={(e) => void s.save(e)}>
+        <ServerSection settings={s.settings} patch={s.patch} />
+        <SecuritySection settings={s.settings} patch={s.patch} />
+        <SaveSection settings={s.settings} patch={s.patch} />
 
-        <button type="submit">Enregistrer</button>
-        <p class="statut">{p.statut}</p>
+        <button type="submit">Save</button>
+        <p class="status">{s.status}</p>
       </form>
 
-      <SectionActions
-        onLockNow={() => void p.lockNow()}
-        onForgetTwoFa={() => void p.forgetTwoFa()}
-        onForgetNeverSave={() => void p.forgetNeverSave()}
-        onForgetLastUsed={() => void p.forgetLastUsed()}
+      <ActionsSection
+        onLockNow={() => void s.lockNow()}
+        onForgetTwoFa={() => void s.forgetTwoFa()}
+        onForgetNeverSave={() => void s.forgetNeverSave()}
+        onForgetLastUsed={() => void s.forgetLastUsed()}
       />
 
-      <SectionAppareil deviceId={p.deviceId} onRegenerate={() => void p.regenerateDevice()} />
+      <DeviceSection deviceId={s.deviceId} onRegenerate={() => void s.regenerateDevice()} />
     </div>
   );
 }

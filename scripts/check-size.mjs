@@ -1,7 +1,7 @@
 /**
- * Vérifie le budget de poids de l'extension : `dist/` doit rester sous
- * 300 Ko (hors sourcemaps). Échoue en sortie non nulle sinon, pour servir de
- * garde-fou en CI. Voir le README : c'est la promesse centrale du projet.
+ * Checks the extension's size budget: `dist/` must stay under 300 KB (excluding
+ * source maps). Exits non-zero otherwise, so it can act as a CI guard rail. See
+ * the README: this is the project's central promise.
  */
 
 import { readdirSync, statSync } from 'node:fs';
@@ -22,27 +22,27 @@ function* files(dir) {
 }
 
 let total = 0;
-const lignes = [];
+const rows = [];
 try {
   for (const path of files(DIST)) {
     const size = statSync(path).size;
     total += size;
-    lignes.push([size, path.slice(DIST.length + 1)]);
+    rows.push([size, path.slice(DIST.length + 1)]);
   }
 } catch {
-  console.error('dist/ introuvable — lancer `npm run build` d’abord.');
+  console.error('dist/ not found — run `npm run build` first.');
   process.exit(1);
 }
 
-lignes.sort((a, b) => b[0] - a[0]);
-for (const [size, name] of lignes) {
-  console.log(`${String(Math.round(size / 1024)).padStart(6)} Ko  ${name}`);
+rows.sort((a, b) => b[0] - a[0]);
+for (const [size, name] of rows) {
+  console.log(`${String(Math.round(size / 1024)).padStart(6)} KB  ${name}`);
 }
 
-const ko = Math.round(total / 1024);
+const kb = Math.round(total / 1024);
 const budget = Math.round(BUDGET / 1024);
 if (total > BUDGET) {
-  console.error(`\nTOTAL : ${ko} Ko — budget de ${budget} Ko DÉPASSÉ`);
+  console.error(`\nTOTAL: ${kb} KB — budget of ${budget} KB EXCEEDED`);
   process.exit(1);
 }
-console.log(`\nTOTAL : ${ko} Ko / budget ${budget} Ko`);
+console.log(`\nTOTAL: ${kb} KB / budget ${budget} KB`);

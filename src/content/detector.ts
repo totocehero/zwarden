@@ -1,52 +1,51 @@
 /**
- * @file Détecteur d'identifiants saisis — script de contenu.
+ * @file Entered-credentials detector — content script.
  *
- * ## Ce qu'il fait, et rien d'autre
+ * ## What it does, and nothing else
  *
- * Il observe les soumissions de formulaires de la page, et lorsqu'un mot de
- * passe non vide vient d'être saisi, il l'envoie **au service worker de
- * l'extension** — jamais ailleurs. Il n'injecte aucune interface, ne lit jamais
- * le coffre, ne remplit rien : la décision « enregistrer ou non » appartient à
- * la popup, qui seule sait ce que le coffre contient déjà.
+ * It watches the page's form submissions, and when a non-empty password has just
+ * been entered, it sends it **to the extension's service worker** — never
+ * anywhere else. It injects no UI, never reads the vault, fills nothing in: the
+ * "save or not" decision belongs to the popup, which alone knows what the vault
+ * already contains.
  *
- * ## Ce fichier ne décide rien
+ * ## This file decides nothing
  *
- * Tout le discernement — quel champ, quel identifiant, est-ce un bouton
- * « afficher » — vit dans `heuristics.ts`, sans API d'extension ni état global,
- * donc sous tests. Ici ne reste que ce qui exige le vrai navigateur : le
- * câblage des événements, la déduplication temporelle, l'envoi du message.
+ * All the judgement — which field, which username, is this a "show" button —
+ * lives in `heuristics.ts`, with no extension API and no global state, hence
+ * under test. What remains here is only what needs a real browser: wiring the
+ * events, deduplicating in time, sending the message.
  *
- * ## Pourquoi il ne remplit pas
+ * ## Why it does not fill
  *
- * Les deux règles d'autofill de `docs/EXTENSION.md` §4 restent entières :
- * aucun remplissage sans geste explicite. Ce script n'écrit rien dans la page,
- * il ne fait que lire ce que l'utilisateur vient lui-même de taper.
+ * The two autofill rules from `docs/EXTENSION.md` §4 stand whole: no filling
+ * without an explicit gesture. This script writes nothing into the page; it only
+ * reads what the user has just typed themselves.
  *
- * ## Ce qui reste imparfait, et assumé
+ * ## What stays imperfect, knowingly
  *
- * Les connexions sans `<form>` (applications monopages qui appellent `fetch`
- * sur un clic) ne déclenchent pas d'événement `submit`. Le repli sur le clic
- * couvre les plus courantes ; il ne prétend pas être exhaustif. Un identifiant
- * non capturé se rattrape par « Ajouter » dans la popup — un identifiant
- * capturé à tort ne coûte qu'un « Ignorer ».
+ * Sign-ins with no `<form>` (single-page apps that call `fetch` on a click) fire
+ * no `submit` event. The click fallback covers the most common ones; it does not
+ * claim to be exhaustive. A missed credential is recovered through "Add" in the
+ * popup — a credential captured in error costs only a "Dismiss".
  *
- * L'identifiant, lui, est **deviné** : aucun site n'est obligé de l'annoncer. Le
- * deviner faux est possible ; le deviner *égal au mot de passe* ne l'est plus
- * (`heuristics.ts`), parce que c'était le seul cas où une erreur de devinette
- * écrivait un secret dans un champ qui n'est pas fait pour lui.
+ * The username, for its part, is **guessed**: no site is obliged to announce it.
+ * Guessing wrong is possible; guessing it *equal to the password* no longer is
+ * (`heuristics.ts`), because that was the one case where a wrong guess wrote a
+ * secret into a field not made for it.
  */
 
 import { findCapture } from './heuristics.js';
 
-/** Type du message, partagé avec le service worker. */
+/** Message type, shared with the service worker. */
 const MESSAGE_TYPE = 'zwarden-credentials';
 
-/** Fenêtre de déduplication entre un `submit` et le clic qui l'a provoqué. */
+/** Deduplication window between a `submit` and the click that caused it. */
 const DEDUPE_MS = 1000;
 
 let lastSentAt = 0;
 
-/** Transmet la capture au service worker, si le verdict est positif. */
+/** Hands the capture to the service worker, if the verdict is positive. */
 function report(scope: ParentNode, control: Element | null = null): void {
   const now = Date.now();
   if (now - lastSentAt < DEDUPE_MS) {
@@ -58,12 +57,12 @@ function report(scope: ParentNode, control: Element | null = null): void {
   }
 
   lastSentAt = now;
-  // Ni l'origine ni l'hôte ne sont transmis : le worker les lit sur l'émetteur,
-  // que le navigateur renseigne. Les annoncer ici donnerait à croire qu'ils
-  // comptent, et inviterait un jour à leur faire confiance.
+  // Neither origin nor host is sent: the worker reads them off the sender, which
+  // the browser fills in. Announcing them here would suggest they count, and
+  // would one day invite trusting them.
   //
-  // La popup ou le worker peuvent être absents : l'erreur est sans conséquence
-  // et ne doit pas polluer la console du site.
+  // The popup or the worker may be absent: the error is of no consequence and
+  // must not pollute the site's console.
   void chrome.runtime
     .sendMessage({ type: MESSAGE_TYPE, username: capture.username, password: capture.password })
     .catch(() => undefined);
@@ -78,9 +77,9 @@ document.addEventListener(
   true,
 );
 
-// Repli pour les connexions sans soumission de formulaire. Restreint aux
-// éléments qui se présentent comme un bouton : un clic n'importe où dans la
-// page ne doit pas déclencher de capture.
+// Fallback for sign-ins with no form submission. Restricted to elements that
+// present themselves as a button: a click anywhere in the page must not trigger
+// a capture.
 document.addEventListener(
   'click',
   (event) => {
@@ -88,15 +87,15 @@ document.addEventListener(
     if (!(target instanceof Element)) {
       return;
     }
-    const bouton = target.closest('button, input[type="submit"], [role="button"]');
-    if (bouton === null) {
+    const button = target.closest('button, input[type="submit"], [role="button"]');
+    if (button === null) {
       return;
     }
-    // Le contrôle est transmis pour être examiné : c'est là que les bascules
-    // d'affichage sont écartées. Hors formulaire, la recherche porte sur le
-    // document entier — c'est la raison d'être de ce repli (connexions sans
-    // `<form>`), et sa part d'imprécision assumée.
-    report(bouton.closest('form') ?? document, bouton);
+    // The control is passed along to be examined: that is where visibility
+    // toggles are ruled out. Outside a form, the search covers the whole
+    // document — that is this fallback's reason to exist (sign-ins with no
+    // `<form>`), and its acknowledged share of imprecision.
+    report(button.closest('form') ?? document, button);
   },
   true,
 );

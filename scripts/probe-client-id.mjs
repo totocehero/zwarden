@@ -1,8 +1,8 @@
 /**
- * Sonde quelles valeurs de `client_id` et `deviceType` Vaultwarden accepte.
+ * Probes which `client_id` and `deviceType` values Vaultwarden accepts.
  *
- * Objectif : déterminer jusqu'où Zwarden peut s'identifier sous son propre nom
- * plutôt que de se faire passer pour un client Bitwarden.
+ * The goal: work out how far Zwarden can identify itself under its own name
+ * rather than impersonating a Bitwarden client.
  *
  * Usage :
  *   ZWARDEN_TEST_SERVER=... ZWARDEN_TEST_EMAIL=... ZWARDEN_TEST_PASSWORD=... \
@@ -35,7 +35,7 @@ async function pbkdf2(password, salt, iterations) {
 
 const b64 = (bytes) => Buffer.from(bytes).toString('base64');
 
-// Dérivation, une seule fois : c'est l'opération coûteuse.
+// Derivation, once only: that is the expensive operation.
 const prelogin = await (
   await fetch(`${SERVER}/identity/accounts/prelogin`, {
     method: 'POST',
@@ -80,26 +80,26 @@ async function essai(label, overrides) {
   });
 
   const body = await response.text();
-  let détail = '';
+  let detail = '';
   if (!response.ok) {
     try {
       const json = JSON.parse(body);
-      détail = ` — ${json.error_description ?? json.error ?? body.slice(0, 90)}`;
+      detail = ` — ${json.error_description ?? json.error ?? body.slice(0, 90)}`;
     } catch {
-      détail = ` — ${body.slice(0, 90)}`;
+      detail = ` — ${body.slice(0, 90)}`;
     }
   }
 
-  const verdict = response.ok ? 'ACCEPTÉ' : 'REFUSÉ ';
-  console.log(`  ${verdict}  ${label}${détail}`);
+  const verdict = response.ok ? 'ACCEPTED' : 'REFUSED ';
+  console.log(`  ${verdict}  ${label}${detail}`);
   return response.ok;
 }
 
 console.log(`Serveur : ${SERVER}`);
-console.log(`KDF     : type ${prelogin.kdf}, ${prelogin.kdfIterations} itérations\n`);
+console.log(`KDF     : type ${prelogin.kdf}, ${prelogin.kdfIterations} iterations\n`);
 
 console.log('client_id :');
-for (const id of ['browser', 'zwarden', 'desktop', 'cli', 'web', 'mobile', 'inventé-xyz', '']) {
+for (const id of ['browser', 'zwarden', 'desktop', 'cli', 'web', 'mobile', 'invented-xyz', '']) {
   await essai(`client_id="${id}"`, { client_id: id });
 }
 
@@ -113,7 +113,7 @@ for (const scope of ['api offline_access', 'api', '']) {
   await essai(`scope="${scope}"`, { scope });
 }
 
-console.log('\nen-tête Auth-Email :');
+console.log('\nAuth-Email header:');
 {
   const form = new URLSearchParams({
     grant_type: 'password',
@@ -130,5 +130,5 @@ console.log('\nen-tête Auth-Email :');
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: form.toString(),
   });
-  console.log(`  ${response.ok ? 'ACCEPTÉ' : 'REFUSÉ '}  sans en-tête Auth-Email`);
+  console.log(`  ${response.ok ? 'ACCEPTED' : 'REFUSED '}  without an Auth-Email header`);
 }

@@ -1,44 +1,42 @@
 /**
- * @file Dérivation de la clé maître à partir du mot de passe.
+ * @file Deriving the master key from the password.
  *
- * ## Chaîne de clés
+ * ## Key chain
  *
  * ```
- *   mot de passe maître
- *          │  KDF (PBKDF2-SHA256 ou Argon2id), sel = e-mail
+ *   master password
+ *          │  KDF (PBKDF2-SHA256 or Argon2id), salt = email
  *          ▼
- *      clé maître (32 o)  ─────────────┐
- *          │  HKDF-Expand              │  PBKDF2, 1 ou 2 itérations
+ *      master key (32 B)  ─────────────┐
+ *          │  HKDF-Expand              │  PBKDF2, 1 or 2 iterations
  *          ▼                           ▼
- *   clé maître étirée (64 o)      hash du mot de passe
- *          │  déchiffre                 (authentification serveur /
- *          ▼                             validation hors ligne)
- *    clé du coffre (64 o)
- *          │  déchiffre
+ *   stretched master key (64 B)    password hash
+ *          │  decrypts                  (server authentication /
+ *          ▼                             offline validation)
+ *     vault key (64 B)
+ *          │  decrypts
  *          ▼
- *   contenu des items
+ *      item contents
  * ```
  *
- * Point essentiel : **la clé maître ne chiffre jamais de données**. Elle sert
- * uniquement à déverrouiller la clé du coffre. C'est ce qui permet de changer
- * de mot de passe sans re-chiffrer l'intégralité du coffre — seule la clé du
- * coffre est ré-enveloppée.
+ * The essential point: **the master key never encrypts data**. It serves only to
+ * unlock the vault key. That is what makes changing the master password possible
+ * without re-encrypting the whole vault — only the vault key is re-wrapped.
  *
- * ## Coût du WASM
+ * ## The cost of WASM
  *
- * PBKDF2-SHA256 passe par WebCrypto : natif, 0 octet de bundle. Argon2id n'a
- * aucun équivalent natif dans les navigateurs ; le module WASM (~45 Ko) est
- * chargé en import dynamique, donc uniquement au déverrouillage d'un compte
- * réellement configuré en Argon2id. Un compte PBKDF2 ne le télécharge jamais.
- * À comparer aux 7,4 Mo de SDK chargés inconditionnellement par le client
- * officiel.
+ * PBKDF2-SHA256 goes through WebCrypto: native, 0 bytes of bundle. Argon2id has
+ * no native equivalent in browsers; the WASM module (~45 KB) is loaded behind a
+ * dynamic import, hence only when unlocking an account actually configured for
+ * Argon2id. A PBKDF2 account never downloads it. Compare with the 7.4 MB of SDK
+ * the official client loads unconditionally.
  */
 
 import { hkdfExpandSha256, pbkdf2Sha256, sha256 } from './primitives.js';
 import { SymmetricCryptoKey } from './symmetricCryptoKey.js';
 import { fromBase64, timingSafeEqual, toBase64, toUtf8Bytes, wipe } from './encoding.js';
 
-/** Fonctions de dérivation supportées, valeurs telles qu'annoncées par l'API. */
+/** Supported derivation functions, values as the API announces them. */
 export const KdfType = {
   PBKDF2_SHA256: 0,
   Argon2id: 1,
@@ -47,56 +45,55 @@ export const KdfType = {
 export type KdfType = (typeof KdfType)[keyof typeof KdfType];
 
 /**
- * Usage d'un hash de mot de passe.
+ * What a password hash is for.
  *
- * La valeur numérique **est** le nombre d'itérations PBKDF2 appliquées, ce qui
- * garantit que les deux hashs diffèrent. Conséquence : le hash conservé
- * localement pour valider le mot de passe hors ligne ne peut pas être rejoué
- * comme preuve d'authentification auprès du serveur, et inversement.
+ * The numeric value **is** the PBKDF2 iteration count applied, which guarantees
+ * the two hashes differ. Consequence: the hash kept locally to validate the
+ * password offline cannot be replayed as proof of authentication to the server,
+ * and vice versa.
  */
 export const HashPurpose = {
-  /** Transmis au serveur lors de l'authentification. */
+  /** Sent to the server at authentication time. */
   ServerAuthorization: 1,
-  /** Conservé localement pour valider le mot de passe sans réseau. */
+  /** Kept locally to validate the password without a network. */
   LocalAuthorization: 2,
 } as const;
 
 export type HashPurpose = (typeof HashPurpose)[keyof typeof HashPurpose];
 
-/** Plancher OWASP 2023 pour PBKDF2-SHA256. */
+/** OWASP 2023 floor for PBKDF2-SHA256. */
 export const PBKDF2_DEFAULT_ITERATIONS = 600_000;
 
 /**
- * Seuil de refus pour PBKDF2.
+ * Refusal floor for PBKDF2.
  *
- * Volontairement plus bas que la valeur recommandée : de nombreux coffres
- * existants ont été créés avec 100 000 itérations (ancien défaut Bitwarden) et
- * doivent rester déverrouillables. En dessous, le coût d'une attaque hors
- * ligne devient dérisoire.
+ * Deliberately below the recommended value: many existing vaults were created
+ * with 100,000 iterations (Bitwarden's old default) and must stay unlockable.
+ * Below that, the cost of an offline attack becomes trivial.
  */
 export const PBKDF2_MIN_ITERATIONS = 100_000;
 
 /**
- * Plafond de refus pour PBKDF2.
+ * Refusal ceiling for PBKDF2.
  *
- * Symétrique du plancher : les paramètres viennent du serveur avant
- * authentification, un serveur hostile peut donc annoncer une valeur absurde
- * (2³¹ itérations) pour geler le client au déverrouillage — un déni de service
- * qui pousse l'utilisateur vers un client moins regardant. L'interface du
- * client officiel plafonne à 2 000 000 ; 5 000 000 laisse une marge
- * confortable sans jamais refuser un coffre légitime.
+ * The floor's mirror image: the parameters come from the server before
+ * authentication, so a hostile server can announce an absurd value (2³¹
+ * iterations) to freeze the client at unlock — a denial of service that nudges
+ * the user towards a less careful client. The official client's UI caps at
+ * 2,000,000; 5,000,000 leaves comfortable headroom without ever refusing a
+ * legitimate vault.
  */
 export const PBKDF2_MAX_ITERATIONS = 5_000_000;
 
-/** Paramètres Argon2id par défaut, alignés sur ceux de Bitwarden. */
+/** Default Argon2id parameters, aligned with Bitwarden's. */
 export const ARGON2_DEFAULTS = {
   iterations: 3,
-  /** En mébioctets, comme dans l'API. */
+  /** In mebibytes, as in the API. */
   memoryMiB: 64,
   parallelism: 4,
 } as const;
 
-/** Seuils de refus pour Argon2id. */
+/** Refusal floors for Argon2id. */
 const ARGON2_MINIMUMS = {
   iterations: 2,
   memoryMiB: 16,
@@ -104,12 +101,12 @@ const ARGON2_MINIMUMS = {
 } as const;
 
 /**
- * Plafonds de refus pour Argon2id, alignés sur les maxima de l'interface du
- * client officiel : aucun coffre créé par Bitwarden ne peut les dépasser.
+ * Refusal ceilings for Argon2id, aligned with the maxima in the official
+ * client's UI: no vault created by Bitwarden can exceed them.
  *
- * Le plus critique est la mémoire : `memoryMiB` se traduit en allocation WASM
- * réelle. Sans plafond, un serveur hostile annonçant plusieurs gibioctets fait
- * échouer l'allocation ou tue l'onglet — déni de service au déverrouillage.
+ * The most critical is memory: `memoryMiB` translates into a real WASM
+ * allocation. Without a ceiling, a hostile server announcing several gibibytes
+ * makes the allocation fail or kills the tab — denial of service at unlock.
  */
 const ARGON2_MAXIMUMS = {
   iterations: 10,
@@ -117,7 +114,7 @@ const ARGON2_MAXIMUMS = {
   parallelism: 16,
 } as const;
 
-/** Paramètres de dérivation, tels qu'annoncés par le serveur. */
+/** Derivation parameters, as the server announces them. */
 export type KdfConfig =
   | { readonly type: typeof KdfType.PBKDF2_SHA256; readonly iterations: number }
   | {
@@ -127,68 +124,66 @@ export type KdfConfig =
       readonly parallelism: number;
     };
 
-/** Levée lorsque le serveur annonce des paramètres KDF dangereux ou malformés. */
+/** Thrown when the server announces dangerous or malformed KDF parameters. */
 export class WeakKdfError extends Error {
   override readonly name = 'WeakKdfError';
-  /** Identifiant stable pour l'interface : les messages servent aux journaux. */
+  /** Stable identifier for the UI: the messages are for logs. */
   readonly code = 'weak-kdf';
 }
 
 /**
- * Valide un paramètre KDF annoncé par le serveur : entier sûr, dans [min, max].
+ * Validates a server-announced KDF parameter: safe integer, within [min, max].
  *
- * @throws {WeakKdfError} Message adapté au cas rencontré.
+ * @throws {WeakKdfError} With a message fitted to the case encountered.
  */
 function assertParameterInRange(label: string, value: number, min: number, max: number): void {
   if (!Number.isSafeInteger(value)) {
-    // Couvre NaN, ±Infinity, les flottants, et les valeurs non numériques
-    // qu'un serveur hostile glisserait dans le JSON : rien de tout cela ne
-    // doit atteindre le KDF.
+    // Covers NaN, ±Infinity, floats, and the non-numeric values a hostile server
+    // would slip into the JSON: none of that may reach the KDF.
     throw new WeakKdfError(
-      `${label} : valeur non entière ou absente (${String(value)}). Connexion refusée.`,
+      `${label}: non-integer or missing value (${String(value)}). Connection refused.`,
     );
   }
   if (value < min) {
     throw new WeakKdfError(
-      `${label} annoncé à ${value}, minimum accepté ${min}. ` +
-        'Connexion refusée : ce paramètre rendrait le mot de passe maître attaquable hors ligne.',
+      `${label} announced as ${value}, minimum accepted ${min}. ` +
+        'Connection refused: this parameter would leave the master password open to offline attack.',
     );
   }
   if (value > max) {
     throw new WeakKdfError(
-      `${label} annoncé à ${value}, maximum accepté ${max}. ` +
-        'Connexion refusée : une valeur aberrante gèlerait le client au déverrouillage.',
+      `${label} announced as ${value}, maximum accepted ${max}. ` +
+        'Connection refused: an absurd value would freeze the client at unlock.',
     );
   }
 }
 
 /**
- * Refuse les paramètres KDF trop faibles, aberrants ou malformés.
+ * Refuses KDF parameters that are too weak, absurd, or malformed.
  *
- * ## Pourquoi cette vérification existe
+ * ## Why this check exists
  *
- * Les paramètres KDF sont fournis par le serveur via `/api/accounts/prelogin`,
- * **avant toute authentification**. Ils constituent donc une entrée non fiable.
- * Un serveur compromis — ou un attaquant en position de machine du milieu sur
- * une instance mal configurée — peut répondre `iterations: 1`. Le client
- * dérive alors une clé maître au coût d'un seul tour de PBKDF2 : le mot de
- * passe devient attaquable hors ligne en quelques secondes, et le hash
- * d'authentification transmis suffit à monter l'attaque.
+ * KDF parameters are supplied by the server through `/api/accounts/prelogin`,
+ * **before any authentication**. They are therefore untrusted input. A
+ * compromised server — or an attacker positioned as a man in the middle on a
+ * badly configured instance — can answer `iterations: 1`. The client then derives
+ * a master key at the cost of a single PBKDF2 round: the password becomes
+ * attackable offline within seconds, and the authentication hash it sends is
+ * enough to mount the attack.
  *
- * Le contrôle est borné dans les deux sens : trop faible, la clé devient
- * cassable hors ligne ; trop élevé (2³¹ itérations, mémoire Argon2 en
- * gibioctets), le client gèle ou l'onglet meurt — déni de service au
- * déverrouillage. Le client Bitwarden officiel n'effectue aucun de ces deux
- * contrôles. Zwarden préfère refuser de se connecter plutôt que d'affaiblir
- * silencieusement la clé ou de se laisser geler.
+ * The check is bounded in both directions: too low, and the key becomes
+ * crackable offline; too high (2³¹ iterations, Argon2 memory in gibibytes), and
+ * the client freezes or the tab dies — denial of service at unlock. The official
+ * Bitwarden client performs neither of these checks. Zwarden would rather refuse
+ * to connect than silently weaken the key or let itself be frozen.
  *
- * @param config Paramètres annoncés par le serveur.
- * @throws {WeakKdfError} Si un paramètre est hors bornes ou non entier.
+ * @param config Parameters announced by the server.
+ * @throws {WeakKdfError} If a parameter is out of bounds or not an integer.
  */
 export function assertKdfIsAcceptable(config: KdfConfig): void {
   if (config.type === KdfType.PBKDF2_SHA256) {
     assertParameterInRange(
-      'PBKDF2 (itérations)',
+      'PBKDF2 (iterations)',
       config.iterations,
       PBKDF2_MIN_ITERATIONS,
       PBKDF2_MAX_ITERATIONS,
@@ -197,19 +192,19 @@ export function assertKdfIsAcceptable(config: KdfConfig): void {
   }
 
   assertParameterInRange(
-    'Argon2id (itérations)',
+    'Argon2id (iterations)',
     config.iterations,
     ARGON2_MINIMUMS.iterations,
     ARGON2_MAXIMUMS.iterations,
   );
   assertParameterInRange(
-    'Argon2id (mémoire MiB)',
+    'Argon2id (memory MiB)',
     config.memoryMiB,
     ARGON2_MINIMUMS.memoryMiB,
     ARGON2_MAXIMUMS.memoryMiB,
   );
   assertParameterInRange(
-    'Argon2id (parallélisme)',
+    'Argon2id (parallelism)',
     config.parallelism,
     ARGON2_MINIMUMS.parallelism,
     ARGON2_MAXIMUMS.parallelism,
@@ -217,35 +212,35 @@ export function assertKdfIsAcceptable(config: KdfConfig): void {
 }
 
 /**
- * Normalise l'e-mail servant de sel.
+ * Normalises the email used as the salt.
  *
- * Le sel doit être identique sur tous les clients, sinon la clé dérivée
- * diffère et le coffre devient illisible. Bitwarden applique `trim()` puis
- * `toLowerCase()` ; toute divergence ici casse l'interopérabilité.
+ * The salt must be identical across all clients, otherwise the derived key
+ * differs and the vault becomes unreadable. Bitwarden applies `trim()` then
+ * `toLowerCase()`; any divergence here breaks interoperability.
  */
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
 /**
- * Normalise le mot de passe avant dérivation.
+ * Normalises the password before derivation.
  *
- * NFKD aligne les représentations Unicode équivalentes : un « é » saisi comme
- * point de code unique et le même composé d'un « e » suivi d'un accent
- * combinant produisent alors la même clé, quel que soit le clavier ou l'OS.
+ * NFKD aligns equivalent Unicode representations: an "é" typed as a single code
+ * point and the same character composed of an "e" followed by a combining accent
+ * then produce the same key, whatever the keyboard or the OS.
  */
 function normalizePassword(password: string): Uint8Array {
   return toUtf8Bytes(password.normalize('NFKD'));
 }
 
 /**
- * Dérive la clé maître depuis le mot de passe et l'e-mail.
+ * Derives the master key from the password and the email.
  *
- * @param password Mot de passe maître, en clair.
- * @param email E-mail du compte, utilisé comme sel.
- * @param config Paramètres KDF annoncés par le serveur.
- * @returns Clé maître de 32 octets, non authentifiée (sans `macKey`).
- * @throws {WeakKdfError} Si les paramètres sont sous les seuils.
+ * @param password Master password, in the clear.
+ * @param email Account email, used as the salt.
+ * @param config KDF parameters announced by the server.
+ * @returns 32-byte master key, unauthenticated (no `macKey`).
+ * @throws {WeakKdfError} If the parameters fall outside the accepted bounds.
  */
 export async function deriveMasterKey(
   password: string,
@@ -257,23 +252,23 @@ export async function deriveMasterKey(
   const passwordBytes = normalizePassword(password);
   try {
     if (config.type === KdfType.PBKDF2_SHA256) {
-      // PBKDF2 prend l'e-mail normalisé directement comme sel.
+      // PBKDF2 takes the normalised email directly as the salt.
       const salt = toUtf8Bytes(normalizeEmail(email));
       return new SymmetricCryptoKey(await pbkdf2Sha256(passwordBytes, salt, config.iterations, 32));
     }
 
-    // Argon2id impose un sel de taille fixe : Bitwarden utilise le SHA-256 de
-    // l'e-mail, et non l'e-mail brut. Divergence = coffres illisibles.
+    // Argon2id requires a fixed-size salt: Bitwarden uses the SHA-256 of the
+    // email, not the raw email. Diverge and vaults become unreadable.
     const salt = await sha256(toUtf8Bytes(normalizeEmail(email)));
 
-    // Build par algorithme (29 Ko) plutôt que l'ESM monolithique du paquet
-    // (212 Ko une fois bundlé). Ce build UMD expose ses fonctions nommées ou
-    // sous `default` selon l'interop CJS de l'environnement : on couvre les
-    // deux. Voir `src/types/hash-wasm-argon2.d.ts`.
+    // A per-algorithm build (29 KB) rather than the package's monolithic ESM
+    // (212 KB once bundled). This UMD build exposes its functions either by name
+    // or under `default`, depending on the environment's CJS interop: we cover
+    // both. See `src/types/hash-wasm-argon2.d.ts`.
     const umd = await import('hash-wasm/dist/argon2.umd.min.js');
     const argon2id = umd.argon2id ?? umd.default?.argon2id;
     if (argon2id === undefined) {
-      throw new Error('Module Argon2 illisible : aucun export argon2id');
+      throw new Error('Unreadable Argon2 module: no argon2id export');
     }
 
     const derived = await argon2id({
@@ -281,35 +276,34 @@ export async function deriveMasterKey(
       salt,
       parallelism: config.parallelism,
       iterations: config.iterations,
-      memorySize: config.memoryMiB * 1024, // hash-wasm attend des KiB
+      memorySize: config.memoryMiB * 1024, // hash-wasm expects KiB
       hashLength: 32,
       outputType: 'binary',
     });
 
     return new SymmetricCryptoKey(derived);
   } finally {
-    // Le mot de passe encodé n'a plus d'usage une fois la clé dérivée.
-    // Best-effort, comme tout effacement en JavaScript.
+    // The encoded password has no further use once the key is derived.
+    // Best-effort, like every erasure in JavaScript.
     wipe(passwordBytes);
   }
 }
 
 /**
- * Étire la clé maître en une clé authentifiée utilisable pour chiffrer.
+ * Stretches the master key into an authenticated key usable for encryption.
  *
- * La clé maître fait 32 octets : de quoi chiffrer, pas d'authentifier. On la
- * développe en 64 octets (`encKey` ‖ `macKey`) par deux appels HKDF-Expand.
+ * The master key is 32 bytes: enough to encrypt, not to authenticate. We expand
+ * it to 64 bytes (`encKey` ‖ `macKey`) through two HKDF-Expand calls.
  *
- * L'étape Extract de HKDF est délibérément omise : la clé maître est déjà une
- * PRK uniformément aléatoire issue du KDF. C'est aussi ce que fait Bitwarden —
- * y ajouter Extract produirait une clé différente et rendrait les coffres
- * existants illisibles.
+ * HKDF's Extract step is deliberately omitted: the master key is already a
+ * uniformly random PRK out of the KDF. That is also what Bitwarden does — adding
+ * Extract would produce a different key and make existing vaults unreadable.
  *
- * @param masterKey Clé maître issue de {@link deriveMasterKey}.
- * @returns Clé de 64 octets, authentifiée.
+ * @param masterKey Master key from {@link deriveMasterKey}.
+ * @returns 64-byte authenticated key.
  */
 export async function stretchMasterKey(masterKey: SymmetricCryptoKey): Promise<SymmetricCryptoKey> {
-  // Les deux dérivations sont indépendantes : lancées de front.
+  // The two derivations are independent: run in parallel.
   const [encKey, macKey] = await Promise.all([
     hkdfExpandSha256(masterKey.key, 'enc', 32),
     hkdfExpandSha256(masterKey.key, 'mac', 32),
@@ -324,19 +318,19 @@ export async function stretchMasterKey(masterKey: SymmetricCryptoKey): Promise<S
 }
 
 /**
- * Calcule un hash du mot de passe maître.
+ * Computes a hash of the master password.
  *
- * PBKDF2 est appliqué « à l'envers » : la clé maître joue le rôle de mot de
- * passe et le mot de passe celui de sel. Le serveur reçoit donc une valeur
- * dont il ne peut retrouver ni le mot de passe, ni la clé maître.
+ * PBKDF2 is applied "backwards": the master key plays the role of the password
+ * and the password that of the salt. The server therefore receives a value from
+ * which it can recover neither the password nor the master key.
  *
- * Le nombre d'itérations est l'usage lui-même ({@link HashPurpose}), ce qui
- * rend les deux hashs structurellement distincts.
+ * The iteration count *is* the purpose itself ({@link HashPurpose}), which makes
+ * the two hashes structurally distinct.
  *
- * @param masterKey Clé maître.
- * @param password Mot de passe maître, en clair.
- * @param purpose Destination du hash.
- * @returns Hash de 32 octets encodé en base64.
+ * @param masterKey Master key.
+ * @param password Master password, in the clear.
+ * @param purpose What the hash is for.
+ * @returns 32-byte hash, base64-encoded.
  */
 export async function derivePasswordHash(
   masterKey: SymmetricCryptoKey,
@@ -353,18 +347,17 @@ export async function derivePasswordHash(
 }
 
 /**
- * Valide un mot de passe contre le hash local, sans réseau.
+ * Validates a password against the local hash, with no network.
  *
- * C'est le chemin de l'écran de verrouillage : le hash `LocalAuthorization`
- * est conservé au premier déverrouillage, puis chaque saisie est revalidée
- * contre lui. La comparaison porte sur les **octets décodés**, à temps
- * constant — jamais un `===` sur les chaînes base64, qui court-circuite au
- * premier caractère divergent.
+ * This is the lock screen's path: the `LocalAuthorization` hash is kept at the
+ * first unlock, then every entry is revalidated against it. The comparison is on
+ * the **decoded bytes**, in constant time — never a `===` on the base64 strings,
+ * which short-circuits at the first differing character.
  *
- * @param masterKey Clé maître dérivée de la saisie à valider.
- * @param password Mot de passe saisi, en clair.
- * @param expectedHashB64 Hash local conservé, en base64.
- * @returns `true` si la saisie correspond.
+ * @param masterKey Master key derived from the entry to validate.
+ * @param password Password entered, in the clear.
+ * @param expectedHashB64 The stored local hash, in base64.
+ * @returns `true` if the entry matches.
  */
 export async function verifyLocalPasswordHash(
   masterKey: SymmetricCryptoKey,

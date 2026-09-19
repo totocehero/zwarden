@@ -1,30 +1,31 @@
 /**
- * @file Orchestration du déverrouillage du coffre.
+ * @file Orchestrating the vault unlock.
  *
- * ## Pourquoi ce module existe
+ * ## Why this module exists
  *
- * Le déverrouillage complet est une chorégraphie dont l'ordre est critique :
+ * A full unlock is a choreography whose order is critical:
  *
  * ```
  *   prelogin ─► deriveMasterKey ─► derivePasswordHash ─► login
  *                     │                                    │
  *                     ▼                                    ▼
- *              stretchMasterKey ──────► déchiffre `protectedUserKey`
+ *              stretchMasterKey ──────► decrypts `protectedUserKey`
  *                     │                                    │
  *                  destroy()                               ▼
- *                                                   clé du coffre
+ *                                                     vault key
  * ```
  *
- * avec, en plus, l'hygiène mémoire : la clé maître et la clé étirée doivent
- * être effacées dès qu'elles ont servi — seule la clé du coffre survit. Chaque
- * consommateur (popup, service worker, tests) qui réécrirait cette danse
- * serait une occasion de se tromper sur l'ordre ou d'oublier un effacement.
- * Elle est donc écrite et auditée **une fois**, ici.
+ * plus, on top, the memory hygiene: the master key and the stretched key must be
+ * erased the moment they have served. Only the vault key survives. Every
+ * consumer (popup, service worker, tests) that rewrote this dance would be one
+ * more chance to get the order wrong or forget an erasure. It is therefore
+ * written and audited **once**, here.
  *
- * ## Répartition des couches
+ * ## Layer split
  *
- * `core/crypto` fournit les primitives et les clés, `core/api` le transport
- * sans aucun secret, et ce module est le seul à faire circuler les deux.
+ * `core/crypto` provides the primitives and the keys, `core/api` the transport
+ * with no secrets at all, and this module is the only one that makes the two
+ * meet.
  */
 
 import { ApiClient, type LoginResult, type TwoFactorSubmission } from '../api/apiClient.js';
@@ -39,60 +40,59 @@ import {
 } from '../crypto/kdf.js';
 import { SymmetricCryptoKey } from '../crypto/symmetricCryptoKey.js';
 
-/** Levée lorsque la réponse du serveur ne permet pas d'ouvrir le coffre. */
+/** Thrown when the server's response does not allow the vault to be opened. */
 export class UnlockError extends Error {
   override readonly name = 'UnlockError';
-  /** Identifiant stable pour l'interface : les messages servent aux journaux. */
+  /** Stable identifier for the UI: the messages are for logs. */
   readonly code = 'unlock-failed';
 }
 
-/** Résultat d'un déverrouillage réussi. */
+/** The result of a successful unlock. */
 export interface UnlockResult {
-  /** Jetons de session, pour les appels API suivants. */
+  /** Session tokens, for the API calls that follow. */
   readonly session: LoginResult;
   /**
-   * Clé du coffre, déchiffrée et authentifiée. À détruire au verrouillage
-   * (`userKey.destroy()`), avec purge de tout stockage de session.
+   * Vault key, decrypted and authenticated. To be destroyed at lock time
+   * (`userKey.destroy()`), together with a purge of all session storage.
    */
   readonly userKey: SymmetricCryptoKey;
   /**
-   * Hash local du mot de passe, à conserver pour la validation hors ligne
-   * (voir `verifyLocalPasswordHash`). Ne peut pas être rejoué auprès du
-   * serveur : son nombre d'itérations diffère du hash d'autorisation.
+   * Local password hash, to be kept for offline validation (see
+   * `verifyLocalPasswordHash`). It cannot be replayed against the server: its
+   * iteration count differs from the authorization hash's.
    */
   readonly localPasswordHash: string;
-  /** Paramètres KDF validés, à conserver pour le déverrouillage hors ligne. */
+  /** Validated KDF parameters, to be kept for offline unlocking. */
   readonly kdfConfig: KdfConfig;
   /**
-   * Jeton de dispense de second facteur, si `remember` a été demandé et
-   * accepté. À persister par appareil et rejouer aux prochains
-   * déverrouillages (fournisseur 5).
+   * Two-factor remember token, present if `remember` was requested and granted.
+   * To be persisted per device and replayed on subsequent unlocks (provider 5).
    */
   readonly twoFactorRememberToken: string | undefined;
 }
 
 /**
- * Déverrouille le coffre à partir du mot de passe maître.
+ * Unlocks the vault from the master password.
  *
- * Encapsule la chorégraphie décrite en en-tête. Au retour, la clé maître et
- * la clé étirée ont été effacées ; il ne reste en mémoire que la clé du
- * coffre et les jetons.
+ * Encapsulates the choreography described in the file header. On return, the
+ * master key and the stretched key have been erased; only the vault key and the
+ * tokens remain in memory.
  *
- * @param client Client API pointant l'instance de l'utilisateur.
- * @param email E-mail du compte.
- * @param password Mot de passe maître, en clair. N'est transmis nulle part ;
- *   ses formes dérivées sont effacées par les couches inférieures.
- * @param twoFactor Second facteur à joindre — code saisi après un premier
- *   refus, ou jeton de dispense conservé (fournisseur 5).
- * @returns Session, clé du coffre et matériel de validation hors ligne.
- * @throws {WeakKdfError} Paramètres KDF du serveur hors bornes.
- * @throws {TwoFactorRequiredError} Une seconde étape est exigée.
- * @throws {CaptchaRequiredError} Le serveur exige un captcha.
- * @throws {RateLimitedError} Le serveur limite le débit.
- * @throws {ApiError} Identifiants refusés ou autre échec HTTP.
- * @throws {UnlockError} Réponse sans clé de coffre exploitable.
- * @throws {MacMismatchError} Clé de coffre enveloppée illisible — corruption
- *   ou falsification côté serveur.
+ * @param client API client pointing at the user's instance.
+ * @param email Account email.
+ * @param password Master password, in the clear. It is transmitted nowhere; its
+ *   derived forms are erased by the layers below.
+ * @param twoFactor Second factor to attach — a code entered after a first
+ *   refusal, or a stored remember token (provider 5).
+ * @returns Session, vault key, and the material for offline validation.
+ * @throws {WeakKdfError} Server KDF parameters out of bounds.
+ * @throws {TwoFactorRequiredError} A second step is demanded.
+ * @throws {CaptchaRequiredError} The server demands a captcha.
+ * @throws {RateLimitedError} The server is rate-limiting.
+ * @throws {ApiError} Credentials refused, or any other HTTP failure.
+ * @throws {UnlockError} A response with no usable vault key.
+ * @throws {MacMismatchError} The wrapped vault key is unreadable — corruption or
+ *   tampering server-side.
  */
 export async function unlock(
   client: ApiClient,
@@ -104,7 +104,7 @@ export async function unlock(
   const masterKey = await deriveMasterKey(password, email, kdfConfig);
 
   try {
-    // Les deux hashs sont indépendants : calculés de front.
+    // The two hashes are independent: computed side by side.
     const [serverHash, localPasswordHash] = await Promise.all([
       derivePasswordHash(masterKey, password, HashPurpose.ServerAuthorization),
       derivePasswordHash(masterKey, password, HashPurpose.LocalAuthorization),
@@ -114,7 +114,7 @@ export async function unlock(
 
     if (session.protectedUserKey === undefined) {
       throw new UnlockError(
-        "Le serveur n'a pas fourni de clé de coffre enveloppée : compte incomplet ou réponse falsifiée",
+        'The server supplied no wrapped vault key: incomplete account or tampered response',
       );
     }
 

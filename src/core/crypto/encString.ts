@@ -1,10 +1,10 @@
 /**
- * @file Format `EncString` de Bitwarden / Vaultwarden.
+ * @file Bitwarden / Vaultwarden's `EncString` format.
  *
- * C'est le format de sérialisation de toute donnée chiffrée échangée avec le
- * serveur : titres, mots de passe, notes, clés de coffre, clés d'organisation.
+ * This is the serialisation format of every piece of encrypted data exchanged
+ * with the server: titles, passwords, notes, vault keys, organisation keys.
  *
- * ## Grammaire
+ * ## Grammar
  *
  * ```
  * encstring := type "." segment ( "|" segment )*
@@ -13,32 +13,32 @@
  *
  * ## Types
  *
- * | Type | Forme          | Algorithme                     | Statut          |
- * |------|----------------|--------------------------------|-----------------|
- * | 0    | `iv\|ct`        | AES-256-CBC, sans MAC          | legacy, lecture |
- * | 1    | `iv\|ct\|mac`    | AES-128-CBC + HMAC-SHA256      | obsolète        |
- * | 2    | `iv\|ct\|mac`    | AES-256-CBC + HMAC-SHA256      | **courant**     |
- * | 3    | `data`         | RSA-2048 OAEP SHA-256          | partage         |
- * | 4    | `data`         | RSA-2048 OAEP SHA-1            | legacy          |
- * | 5    | `data\|mac`     | RSA-2048 OAEP SHA-256 + HMAC   | legacy          |
- * | 6    | `data\|mac`     | RSA-2048 OAEP SHA-1 + HMAC     | legacy          |
+ * | Type | Shape          | Algorithm                      | Status           |
+ * |------|----------------|--------------------------------|------------------|
+ * | 0    | `iv\|ct`        | AES-256-CBC, no MAC            | legacy, read-only|
+ * | 1    | `iv\|ct\|mac`    | AES-128-CBC + HMAC-SHA256      | obsolete         |
+ * | 2    | `iv\|ct\|mac`    | AES-256-CBC + HMAC-SHA256      | **current**      |
+ * | 3    | `data`         | RSA-2048 OAEP SHA-256          | sharing          |
+ * | 4    | `data`         | RSA-2048 OAEP SHA-1            | legacy           |
+ * | 5    | `data\|mac`     | RSA-2048 OAEP SHA-256 + HMAC   | legacy           |
+ * | 6    | `data\|mac`     | RSA-2048 OAEP SHA-1 + HMAC     | legacy           |
  *
- * Zwarden n'émet que du type 2. Les autres sont analysables pour rester
- * interopérable avec des coffres existants, mais le déchiffrement applique ses
- * propres restrictions (voir `cryptoService.ts`).
+ * Zwarden only ever emits type 2. The others remain parseable to stay
+ * interoperable with existing vaults, but decryption applies its own
+ * restrictions (see `cryptoService.ts`).
  *
- * ## Rôle de sécurité de ce module
+ * ## This module's security role
  *
- * L'analyse est la première frontière de confiance : ces chaînes viennent du
- * serveur, qui est considéré comme hostile. Les tailles d'IV et de MAC, et
- * l'alignement du ciphertext sur les blocs AES pour les types symétriques,
- * sont donc validés ici, une fois, plutôt que supposés corrects plus loin dans
- * la chaîne. Une `EncString` construite est structurellement bien formée.
+ * Parsing is the first trust boundary: these strings come from the server, which
+ * is treated as hostile. IV and MAC sizes, and the ciphertext's alignment on AES
+ * blocks for the symmetric types, are therefore validated here, once, rather
+ * than assumed correct further down the chain. A constructed `EncString` is
+ * structurally well-formed.
  */
 
 import { fromBase64, toBase64 } from './encoding.js';
 
-/** Identifiants de type, tels que sérialisés en préfixe. */
+/** Type identifiers, as serialised in the prefix. */
 export const EncryptionType = {
   AesCbc256_B64: 0,
   AesCbc128_HmacSha256_B64: 1,
@@ -51,22 +51,22 @@ export const EncryptionType = {
 
 export type EncryptionType = (typeof EncryptionType)[keyof typeof EncryptionType];
 
-/** Taille d'un bloc AES, donc de l'IV, en octets. */
+/** Size of an AES block, hence of the IV, in bytes. */
 const IV_LENGTH = 16;
 
-/** Taille d'une sortie HMAC-SHA256, en octets. */
+/** Size of an HMAC-SHA256 output, in bytes. */
 const MAC_LENGTH = 32;
 
 /**
- * Description structurelle d'un type de chiffrement.
+ * Structural description of an encryption type.
  *
- * Cette table remplace un raisonnement implicite sur le nombre de segments.
- * Ajouter un type se fait ici et nulle part ailleurs.
+ * This table replaces implicit reasoning about segment counts. Adding a type
+ * happens here and nowhere else.
  */
 interface TypeShape {
-  /** Le premier segment est un IV (chiffrement symétrique par blocs). */
+  /** The first segment is an IV (symmetric block cipher). */
   readonly hasIv: boolean;
-  /** Un segment de MAC est présent en dernière position. */
+  /** A MAC segment is present in last position. */
   readonly hasMac: boolean;
 }
 
@@ -80,49 +80,48 @@ const SHAPES: Readonly<Record<number, TypeShape>> = {
   [EncryptionType.Rsa2048_OaepSha1_HmacSha256_B64]: { hasIv: false, hasMac: true },
 };
 
-/** Nombre de segments attendus pour une forme donnée. */
+/** Number of segments expected for a given shape. */
 function segmentCount(shape: TypeShape): number {
-  // ciphertext, toujours présent ; + IV éventuel ; + MAC éventuel.
+  // ciphertext, always present; + optional IV; + optional MAC.
   return 1 + (shape.hasIv ? 1 : 0) + (shape.hasMac ? 1 : 0);
 }
 
-/** Levée lorsqu'une chaîne ne respecte pas la grammaire ou les tailles. */
+/** Thrown when a string violates the grammar or the expected sizes. */
 export class EncStringParseError extends Error {
   override readonly name = 'EncStringParseError';
-  /** Identifiant stable pour l'interface : les messages servent aux journaux. */
+  /** Stable identifier for the UI: the messages are for logs. */
   readonly code = 'enc-string-parse';
 }
 
 /**
- * Décode un segment base64 en convertissant tout échec en erreur du domaine.
+ * Decodes a base64 segment, turning any failure into a domain error.
  *
- * `atob` lève une `DOMException` peu parlante. On la traduit pour que les
- * appelants n'aient qu'un seul type d'erreur à intercepter, et pour que le
- * message identifie le segment fautif.
+ * `atob` throws an uninformative `DOMException`. We translate it so callers have
+ * a single error type to catch, and so the message names the offending segment.
  */
 function decodeSegment(segment: string, label: string): Uint8Array {
   try {
     return fromBase64(segment);
   } catch {
-    throw new EncStringParseError(`segment « ${label} » : base64 invalide`);
+    throw new EncStringParseError(`segment "${label}": invalid base64`);
   }
 }
 
-/** Décode un segment et vérifie sa longueur, pour l'IV et le MAC. */
+/** Decodes a segment and checks its length, for the IV and the MAC. */
 function decodeFixedLength(segment: string, label: string, expected: number): Uint8Array {
   const bytes = decodeSegment(segment, label);
   if (bytes.length !== expected) {
     throw new EncStringParseError(
-      `segment « ${label} » : ${bytes.length} octets, ${expected} attendus`,
+      `segment "${label}": ${bytes.length} bytes, ${expected} expected`,
     );
   }
   return bytes;
 }
 
 /**
- * Sépare le préfixe numérique de type du reste de la chaîne.
+ * Splits the numeric type prefix from the rest of the string.
  *
- * @throws {EncStringParseError} Si le préfixe est absent ou non numérique.
+ * @throws {EncStringParseError} If the prefix is missing or not numeric.
  */
 function splitTypePrefix(value: string): {
   readonly encryptionType: EncryptionType;
@@ -130,42 +129,42 @@ function splitTypePrefix(value: string): {
 } {
   const separator = value.indexOf('.');
   if (separator < 1) {
-    throw new EncStringParseError('préfixe de type absent');
+    throw new EncStringParseError('missing type prefix');
   }
 
   const raw = value.slice(0, separator);
   if (!/^\d+$/.test(raw)) {
-    throw new EncStringParseError(`préfixe de type non numérique : « ${raw} »`);
+    throw new EncStringParseError(`non-numeric type prefix: "${raw}"`);
   }
 
   return { encryptionType: Number(raw) as EncryptionType, body: value.slice(separator + 1) };
 }
 
 /**
- * Donnée chiffrée analysée et structurellement validée.
+ * Parsed, structurally validated encrypted data.
  *
- * Immuable. Instanciable uniquement via {@link EncString.parse} ou
- * {@link EncString.fromParts}, ce qui garantit qu'aucune instance ne porte un
- * IV ou un MAC de taille aberrante.
+ * Immutable. Instantiable only through {@link EncString.parse} or
+ * {@link EncString.fromParts}, which guarantees no instance carries an IV or MAC
+ * of nonsensical size.
  */
 export class EncString {
   private constructor(
-    /** Type de chiffrement, déterminant l'interprétation des segments. */
+    /** Encryption type, which determines how the segments are read. */
     readonly encryptionType: EncryptionType,
-    /** IV de 16 octets pour les types symétriques, `undefined` pour RSA. */
+    /** 16-byte IV for symmetric types, `undefined` for RSA. */
     readonly iv: Uint8Array | undefined,
-    /** Donnée chiffrée. */
+    /** Encrypted data. */
     readonly ciphertext: Uint8Array,
-    /** MAC de 32 octets si le type est authentifié, sinon `undefined`. */
+    /** 32-byte MAC if the type is authenticated, otherwise `undefined`. */
     readonly mac: Uint8Array | undefined,
   ) {}
 
   /**
-   * Construit une `EncString` à partir de composants déjà en mémoire.
+   * Builds an `EncString` from components already in memory.
    *
-   * Réservé à la sortie du chiffrement et aux tests. N'effectue pas les
-   * validations de taille de {@link EncString.parse} : l'appelant est
-   * responsable de la cohérence.
+   * Reserved for the output of encryption and for tests. It does not perform
+   * {@link EncString.parse}'s size validation: the caller is responsible for
+   * consistency.
    */
   static fromParts(
     encryptionType: EncryptionType,
@@ -177,34 +176,34 @@ export class EncString {
   }
 
   /**
-   * Analyse une chaîne sérialisée.
+   * Parses a serialised string.
    *
-   * Échoue bruyamment plutôt que de renvoyer `null` : une `EncString`
-   * malformée traduit soit une corruption du coffre, soit une réponse serveur
-   * falsifiée. Dans les deux cas l'anomalie doit remonter. Utiliser
-   * {@link EncString.parseOrNull} pour les champs dont l'absence est normale.
+   * Fails loudly rather than returning `null`: a malformed `EncString` means
+   * either vault corruption or a tampered server response. Either way the
+   * anomaly must surface. Use {@link EncString.parseOrNull} for fields whose
+   * absence is normal.
    *
-   * @param value Chaîne à analyser.
-   * @returns Instance validée.
-   * @throws {EncStringParseError} Préfixe absent ou non numérique, type
-   *   inconnu, nombre de segments incorrect, IV ou MAC de taille invalide.
+   * @param value String to parse.
+   * @returns Validated instance.
+   * @throws {EncStringParseError} Missing or non-numeric prefix, unknown type,
+   *   wrong segment count, invalid IV or MAC size.
    */
   static parse(value: string): EncString {
     const { encryptionType, body } = splitTypePrefix(value);
     const shape = SHAPES[encryptionType];
     if (shape === undefined) {
-      throw new EncStringParseError(`type de chiffrement inconnu : ${encryptionType}`);
+      throw new EncStringParseError(`unknown encryption type: ${encryptionType}`);
     }
 
     const segments = body.split('|');
     const expected = segmentCount(shape);
     if (segments.length !== expected) {
       throw new EncStringParseError(
-        `type ${encryptionType} : ${expected} segment(s) attendu(s), ${segments.length} reçu(s)`,
+        `type ${encryptionType}: ${expected} segment(s) expected, ${segments.length} received`,
       );
     }
 
-    // Les segments sont consommés dans l'ordre : [iv] ciphertext [mac].
+    // Segments are consumed in order: [iv] ciphertext [mac].
     let cursor = 0;
     const iv = shape.hasIv
       ? decodeFixedLength(segments[cursor++]!, 'iv', IV_LENGTH)
@@ -214,13 +213,13 @@ export class EncString {
       ? decodeFixedLength(segments[cursor++]!, 'mac', MAC_LENGTH)
       : undefined;
 
-    // Pour les types symétriques (CBC), un ciphertext valide est un nombre
-    // entier non nul de blocs AES : PKCS#7 ajoute toujours au moins un octet,
-    // donc même un clair vide produit un bloc. Rejeter ici donne une erreur du
-    // domaine, au lieu d'une DOMException opaque au fond d'AES.
+    // For the symmetric types (CBC), a valid ciphertext is a non-zero whole
+    // number of AES blocks: PKCS#7 always adds at least one byte, so even empty
+    // plaintext produces one block. Rejecting here yields a domain error instead
+    // of an opaque DOMException deep inside AES.
     if (shape.hasIv && (ciphertext.length === 0 || ciphertext.length % IV_LENGTH !== 0)) {
       throw new EncStringParseError(
-        `segment « ciphertext » : ${ciphertext.length} octets, multiple non nul de ${IV_LENGTH} attendu`,
+        `segment "ciphertext": ${ciphertext.length} bytes, non-zero multiple of ${IV_LENGTH} expected`,
       );
     }
 
@@ -228,17 +227,16 @@ export class EncString {
   }
 
   /**
-   * Variante tolérante de {@link EncString.parse}.
+   * Lenient variant of {@link EncString.parse}.
    *
-   * Destinée aux champs optionnels du modèle serveur, où `null` et chaîne vide
-   * signifient légitimement « absent ». Une chaîne **malformée**, en revanche,
-   * n'est pas une absence : `onError` est obligatoire, comme pour
-   * `decryptStringOrNull` — un champ qui disparaît sans trace est
-   * indiscernable d'une attaque de suppression.
+   * Meant for the server model's optional fields, where `null` and the empty
+   * string legitimately mean "absent". A **malformed** string, however, is not an
+   * absence: `onError` is mandatory, as it is for `decryptStringOrNull` — a field
+   * that vanishes without trace is indistinguishable from a deletion attack.
    *
-   * @param value Chaîne, `null` ou `undefined`.
-   * @param onError Notification d'échec d'analyse, pour journalisation.
-   * @returns Instance analysée, ou `null` si absente ou malformée.
+   * @param value String, `null` or `undefined`.
+   * @param onError Parse-failure notification, for logging.
+   * @returns Parsed instance, or `null` if absent or malformed.
    */
   static parseOrNull(
     value: string | null | undefined,
@@ -255,21 +253,21 @@ export class EncString {
     }
   }
 
-  /** `true` pour les types à chiffrement symétrique (0, 1, 2). */
+  /** `true` for the symmetrically encrypted types (0, 1, 2). */
   get isSymmetric(): boolean {
     return SHAPES[this.encryptionType]?.hasIv ?? false;
   }
 
-  /** `true` si la donnée porte un MAC, donc est authentifiée. */
+  /** `true` if the data carries a MAC, hence is authenticated. */
   get hasMac(): boolean {
     return this.mac !== undefined;
   }
 
   /**
-   * Sérialise au format attendu par l'API.
+   * Serialises to the format the API expects.
    *
-   * L'aller-retour `parse(s).toString() === s` est garanti pour toute chaîne
-   * canonique (base64 standard, padding présent).
+   * The round trip `parse(s).toString() === s` is guaranteed for any canonical
+   * string (standard base64, padding present).
    */
   toString(): string {
     const segments: string[] = [];
@@ -283,7 +281,7 @@ export class EncString {
     return `${this.encryptionType}.${segments.join('|')}`;
   }
 
-  /** Permet à `JSON.stringify` de produire directement la forme sérialisée. */
+  /** Lets `JSON.stringify` produce the serialised form directly. */
   toJSON(): string {
     return this.toString();
   }

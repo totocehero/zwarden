@@ -1,111 +1,110 @@
-# Cryptographie de Zwarden
+# Zwarden's cryptography
 
-Ce document décrit le schéma cryptographique implémenté dans `src/core/crypto/`.
-Il vise deux publics : quiconque audite le code, et quiconque devra le modifier
-dans six mois.
+This document describes the cryptographic scheme implemented in
+`src/core/crypto/`. It is aimed at two audiences: anyone auditing the code, and
+anyone who will have to change it in six months.
 
-Zwarden est **compatible avec le format Bitwarden / Vaultwarden**. Les
-divergences volontaires sont signalées par ⚠ et concernent uniquement des
-durcissements, jamais le format sur le fil.
+Zwarden is **compatible with the Bitwarden / Vaultwarden format**. Deliberate
+divergences are flagged with ⚠ and concern hardening alone, never the wire
+format.
 
 ---
 
-## 1. Modèle de menace
+## 1. Threat model
 
-### Ce dont Zwarden protège
+### What Zwarden protects against
 
-| Adversaire | Capacité supposée | Protection |
+| Adversary | Assumed capability | Protection |
 |---|---|---|
-| Serveur malveillant ou compromis | Lit et modifie tout ce qu'il stocke, contrôle ses réponses | Chiffrement de bout en bout ; authentification de chaque champ ; validation des paramètres KDF |
-| Réseau (MITM) | Lit et modifie le trafic | TLS, plus le chiffrement de bout en bout en défense en profondeur |
-| Vol de la base serveur | Lecture hors ligne de tout le stockage | Le serveur ne détient aucune clé ; seule une attaque par dictionnaire sur le mot de passe maître reste possible, freinée par le KDF |
-| Vol du profil navigateur, coffre verrouillé | Lecture du stockage local persistant | Aucune clé en clair sur disque |
+| A malicious or compromised server | Reads and modifies everything it stores, controls its responses | End-to-end encryption; every field authenticated; KDF parameters validated |
+| The network (MITM) | Reads and modifies traffic | TLS, plus end-to-end encryption as defence in depth |
+| Theft of the server database | Offline reading of all storage | The server holds no key; only a dictionary attack on the master password remains possible, slowed by the KDF |
+| Theft of the browser profile, vault locked | Reading persistent local storage | No key in the clear on disk |
 
-### Ce dont Zwarden ne protège pas
+### What Zwarden does not protect against
 
-Ces limites sont structurelles, communes à tous les gestionnaires de mots de
-passe en extension. Les énoncer évite de fausses attentes.
+These limits are structural and common to every browser-extension password
+manager. Stating them avoids false expectations.
 
-- **Machine compromise, coffre déverrouillé.** La clé du coffre est en mémoire.
-  Un malware avec accès au processus la récupère. `wipe()` réduit la fenêtre
-  d'exposition, sans plus.
-- **Mot de passe maître faible.** Le KDF augmente le coût d'une attaque hors
-  ligne ; il ne compense pas un mot de passe devinable.
-- **Extension navigateur malveillante** disposant des mêmes permissions.
-- **Métadonnées.** Le serveur connaît le nombre d'items, leurs dates de
-  modification et leur taille approximative. Ces informations ne sont pas
-  chiffrées dans le format Bitwarden.
-- **Presse-papiers.** Un secret copié y séjourne jusqu'à l'écrasement différé
-  (30 s par défaut). Tout programme du poste peut le lire pendant ce temps, et
-  l'historique de presse-papiers du système d'exploitation, s'il est actif, peut
-  en garder une trace que l'extension n'atteint pas.
-- **Traces locales d'usage.** Le classement « dernier utilisé » persiste sur
-  disque des identifiants d'items (UUID opaques) et des horodatages — jamais
-  un nom, une URL, un identifiant de connexion ni un secret. Qui lit le profil
-  du navigateur apprend qu'un item a servi à telle heure, pas lequel. La liste
-  des sites exclus de la proposition d'enregistrement, elle, est en clair :
-  ce sont des noms d'hôtes que l'utilisateur a lui-même désignés.
-- **Identifiant capturé, en mémoire.** Entre une saisie et la décision de
-  l'utilisateur, un mot de passe en clair attend dans
-  `chrome.storage.session` : même stockage que la clé du coffre, même purge —
-  verrouillage, fermeture du navigateur — plus une expiration de 10 minutes.
-  Il n'atteint jamais le disque.
-- **Hash local du mot de passe maître, en mémoire.** La session déverrouillée
-  conserve `localPasswordHash` afin de vérifier une nouvelle saisie hors réseau
-  (garde `reprompt`, §7). Il ne peut pas être rejoué auprès du serveur — son
-  nombre d'itérations diffère du hash d'autorisation — et il vit dans le même
-  stockage mémoire que la clé du coffre, laquelle est strictement plus
-  sensible : cette conservation n'ouvre aucune surface nouvelle.
+- **A compromised machine with the vault unlocked.** The vault key is in memory.
+  Malware with access to the process retrieves it. `wipe()` narrows the exposure
+  window, no more.
+- **A weak master password.** The KDF raises the cost of an offline attack; it
+  does not make up for a guessable password.
+- **A malicious browser extension** holding the same permissions.
+- **Metadata.** The server knows the number of items, their modification dates
+  and their approximate size. That information is not encrypted in the Bitwarden
+  format.
+- **The clipboard.** A copied secret sits there until the deferred overwrite
+  (30 s by default). Any program on the machine can read it meanwhile, and the
+  operating system's clipboard history, if active, may keep a trace the
+  extension cannot reach.
+- **Local traces of use.** The "most recently used" ordering persists item
+  identifiers (opaque UUIDs) and timestamps to disk — never a name, a URL, a
+  username or a secret. Whoever reads the browser profile learns that an item was
+  used at a given time, not which one. The list of sites excluded from the save
+  proposal, however, is in the clear: they are hostnames the user named
+  themselves.
+- **A captured credential, in memory.** Between an entry and the user's
+  decision, a cleartext password waits in `chrome.storage.session`: the same
+  storage as the vault key, the same purge — locking, closing the browser — plus
+  a 10-minute expiry. It never reaches disk.
+- **The local master-password hash, in memory.** The unlocked session keeps
+  `localPasswordHash` so a fresh entry can be verified offline (the `reprompt`
+  guard, §7). It cannot be replayed against the server — its iteration count
+  differs from the authorization hash's — and it lives in the same memory
+  storage as the vault key, which is strictly more sensitive: keeping it opens
+  no new surface.
 
 ---
 
-## 2. Hiérarchie des clés
+## 2. Key hierarchy
 
 ```
-                       mot de passe maître
+                       master password
                               │
               ┌───────────────┴───────────────┐
               │ KDF                           │
-              │ sel = e-mail normalisé        │
+              │ salt = normalised email       │
               ▼                               │
-       clé maître (32 o)                      │
+        master key (32 B)                     │
               │                               │
       ┌───────┴────────┐                      │
       │ HKDF-Expand    │ PBKDF2               │
-      │ "enc" / "mac"  │ 1 ou 2 itérations    │
+      │ "enc" / "mac"  │ 1 or 2 iterations    │
       ▼                ▼                      │
- clé maître        hash du mot de passe ──────┘
- étirée (64 o)     (envoyé au serveur)
+  stretched         password hash ────────────┘
+  master key        (sent to the server)
+  (64 B)
       │
-      │ déchiffre le champ `Key` du profil
+      │ decrypts the profile's `Key` field
       ▼
- clé du coffre (64 o)  ← aléatoire, indépendante du mot de passe
+   vault key (64 B)  ← random, independent of the password
       │
-      ├── déchiffre les champs de chaque item
-      └── déchiffre la clé privée RSA (partage en organisation)
+      ├── decrypts each item's fields
+      └── decrypts the RSA private key (organisation sharing)
 ```
 
-### Pourquoi cette indirection
+### Why this indirection
 
-La clé maître **ne chiffre jamais de données**. Elle ne sert qu'à envelopper la
-clé du coffre.
+The master key **never encrypts data**. It serves only to wrap the vault key.
 
-Conséquence directe : changer de mot de passe maître ne demande que de
-ré-envelopper 64 octets. Sans cette indirection, il faudrait re-chiffrer et
-retransmettre l'intégralité du coffre à chaque changement — coûteux, et surtout
-fragile en cas d'interruption au milieu de l'opération.
+The direct consequence: changing the master password requires only re-wrapping
+64 bytes. Without that indirection, the entire vault would have to be
+re-encrypted and retransmitted on every change — expensive, and above all
+fragile if the operation is interrupted halfway.
 
 ---
 
-## 3. Dérivation de la clé maître
+## 3. Master key derivation
 
 ### PBKDF2-SHA256
 
 ```
-clé maître = PBKDF2-SHA256(
-    password = NFKD(mot de passe),
-    salt     = lowercase(trim(e-mail)),
-    c        = itérations annoncées par le serveur,
+master key = PBKDF2-SHA256(
+    password = NFKD(password),
+    salt     = lowercase(trim(email)),
+    c        = iterations announced by the server,
     dkLen    = 32
 )
 ```
@@ -113,323 +112,320 @@ clé maître = PBKDF2-SHA256(
 ### Argon2id
 
 ```
-clé maître = Argon2id(
-    password    = NFKD(mot de passe),
-    salt        = SHA-256(lowercase(trim(e-mail))),
-    t           = itérations,
-    m           = mémoire en MiB × 1024,
-    p           = parallélisme,
+master key = Argon2id(
+    password    = NFKD(password),
+    salt        = SHA-256(lowercase(trim(email))),
+    t           = iterations,
+    m           = memory in MiB × 1024,
+    p           = parallelism,
     hashLength  = 32
 )
 ```
 
-Le sel est le **condensat** de l'e-mail, pas l'e-mail brut : Argon2 impose une
-taille de sel fixe.
+The salt is the email's **digest**, not the raw email: Argon2 requires a
+fixed-size salt.
 
-### Détails qui cassent l'interopérabilité s'ils divergent
+### Details that break interoperability if they diverge
 
-| Point | Règle | Conséquence d'un écart |
+| Point | Rule | Consequence of a deviation |
 |---|---|---|
-| Normalisation du mot de passe | `NFKD` | Les accents composés produisent une clé différente selon l'OS |
-| Normalisation de l'e-mail | `trim()` puis `toLowerCase()` | Sel différent, coffre illisible |
-| Sel Argon2id | `SHA-256(e-mail)` | Coffre illisible |
-| HKDF | Expand **seul**, pas d'Extract | Clé étirée différente, coffre illisible |
+| Password normalisation | `NFKD` | Composed accents produce a different key depending on the OS |
+| Email normalisation | `trim()` then `toLowerCase()` | Different salt, unreadable vault |
+| Argon2id salt | `SHA-256(email)` | Unreadable vault |
+| HKDF | Expand **alone**, no Extract | Different stretched key, unreadable vault |
 
-⚠ **Validation des paramètres KDF.** Les paramètres arrivent de
-`/api/accounts/prelogin`, donc **avant authentification** : entrée non fiable.
-Un serveur hostile répondant `iterations: 1` obtient une clé maître dérivée en
-un seul tour, et le hash d'authentification transmis suffit alors à casser le
-mot de passe hors ligne en quelques secondes.
+⚠ **KDF parameter validation.** The parameters arrive from
+`/api/accounts/prelogin`, hence **before authentication**: untrusted input. A
+hostile server answering `iterations: 1` obtains a master key derived in a
+single round, and the authentication hash then sent is enough to crack the
+password offline within seconds.
 
-Le contrôle est borné **dans les deux sens** :
+The check is bounded **in both directions**:
 
-- **Planchers** — en dessous, la clé devient cassable hors ligne. Refus sous
-  100 000 itérations PBKDF2 (ancien défaut Bitwarden, conservé pour ne pas
-  bloquer les coffres existants) et sous `t=2, m=16 MiB, p=1` pour Argon2id.
-- **Plafonds** — au-dessus, c'est un déni de service : `iterations: 2³¹` gèle le
-  client, une mémoire Argon2 de plusieurs gibioctets tue l'onglet en OOM au
-  déverrouillage. Refus au-dessus de 5 000 000 itérations PBKDF2 et de
-  `t=10, m=1024 MiB, p=16` pour Argon2id — les maxima de l'interface du client
-  officiel, donc aucun coffre légitime ne peut les dépasser.
-- **Valeurs non entières** — `NaN`, flottants et chaînes déguisées en nombres
-  sont rejetés avant d'atteindre le KDF (`Number.isSafeInteger`).
+- **Floors** — below them, the key becomes crackable offline. Refused below
+  100,000 PBKDF2 iterations (Bitwarden's old default, kept so existing vaults are
+  not blocked) and below `t=2, m=16 MiB, p=1` for Argon2id.
+- **Ceilings** — above them, it is a denial of service: `iterations: 2³¹` freezes
+  the client, an Argon2 memory of several gibibytes kills the tab with an OOM at
+  unlock. Refused above 5,000,000 PBKDF2 iterations and above
+  `t=10, m=1024 MiB, p=16` for Argon2id — the maxima in the official client's
+  interface, so no legitimate vault can exceed them.
+- **Non-integer values** — `NaN`, floats and strings dressed up as numbers are
+  rejected before reaching the KDF (`Number.isSafeInteger`).
 
-**Le client Bitwarden officiel n'effectue aucun de ces contrôles.**
-
----
-
-## 4. Étirement : 32 → 64 octets
-
-La clé maître fait 32 octets : de quoi chiffrer, pas d'authentifier.
-
-```
-encKey = HKDF-Expand-SHA256(prk = clé maître, info = "enc", L = 32)
-macKey = HKDF-Expand-SHA256(prk = clé maître, info = "mac", L = 32)
-
-clé maître étirée = encKey ‖ macKey
-```
-
-L'étape Extract de HKDF est omise : la clé maître est déjà une PRK uniformément
-aléatoire issue du KDF, Extract n'y ajouterait aucune entropie. C'est le choix
-de Bitwarden ; s'en écarter rendrait les coffres illisibles.
-
-Les étiquettes `enc` et `mac` garantissent l'indépendance des deux moitiés.
-Réutiliser une même clé pour AES et HMAC est une faute classique : la
-composition perd toute garantie prouvée.
+**The official Bitwarden client performs none of these checks.**
 
 ---
 
-## 5. Hash du mot de passe maître
+## 4. Stretching: 32 → 64 bytes
+
+The master key is 32 bytes: enough to encrypt, not to authenticate.
 
 ```
-hash = base64( PBKDF2-SHA256(password = clé maître, salt = NFKD(mot de passe), c = usage, dkLen = 32) )
+encKey = HKDF-Expand-SHA256(prk = master key, info = "enc", L = 32)
+macKey = HKDF-Expand-SHA256(prk = master key, info = "mac", L = 32)
+
+stretched master key = encKey ‖ macKey
 ```
 
-PBKDF2 est appliqué « à l'envers » : la clé maître est le mot de passe, le mot
-de passe est le sel. Le serveur reçoit une valeur d'où il ne peut retrouver ni
-l'un ni l'autre.
+HKDF's Extract step is omitted: the master key is already a uniformly random PRK
+out of the KDF, and Extract would add no entropy. This is Bitwarden's choice;
+departing from it would make vaults unreadable.
 
-| Usage | `c` | Destination |
+The `enc` and `mac` labels guarantee the two halves are independent. Reusing one
+key for both AES and HMAC is a classic fault: the composition loses every proven
+guarantee.
+
+---
+
+## 5. Master password hash
+
+```
+hash = base64( PBKDF2-SHA256(password = master key, salt = NFKD(password), c = purpose, dkLen = 32) )
+```
+
+PBKDF2 is applied "backwards": the master key is the password, the password is
+the salt. The server receives a value from which it can recover neither.
+
+| Purpose | `c` | Destination |
 |---|---|---|
-| `ServerAuthorization` | 1 | Envoyé à `/identity/connect/token` |
-| `LocalAuthorization` | 2 | Conservé localement pour valider le mot de passe hors ligne |
+| `ServerAuthorization` | 1 | Sent to `/identity/connect/token` |
+| `LocalAuthorization` | 2 | Kept locally to validate the password offline |
 
-Le nombre d'itérations **est** la valeur de l'énumération. Les deux hashs sont
-donc structurellement distincts : celui stocké localement ne peut pas être
-rejoué comme preuve d'authentification, et inversement.
+The iteration count **is** the enum's value. The two hashes are therefore
+structurally distinct: the one stored locally cannot be replayed as proof of
+authentication, and vice versa.
 
-La validation hors ligne passe par `verifyLocalPasswordHash`, qui compare les
-**octets décodés** à temps constant — jamais un `===` sur les chaînes base64,
-qui court-circuite au premier caractère divergent.
+Offline validation goes through `verifyLocalPasswordHash`, which compares the
+**decoded bytes** in constant time — never a `===` on the base64 strings, which
+short-circuits at the first differing character.
 
 ---
 
-## 6. Chiffrement des données
+## 6. Data encryption
 
 ### Construction
 
 ```
-iv  ← 16 octets aléatoires
-ct  ← AES-256-CBC-PKCS7(encKey, iv, clair)
+iv  ← 16 random bytes
+ct  ← AES-256-CBC-PKCS7(encKey, iv, plaintext)
 mac ← HMAC-SHA256(macKey, iv ‖ ct)
 ```
 
-Sérialisation : `2.<base64(iv)>|<base64(ct)>|<base64(mac)>`
+Serialisation: `2.<base64(iv)>|<base64(ct)>|<base64(mac)>`
 
-### Déchiffrement
+### Decryption
 
 ```
-1. vérifier  HMAC-SHA256(macKey, iv ‖ ct) == mac    (subtle.verify, temps constant natif)
-2. si échec  → rejeter, sans toucher AES
-3. sinon     → AES-256-CBC-décrypt
+1. verify    HMAC-SHA256(macKey, iv ‖ ct) == mac    (subtle.verify, native constant time)
+2. on failure → reject, without touching AES
+3. otherwise  → AES-256-CBC-decrypt
 ```
 
-**L'ordre de ces étapes est la propriété de sécurité la plus importante du
-module.** AES-CBC lève une exception sur remplissage PKCS#7 invalide.
-Déchiffrer avant de vérifier transforme cette exception en *oracle de padding* :
-un attaquant capable de soumettre des ciphertexts et d'observer l'échec
-reconstruit le clair bloc par bloc, sans jamais connaître la clé.
+**The order of these steps is the module's most important security property.**
+AES-CBC throws on invalid PKCS#7 padding. Decrypting before verifying turns that
+exception into a *padding oracle*: an attacker able to submit ciphertexts and
+observe the failure reconstructs the plaintext block by block, without ever
+learning the key.
 
-Le MAC couvre l'IV **et** le ciphertext. Un IV falsifié permettrait de retourner
-des bits arbitraires du premier bloc en clair ; il est donc authentifié.
+The MAC covers the IV **and** the ciphertext. A forged IV would allow arbitrary
+bits of the first plaintext block to be flipped; it is therefore authenticated.
 
-### Types supportés
+### Supported types
 
-| Type | Algorithme | Lecture | Écriture |
+| Type | Algorithm | Read | Write |
 |---|---|---|---|
-| 0 | AES-256-CBC, sans MAC | legacy ⚠ | refusé |
-| 1 | AES-128-CBC + HMAC | refusé | refusé |
-| 2 | AES-256-CBC + HMAC-SHA256 | oui | **oui** |
-| 3–4 | RSA-2048 OAEP | clés d'organisation uniquement | refusé |
-| 5–6 | RSA-2048 OAEP + HMAC | refusé (legacy jamais généralisé) | refusé |
+| 0 | AES-256-CBC, no MAC | legacy ⚠ | refused |
+| 1 | AES-128-CBC + HMAC | refused | refused |
+| 2 | AES-256-CBC + HMAC-SHA256 | yes | **yes** |
+| 3–4 | RSA-2048 OAEP | organisation keys only | refused |
+| 5–6 | RSA-2048 OAEP + HMAC | refused (a legacy that never took hold) | refused |
 
-Le RSA ne sert qu'à déballer les **clés d'organisation** (`keyring.ts`) : la
-clé privée du compte, elle-même enveloppée par la clé du coffre, déchiffre la
-clé de chaque organisation, qui déchiffre ensuite ses items en AES type 2.
-
----
-
-## 7. Durcissements par rapport au client officiel
-
-### ⚠ Refus de rétrogradation
-
-Une donnée de type 2 resservie comme type 0 est rejetée.
-
-Sans ce contrôle, l'attaque est immédiate : le serveur retire le segment MAC,
-change le préfixe `2.` en `0.`, et le client déchiffre sans vérification. L'oracle
-de padding neutralisé au §6 est intégralement rouvert.
-
-Implémentation : le déchiffrement d'un type 0 avec une clé authentifiée (64 o)
-lève `UnsupportedEncryptionError`. Un vrai coffre legacy utilise une clé de
-32 octets, la distinction est donc nette.
-
-### ⚠ Écriture toujours authentifiée
-
-`encryptBytes` lève si la clé ne comporte pas de `macKey`. Zwarden ne peut pas
-produire de donnée non authentifiée, quelle que soit la configuration du coffre.
-
-### ⚠ Validation des paramètres KDF
-
-Voir §3.
-
-### ⚠ AES-128 (type 1) refusé en lecture
-
-Format obsolète. Le coffre doit être ré-chiffré. Aucun coffre actif connu ne
-l'utilise encore.
-
-### SHA-1 : une seule porte, et elle ne donne pas sur le coffre
-
-`hmacForOtp` est le seul point du code où SHA-1 apparaît, et il ne sert qu'aux
-codes à usage unique (RFC 6238). Ce n'est pas une concession : TOTP est
-spécifié sur HMAC-SHA1, l'immense majorité des sites n'offre rien d'autre, et
-le refuser rendrait le second facteur inutilisable sans rien sécuriser. Le
-risque de SHA-1 est la collision ; HMAC n'en dépend pas.
-
-Aucune donnée chiffrée ne passe par cette fonction : « Encrypt-then-MAC » reste
-porté par `hmacSha256`, et lui seul. La séparation est dans les noms comme dans
-les appels — un HMAC de coffre calculé avec `hmacForOtp` se verrait à la
-relecture.
-
-### Vérifier le mot de passe maître sans réseau
-
-`unlock()` produit deux hashs indépendants : l'un autorise auprès du serveur,
-l'autre reste local. Le second sert à revalider une saisie lorsqu'un item exige
-de redemander le mot de passe maître (`reprompt`, `docs/EXTENSION.md` §3) : on
-redérive la clé maître depuis la saisie, on recalcule le hash local, et on
-compare avec `timingSafeEqual`. La clé maître redérivée est détruite aussitôt.
-
-Deux raisons de ne pas passer par le serveur. D'abord un `reprompt` doit
-fonctionner hors ligne, comme le reste du coffre en cache. Ensuite, faire
-valider la garde à distance donnerait à qui contrôle le réseau le pouvoir de la
-désarmer — une réponse « mot de passe correct » suffirait. La garde est locale
-parce que ce qu'elle protège est local.
+RSA serves only to unwrap **organisation keys** (`keyring.ts`): the account's
+private key, itself wrapped by the vault key, decrypts each organisation's key,
+which then decrypts its items with AES type 2.
 
 ---
 
-## 8. Choix d'implémentation
+## 7. Hardening beyond the official client
 
-### WebCrypto plutôt qu'un SDK compilé
+### ⚠ Downgrade refusal
 
-| Opération | Implémentation | Bundle |
+Type 2 data served back as type 0 is rejected.
+
+Without that check the attack is immediate: the server strips the MAC segment,
+changes the `2.` prefix to `0.`, and the client decrypts without verification.
+The padding oracle neutralised in §6 is fully reopened.
+
+Implementation: decrypting a type 0 with an authenticated key (64 B) raises
+`UnsupportedEncryptionError`. A genuine legacy vault uses a 32-byte key, so the
+distinction is clean.
+
+### ⚠ Writes are always authenticated
+
+`encryptBytes` throws if the key has no `macKey`. Zwarden cannot produce
+unauthenticated data, whatever the vault's configuration.
+
+### ⚠ KDF parameter validation
+
+See §3.
+
+### ⚠ AES-128 (type 1) refused for reading
+
+An obsolete format. The vault must be re-encrypted. No known active vault still
+uses it.
+
+### SHA-1: one door, and it does not open onto the vault
+
+`hmacForOtp` is the only place in the code where SHA-1 appears, and it serves
+one-time codes alone (RFC 6238). This is not a concession: TOTP is specified on
+HMAC-SHA1, the vast majority of sites offer nothing else, and refusing it would
+make the second factor unusable without securing anything. SHA-1's weakness is
+collisions; HMAC does not depend on them.
+
+No encrypted data passes through this function: "encrypt-then-MAC" remains
+carried by `hmacSha256`, and it alone. The separation is in the names as much as
+in the calls — a vault HMAC computed with `hmacForOtp` would stand out on
+reading.
+
+### Verifying the master password without a network
+
+`unlock()` produces two independent hashes: one authorises against the server,
+the other stays local. The second is used to revalidate an entry when an item
+demands the master password again (`reprompt`, `docs/EXTENSION.md` §3): we
+re-derive the master key from the entry, recompute the local hash, and compare
+with `timingSafeEqual`. The re-derived master key is destroyed immediately.
+
+Two reasons not to go through the server. First, a `reprompt` must work offline,
+like the rest of the cached vault. Second, having the guard validated remotely
+would hand whoever controls the network the power to disarm it — a "password
+correct" response would suffice. The guard is local because what it protects is
+local.
+
+---
+
+## 8. Implementation choices
+
+### WebCrypto rather than a compiled SDK
+
+| Operation | Implementation | Bundle |
 |---|---|---|
-| AES-256-CBC | WebCrypto natif | 0 o |
-| HMAC-SHA256 | WebCrypto natif | 0 o |
-| SHA-256 | WebCrypto natif | 0 o |
-| PBKDF2-SHA256 | WebCrypto natif | 0 o |
-| HKDF-Expand | boucle de HMAC natifs | ~15 lignes |
-| Argon2id | WASM, import dynamique | ~45 Ko, chargé à la demande |
+| AES-256-CBC | native WebCrypto | 0 B |
+| HMAC-SHA256 | native WebCrypto | 0 B |
+| SHA-256 | native WebCrypto | 0 B |
+| PBKDF2-SHA256 | native WebCrypto | 0 B |
+| HKDF-Expand | a loop of native HMACs | ~15 lines |
+| Argon2id | WASM, dynamic import | ~45 KB, loaded on demand |
 
-Le client officiel charge 7,4 Mo de SDK Rust au démarrage, inconditionnellement.
-Le code natif du navigateur est écrit en C++ à temps constant, audité en continu,
-et déjà en mémoire.
+The official client loads 7.4 MB of Rust SDK at start-up, unconditionally. The
+browser's native code is written in constant-time C++, continuously audited, and
+already in memory.
 
-Un compte configuré en PBKDF2 ne télécharge **jamais** le module Argon2id.
+An account configured for PBKDF2 **never** downloads the Argon2id module.
 
-### base64 délégué à la plateforme
+### base64 delegated to the platform
 
-Le chemin principal utilise `Uint8Array.prototype.toBase64` /
-`Uint8Array.fromBase64` (proposition TC39 arraybuffer-base64), détectés au
-chargement du module ; à défaut, repli sur `btoa`/`atob`. Une implémentation
-manuelle a été écrite puis retirée : `scripts/bench-base64.mjs` la mesure
-**plus lente** que `atob`/`btoa` (2,2× au décodage), elles-mêmes battues par les
-méthodes natives dédiées. 40 lignes de code sensible supprimées pour un gain de
-performance.
+The main path uses `Uint8Array.prototype.toBase64` / `Uint8Array.fromBase64`
+(the TC39 arraybuffer-base64 proposal), detected at module load; failing that,
+it falls back to `btoa`/`atob`. A hand-written implementation was written and
+then removed: `scripts/bench-base64.mjs` measures it **slower** than
+`atob`/`btoa` (2.2× on decoding), which are themselves beaten by the dedicated
+native methods. Forty lines of sensitive code deleted for a performance gain.
 
-Les décodeurs de la plateforme **rejettent** les entrées invalides, là où
-l'implémentation manuelle les ignorait. C'est le bon comportement : sur du
-matériel cryptographique, ignorer des octets illisibles masquerait une
-corruption ou une réponse falsifiée. `EncString.parse` traduit ces échecs en
-`EncStringParseError`.
+The platform's decoders **reject** invalid input, where the hand-written one
+ignored it. That is the right behaviour: on cryptographic material, ignoring
+unreadable bytes would mask corruption or a tampered response. `EncString.parse`
+translates those failures into `EncStringParseError`.
 
-### Réutilisation des clés importées
+### Reusing imported keys
 
-`subtle.importKey` coûte un aller-retour asynchrone vers le module crypto.
-`SymmetricCryptoKey` importe donc chaque moitié de clé **une seule fois**
-(handles non extractibles, mis en cache paresseusement) : la synchronisation
-d'un coffre de N items économise 2 N imports. `destroy()` abandonne les handles
-en même temps qu'il efface le matériel brut.
+`subtle.importKey` costs an async round trip to the crypto module.
+`SymmetricCryptoKey` therefore imports each key half **once** (non-extractable
+handles, cached lazily): syncing an N-item vault saves 2 N imports. `destroy()`
+drops the handles at the same time as it erases the raw material.
 
-### Comparaison à temps constant
+### Constant-time comparison
 
-La vérification de MAC est déléguée à `subtle.verify` : code natif, à temps
-constant garanti par la plateforme. Une boucle JavaScript « à temps constant »
-reste à la merci du JIT, qui ne promet rien sur le profil temporel du code
-qu'il optimise.
+MAC verification is delegated to `subtle.verify`: native code, with constant time
+guaranteed by the platform. A "constant-time" JavaScript loop remains at the
+mercy of the JIT, which promises nothing about the timing profile of the code it
+optimises.
 
-`timingSafeEqual` demeure pour les comparaisons hors WebCrypto (hash local,
-tests). Il parcourt systématiquement toute la longueur et accumule les
-différences par OU binaire : une comparaison à court-circuit révèle par son
-temps de réponse le nombre d'octets de tête corrects, ce qui ramène la forge
-d'un MAC de 2²⁵⁶ à environ 256 × 32 essais.
+`timingSafeEqual` remains for comparisons outside WebCrypto (the local hash,
+tests). It always walks the full length and accumulates differences with a
+bitwise OR: a short-circuiting comparison reveals, through its response time, how
+many leading bytes are correct, which brings forging a MAC down from 2²⁵⁶ to
+about 256 × 32 attempts.
 
-### Effacement mémoire
+### Memory erasure
 
-`wipe()` et `SymmetricCryptoKey.destroy()` sont **best-effort**. Un moteur JS à
-GC générationnel recopie les objets lors des promotions mémoire, et ces copies
-sont inatteignables depuis JavaScript. Cela réduit la fenêtre d'exposition aux
-dumps mémoire et à l'hibernation, sans la supprimer. Ne pas surestimer cette
-garantie.
+`wipe()` and `SymmetricCryptoKey.destroy()` are **best-effort**. A JS engine with
+a generational GC copies objects during memory promotions, and those copies are
+out of JavaScript's reach. This narrows the exposure window to memory dumps and
+hibernation without closing it. Do not overestimate this guarantee.
 
 ---
 
-## 9. Couverture de tests
+## 9. Test coverage
 
-`npm test` — 190 tests unitaires.
+`npm test` — 301 tests.
 
-| Fichier | Portée |
+| File | Scope |
 |---|---|
-| `encoding.test.ts` | Vecteurs RFC 4648, sur le chemin natif **et** le repli ; aller-retour sur les 256 valeurs d'octet ; UTF-8 multi-octets ; base64url ; temps constant |
-| `primitives.test.ts` | Vecteurs RFC 4231 (HMAC), RFC 7914 (PBKDF2), RFC 5869 (HKDF) ; `subtle.verify` ; équivalence clé brute / `CryptoKey` importée |
-| `cryptoService.test.ts` | Aller-retours ; unicité de l'IV ; **altération IV / ciphertext / MAC** ; rétrogradation ; mauvaise clé ; validation structurelle du ciphertext ; vecteur de non-régression figé |
-| `kdf.test.ts` | Déterminisme ; normalisation e-mail et mot de passe ; séparation des sels ; refus des KDF faibles, aberrants et non entiers ; séparation des hashs ; validation locale à temps constant |
-| `apiClient.test.ts` | `fetch` simulé : validation d'URL, casse des champs, 429 / Retry-After, second facteur, captcha, rafraîchissement de session, 200 non-JSON, jeton absent, idempotence de la suppression ; seul le hash d'autorisation transite |
-| `vault.test.ts` | Serveur simulé qui **vérifie le hash** : `unlock()` de bout en bout, refus de KDF faible avant tout envoi, clé enveloppée absente ou falsifiée ; items à clé propre, casse PascalCase, champs corrompus isolés, liste à concurrence bornée |
+| `encoding.test.ts` | RFC 4648 vectors, on the native path **and** the fallback; round trip over all 256 byte values; multi-byte UTF-8; base64url; constant time |
+| `primitives.test.ts` | RFC 4231 (HMAC), RFC 7914 (PBKDF2), RFC 5869 (HKDF) vectors; `subtle.verify`; equivalence of a raw key and an imported `CryptoKey` |
+| `cryptoService.test.ts` | Round trips; IV uniqueness; **tampering with IV / ciphertext / MAC**; downgrade; wrong key; structural ciphertext validation; a frozen non-regression vector |
+| `kdf.test.ts` | Determinism; email and password normalisation; salt separation; refusal of weak, absurd and non-integer KDFs; hash separation; constant-time local validation |
+| `apiClient.test.ts` | Stubbed `fetch`: URL validation, field casing, 429 / Retry-After, second factor, captcha, session refresh, non-JSON 200, missing token, deletion idempotence; only the authorization hash travels |
+| `vault.test.ts` | A stubbed server that **verifies the hash**: `unlock()` end to end, weak-KDF refusal before anything is sent, a missing or forged wrapped key; items with their own key, PascalCase casing, corrupted fields isolated, a list with bounded concurrency |
+| `detector.test.ts` | Under jsdom: the "show password" click, account creation with a diverging confirmation, a hidden field, and the mirror field that once handed the password over as the username |
+| `totp.test.ts` | RFC 6238 vectors on SHA-1/256/512; `otpauth://` parsing; the counter beyond 2^31 |
+| `generator.test.ts` | Composition guarantee; rejection of the incomplete slice; shuffle; ambiguous characters |
 
-Les tests d'altération sont les plus importants : ils vérifient que chaque
-falsification possible produit bien `MacMismatchError`.
+The tampering tests are the most important: they check that every possible
+forgery does produce a `MacMismatchError`.
 
 ---
 
-## 10. Interopérabilité : validée
+## 10. Interoperability: validated
 
-L'interopérabilité n'est plus une déduction depuis la spécification, c'est un
-fait observé. Validation menée contre **Vaultwarden 2026.6.0**, compte en
-PBKDF2-SHA256 à 600 000 itérations.
+Interoperability is no longer a deduction from the specification, it is an
+observed fact. Validation carried out against **Vaultwarden 2026.6.0**, on an
+account using PBKDF2-SHA256 at 600,000 iterations.
 
-| Étape | Résultat | Ce que cela prouve |
+| Step | Result | What it proves |
 |---|---|---|
-| `prelogin` | PBKDF2, 600 000 itérations | Lecture correcte des paramètres KDF |
-| Dérivation de la clé maître | 32 octets | — |
-| `connect/token` | **Accepté** | Le hash d'autorisation est identique à celui du client officiel, donc la dérivation de clé maître l'est aussi (NFKD, normalisation e-mail, sel, itérations) |
-| Déchiffrement de la clé de coffre | 64 o, MAC vérifié | HKDF-Expand sans Extract, étiquettes `enc`/`mac`, ordre de concaténation, format `EncString` type 2, AES-256-CBC et HMAC-SHA256 : tous corrects |
-| Écriture puis relecture | Valeurs identiques | Le chemin de chiffrement produit des données que le serveur accepte et que l'on redéchiffre après un aller-retour complet |
+| `prelogin` | PBKDF2, 600,000 iterations | The KDF parameters are read correctly |
+| Master key derivation | 32 bytes | — |
+| `connect/token` | **Accepted** | The authorization hash is identical to the official client's, so the master key derivation is too (NFKD, email normalisation, salt, iterations) |
+| Vault key decryption | 64 B, MAC verified | HKDF-Expand without Extract, the `enc`/`mac` labels, the concatenation order, the type 2 `EncString` format, AES-256-CBC and HMAC-SHA256: all correct |
+| Write then read back | Identical values | The encryption path produces data the server accepts and that we decrypt again after a complete round trip |
 
-Le test d'écriture est le plus concluant : un item est chiffré localement,
-poussé via `POST /api/ciphers`, relu par une synchronisation complète, puis
-redéchiffré. Nom, identifiant et mot de passe sont comparés à l'original. L'item
-est supprimé en fin de test, y compris en cas d'échec d'assertion.
+The write test is the most conclusive: an item is encrypted locally, pushed
+through `POST /api/ciphers`, read back by a full sync, then decrypted again.
+Name, username and password are compared against the original. The item is
+deleted at the end of the test, including when an assertion fails.
 
-### Rejouer la validation
+### Replaying the validation
 
 ```bash
-export ZWARDEN_TEST_SERVER=https://vault.exemple.fr
-export ZWARDEN_TEST_EMAIL=compte+test@exemple.fr
+export ZWARDEN_TEST_SERVER=https://vault.example.com
+export ZWARDEN_TEST_EMAIL=account+test@example.com
 export ZWARDEN_TEST_PASSWORD='...'
 npx vitest run tests/integration
 ```
 
-Sans ces variables, le test est ignoré : la suite reste exécutable hors ligne.
+Without those variables the test is skipped: the suite stays runnable offline.
 
-**Utiliser un compte jetable.** Le test crée et supprime un item. Aucun secret
-n'est écrit sur disque ni journalisé — le rapport ne montre que des longueurs et
-des identifiants d'items.
+**Use a throwaway account.** The test creates and deletes an item. No secret is
+written to disk nor logged — the report shows only lengths and item identifiers.
 
-### Non encore couvert
+### Not covered yet
 
-- Argon2id contre un vrai serveur (testé unitairement, pas en interopérabilité)
-- Items à clé propre (`cipher.key`) — le code les gère, aucun échantillon réel
-  rencontré
-- Coffres d'organisation contre un vrai serveur — la chaîne RSA complète est
-  validée unitairement (paire RSA simulée, profil reconstitué), pas encore en
-  interopérabilité
-- Pièces jointes
+- Argon2id against a real server (unit-tested, not interoperability-tested)
+- Items with their own key (`cipher.key`) — the code handles them, no real
+  sample encountered
+- Organisation vaults against a real server — the full RSA chain is validated by
+  unit tests (a simulated RSA pair, a reconstructed profile), not yet in
+  interoperability
+- Attachments

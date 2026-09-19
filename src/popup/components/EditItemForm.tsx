@@ -1,30 +1,30 @@
 /**
- * @file Formulaire d'édition d'un item.
+ * @file The item edit form.
  *
- * Purement présentationnel : il reçoit des valeurs en clair déjà déchiffrées
- * par `App`, et remonte chaque frappe. Il ne chiffre rien, n'appelle pas le
- * réseau et ne sait pas ce qu'est une clé — ce qui le met hors de la logique de
- * coffre (`docs/EXTENSION.md` §3).
+ * Purely presentational: it receives cleartext values already decrypted by
+ * `App`, and raises every keystroke. It encrypts nothing, calls no network and
+ * does not know what a key is — which puts it outside the vault logic
+ * (`docs/EXTENSION.md` §3).
  *
- * Les champs propres à une connexion (identifiant, mot de passe, TOTP, URIs)
- * n'apparaissent que pour le type 1 : les afficher vides sur une note sécurisée
- * laisserait croire qu'ils y sont enregistrables.
+ * The login-specific fields (username, password, TOTP, URIs) only appear for
+ * type 1: showing them empty on a secure note would suggest they can be saved
+ * there.
  */
 
 import type { JSX } from 'preact';
 
 import type { PasskeyView } from '@core/vault/cipherService.js';
 
-import { IconDe, IconOeil } from './Icons.js';
+import { IconDice, IconEye } from './Icons.js';
 
-/** Valeurs en clair du formulaire. */
+/** The form's cleartext values. */
 export interface EditForm {
   name: string;
   username: string;
   password: string;
   totp: string;
   notes: string;
-  /** Une URI par ligne. */
+  /** One URI per line. */
   uris: string;
 }
 
@@ -37,14 +37,14 @@ export const EMPTY_EDIT: EditForm = {
   uris: '',
 };
 
-export function FormulaireEdition({
+export function EditItemForm({
   form,
-  estLogin,
+  isLogin,
   showPassword,
   passkeys,
   busy,
   error,
-  generateur,
+  generator,
   onPatch,
   onToggleShowPassword,
   onOpenGenerator,
@@ -52,13 +52,13 @@ export function FormulaireEdition({
   onCancel,
 }: {
   form: EditForm;
-  estLogin: boolean;
+  isLogin: boolean;
   showPassword: boolean;
   passkeys: readonly PasskeyView[];
   busy: string | null;
   error: string | null;
-  /** Panneau du générateur, rendu par l'appelant — ou rien s'il est fermé. */
-  generateur: JSX.Element | null;
+  /** The generator panel, rendered by the caller — or nothing if it is closed. */
+  generator: JSX.Element | null;
   onPatch: (patch: Partial<EditForm>) => void;
   onToggleShowPassword: () => void;
   onOpenGenerator: () => void;
@@ -69,14 +69,14 @@ export function FormulaireEdition({
     <div>
       <header>
         <h1>Zwarden</h1>
-        <button class="discret" onClick={onCancel}>
-          ← Annuler
+        <button class="quiet" onClick={onCancel}>
+          ← Cancel
         </button>
       </header>
       <main>
         <form onSubmit={onSubmit}>
           <label>
-            Nom
+            Name
             <input
               type="text"
               value={form.name}
@@ -84,9 +84,9 @@ export function FormulaireEdition({
               required
             />
           </label>
-          {estLogin && (
+          {isLogin && (
             <label>
-              Identifiant
+              Username
               <input
                 type="text"
                 value={form.username}
@@ -94,10 +94,10 @@ export function FormulaireEdition({
               />
             </label>
           )}
-          {estLogin && (
+          {isLogin && (
             <label>
-              Mot de passe
-              <div class="champ-mdp">
+              Password
+              <div class="password-field">
                 <input
                   type={showPassword ? 'text' : 'password'}
                   value={form.password}
@@ -105,30 +105,29 @@ export function FormulaireEdition({
                 />
                 <button
                   type="button"
-                  class="oeil"
-                  title={showPassword ? 'Masquer' : 'Afficher'}
+                  class="eye"
+                  title={showPassword ? 'Hide' : 'Show'}
                   onClick={onToggleShowPassword}
                 >
-                  <IconOeil barre={showPassword} />
+                  <IconEye struck={showPassword} />
                 </button>
                 <button
                   type="button"
-                  class="oeil de"
-                  title="Générer un mot de passe"
+                  class="eye dice"
+                  title="Generate a password"
                   onClick={onOpenGenerator}
                 >
-                  <IconDe />
+                  <IconDice />
                 </button>
               </div>
             </label>
           )}
-          {/* Hors du `<label>` : imbriquer des champs dans le libellé d'un autre
-              ferait basculer la case cochée dans le panneau sur le champ mot de
-              passe. */}
-          {generateur}
-          {estLogin && (
+          {/* Outside the `<label>`: nesting one field inside another's label
+              would make the panel's checkbox toggle the password field. */}
+          {generator}
+          {isLogin && (
             <label>
-              TOTP (clé ou otpauth://)
+              TOTP (key or otpauth://)
               <input
                 type="text"
                 value={form.totp}
@@ -136,9 +135,9 @@ export function FormulaireEdition({
               />
             </label>
           )}
-          {estLogin && (
+          {isLogin && (
             <label>
-              URIs (une par ligne)
+              URIs (one per line)
               <textarea
                 rows={2}
                 value={form.uris}
@@ -158,22 +157,21 @@ export function FormulaireEdition({
             <div class="passkeys-info">
               {passkeys.map((pk, i) => (
                 <p key={i}>
-                  <span class="badge">passkey</span> {pk.rpId ?? 'site inconnu'}
+                  <span class="badge">passkey</span> {pk.rpId ?? 'unknown site'}
                   {pk.userName !== null ? ` — ${pk.userName}` : ''}
                 </p>
               ))}
-              <p class="aide-diag">
-                Passkey conservée telle quelle — la signature WebAuthn arrivera dans une
-                prochaine version.
+              <p class="hint-diag">
+                Passkey preserved as-is — WebAuthn signing will arrive in a future version.
               </p>
             </div>
           )}
           <button type="submit" disabled={busy !== null}>
-            Enregistrer
+            Save
           </button>
         </form>
-        {busy !== null && <p class="statut">{busy}</p>}
-        {error !== null && <p class="erreur">{error}</p>}
+        {busy !== null && <p class="status">{busy}</p>}
+        {error !== null && <p class="error">{error}</p>}
       </main>
     </div>
   );

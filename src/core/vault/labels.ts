@@ -1,15 +1,15 @@
 /**
- * @file Étiquettes du coffre : dossiers et collections, unifiés en « tags ».
+ * @file Vault labels: folders and collections, unified as "tags".
  *
- * Deux mécanismes distincts du protocole, une seule notion en surface :
+ * Two distinct protocol mechanisms, one notion on the surface:
  *
- * - **dossier** (`#nom`) — rangement personnel, un seul par item, nom chiffré
- *   avec la clé du coffre ;
- * - **collection** (`@nom`) — unité de contrôle d'accès du partage, plusieurs
- *   par item, nom chiffré avec la clé de **son organisation**.
+ * - **folder** (`#name`) — personal filing, one per item, name encrypted with
+ *   the vault key;
+ * - **collection** (`@name`) — sharing's unit of access control, several per
+ *   item, name encrypted with **its organisation's** key.
  *
- * Cette phase est en lecture : déchiffrer les noms pour l'affichage et le
- * filtrage. L'assignation et le partage par tag viendront ensuite.
+ * This phase is read-only: decrypt the names for display and filtering.
+ * Assignment and sharing by tag come later.
  */
 
 import {
@@ -23,29 +23,29 @@ import { SymmetricCryptoKey } from '../crypto/symmetricCryptoKey.js';
 import type { CipherKeys } from './cipherService.js';
 import { MissingOrgKeyError } from './keyring.js';
 
-/** Collection déchiffrée, avec ce que l'interface doit savoir. */
+/** A decrypted collection, with what the UI needs to know. */
 export interface CollectionLabel {
   readonly name: string;
   readonly organizationId: string | null;
   /**
-   * `true` si le membre n'a que la lecture sur cette collection : l'interface
-   * doit désactiver l'édition de ses items plutôt que promettre un
-   * enregistrement qui échouera en 403.
+   * `true` if the member has read-only access to this collection: the UI must
+   * disable editing its items rather than promise a save that will fail with a
+   * 403.
    */
   readonly readOnly: boolean;
 }
 
-/** Étiquettes déchiffrées du coffre. */
+/** The vault's decrypted labels. */
 export interface VaultLabels {
-  /** Dossiers personnels : id → nom. */
+  /** Personal folders: id → name. */
   readonly folders: ReadonlyMap<string, string>;
-  /** Collections : id → étiquette. */
+  /** Collections: id → label. */
   readonly collections: ReadonlyMap<string, CollectionLabel>;
-  /** Organisations : id → nom (en clair dans le profil). */
+  /** Organisations: id → name (in the clear in the profile). */
   readonly organizations: ReadonlyMap<string, string>;
 }
 
-/** Étiquettes vides, pour les états intermédiaires de l'interface. */
+/** Empty labels, for the UI's intermediate states. */
 export const EMPTY_LABELS: VaultLabels = {
   folders: new Map(),
   collections: new Map(),
@@ -53,14 +53,14 @@ export const EMPTY_LABELS: VaultLabels = {
 };
 
 /**
- * Déchiffre les étiquettes d'une réponse de synchronisation.
+ * Decrypts the labels of a sync response.
  *
- * Robuste par construction : une étiquette illisible est signalée via
- * `onError` et ignorée — elle n'apparaît pas, le reste du coffre vit.
+ * Robust by construction: an unreadable label is reported through `onError` and
+ * skipped — it does not show up, and the rest of the vault lives on.
  *
- * @param sync Réponse de synchronisation complète.
- * @param keys Clé du coffre seule, ou trousseau complet (organisations).
- * @param onError Notification de chaque étiquette illisible.
+ * @param sync Complete sync response.
+ * @param keys The vault key alone, or the full keyring (organisations).
+ * @param onError Notification for each unreadable label.
  */
 export async function decryptLabels(
   sync: SyncResponse,
@@ -79,7 +79,7 @@ export async function decryptLabels(
   return { folders, collections, organizations: readOrganizations(sync) };
 }
 
-/** Dossiers personnels : nom chiffré avec la clé du coffre. */
+/** Personal folders: name encrypted with the vault key. */
 async function decryptFolders(
   sync: SyncResponse,
   userKey: SymmetricCryptoKey,
@@ -100,8 +100,8 @@ async function decryptFolders(
 }
 
 /**
- * Noms d'organisations. Seule famille d'étiquettes qui arrive **en clair** dans
- * le profil : d'où l'absence de déchiffrement, et de fonction asynchrone.
+ * Organisation names. The only family of labels that arrives **in the clear** in
+ * the profile: hence no decryption, and no async function.
  */
 function readOrganizations(sync: SyncResponse): Map<string, string> {
   const organizations = new Map<string, string>();
@@ -118,9 +118,9 @@ function readOrganizations(sync: SyncResponse): Map<string, string> {
 }
 
 /**
- * Collections. Le nom est chiffré avec la clé de **son** organisation, pas
- * celle du coffre : une collection dont la clé d'organisation n'a pas été
- * déballée est signalée et sautée, sans faire échouer les autres.
+ * Collections. The name is encrypted with **its** organisation's key, not the
+ * vault's: a collection whose organisation key was not unwrapped is reported and
+ * skipped, without failing the others.
  */
 async function decryptCollections(
   sync: SyncResponse,

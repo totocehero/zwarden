@@ -1,42 +1,41 @@
 /**
- * @file Chiffrement et déchiffrement authentifiés des `EncString`.
+ * @file Authenticated encryption and decryption of `EncString`s.
  *
- * C'est le seul point du code autorisé à appeler AES. Toutes les décisions de
- * sécurité sont concentrées ici, pour qu'un audit n'ait qu'un fichier à lire.
+ * This is the only place in the codebase allowed to call AES. Every security
+ * decision is concentrated here, so that an audit has a single file to read.
  *
- * ## Construction : Encrypt-then-MAC
+ * ## Construction: encrypt-then-MAC
  *
  * ```
- *   iv  ← aléatoire, 16 octets
- *   ct  ← AES-256-CBC(encKey, iv, clair)
+ *   iv  ← random, 16 bytes
+ *   ct  ← AES-256-CBC(encKey, iv, plaintext)
  *   mac ← HMAC-SHA256(macKey, iv ‖ ct)
  * ```
  *
- * `encKey` et `macKey` sont deux moitiés indépendantes d'une clé de 64 octets.
- * Le MAC couvre l'IV **et** le ciphertext : un IV falsifié, qui permettrait de
- * retourner des bits du premier bloc en clair, est donc détecté.
+ * `encKey` and `macKey` are two independent halves of a 64-byte key. The MAC
+ * covers the IV **and** the ciphertext: a forged IV, which would let an attacker
+ * flip bits in the first plaintext block, is therefore detected.
  *
- * Encrypt-then-MAC est la seule des trois compositions classiques (E&M, MtE,
- * EtM) qui soit génériquement sûre. Elle permet surtout de rejeter un
- * ciphertext falsifié **sans jamais le déchiffrer**.
+ * Encrypt-then-MAC is the only one of the three classic compositions (E&M, MtE,
+ * EtM) that is generically secure. Above all it allows a forged ciphertext to be
+ * rejected **without ever decrypting it**.
  *
- * ## Trois règles, jamais négociables
+ * ## Three rules, never negotiable
  *
- * 1. **MAC vérifié avant déchiffrement.** AES-CBC lève une exception sur
- *    remplissage PKCS#7 invalide. Déchiffrer avant de vérifier transforme cette
- *    exception en oracle de padding : un attaquant capable de soumettre des
- *    ciphertexts et d'observer l'échec récupère le clair bloc par bloc, sans
- *    jamais connaître la clé. Inverser l'ordre des deux étapes dans
- *    {@link decryptBytes} suffit à rouvrir cette faille.
+ * 1. **MAC verified before decryption.** AES-CBC throws on invalid PKCS#7
+ *    padding. Decrypting before verifying turns that exception into a padding
+ *    oracle: an attacker able to submit ciphertexts and observe the failure
+ *    recovers the plaintext block by block, without ever learning the key.
+ *    Swapping the order of those two steps in {@link decryptBytes} is all it
+ *    takes to reopen that hole.
  *
- * 2. **Comparaison de MAC à temps constant.** Déléguée à `subtle.verify` :
- *    code natif, à temps constant garanti par la plateforme plutôt que par le
- *    comportement du JIT sur une boucle JavaScript.
+ * 2. **Constant-time MAC comparison.** Delegated to `subtle.verify`: native
+ *    code, with constant time guaranteed by the platform rather than by how the
+ *    JIT happens to treat a JavaScript loop.
  *
- * 3. **Aucune rétrogradation.** Une donnée authentifiée resservie comme non
- *    authentifiée est rejetée. Sans cela, un serveur hostile retire simplement
- *    le MAC et annonce le type 0 pour retrouver l'oracle de padding neutralisé
- *    par la règle 1.
+ * 3. **No downgrade.** Authenticated data served back as unauthenticated is
+ *    rejected. Without that, a hostile server simply strips the MAC and declares
+ *    type 0 to recover the padding oracle rule 1 closed.
  */
 
 import { EncString, EncryptionType } from './encString.js';
@@ -53,55 +52,54 @@ import {
 import type { SymmetricCryptoKey } from './symmetricCryptoKey.js';
 
 /**
- * Levée lorsque le MAC ne correspond pas.
+ * Thrown when the MAC does not match.
  *
- * Signifie l'un de trois cas, volontairement indistinguables du point de vue de
- * l'appelant : donnée altérée, donnée corrompue, ou mauvaise clé.
+ * Means one of three things, deliberately indistinguishable from the caller's
+ * point of view: tampered data, corrupted data, or the wrong key.
  */
 export class MacMismatchError extends Error {
   override readonly name = 'MacMismatchError';
-  /** Identifiant stable pour l'interface : les messages servent aux journaux. */
+  /** Stable identifier for the UI: the messages are for logs. */
   readonly code = 'mac-mismatch';
 
   constructor() {
-    super('Vérification du MAC échouée : donnée altérée, corrompue, ou clé incorrecte');
+    super('MAC verification failed: data tampered with, corrupted, or wrong key');
   }
 }
 
-/** Levée lorsqu'une combinaison type / clé est refusée par politique. */
+/** Thrown when a type / key combination is refused by policy. */
 export class UnsupportedEncryptionError extends Error {
   override readonly name = 'UnsupportedEncryptionError';
-  /** Identifiant stable pour l'interface : les messages servent aux journaux. */
+  /** Stable identifier for the UI: the messages are for logs. */
   readonly code = 'unsupported-encryption';
 }
 
-/** Taille d'un IV AES, en octets. */
+/** Size of an AES IV, in bytes. */
 const IV_LENGTH = 16;
 
 /**
- * Données couvertes par le MAC : IV ‖ ciphertext.
+ * The data the MAC covers: IV ‖ ciphertext.
  *
- * L'ordre de concaténation fait partie du format sur le fil : le modifier
- * rendrait tous les coffres existants illisibles.
+ * The concatenation order is part of the wire format: changing it would make
+ * every existing vault unreadable.
  */
 function macPayload(iv: Uint8Array, ciphertext: Uint8Array): Uint8Array {
   return concatBytes(iv, ciphertext);
 }
 
 /**
- * Chiffre des octets bruts.
+ * Encrypts raw bytes.
  *
- * Produit systématiquement du type 2 (AES-256-CBC + HMAC-SHA256). Zwarden
- * n'émet jamais de donnée non authentifiée, quelle que soit la configuration
- * du coffre.
+ * Always produces type 2 (AES-256-CBC + HMAC-SHA256). Zwarden never emits
+ * unauthenticated data, whatever the vault's configuration.
  *
- * Un IV est tiré aléatoirement à chaque appel. Réutiliser un IV en CBC révèle
- * l'égalité des préfixes en clair entre deux messages.
+ * A fresh IV is drawn on every call. Reusing an IV under CBC reveals that two
+ * messages share a plaintext prefix.
  *
- * @param plaintext Données à chiffrer.
- * @param key Clé de 64 octets, authentifiée.
- * @returns `EncString` de type 2.
- * @throws {UnsupportedEncryptionError} Si la clé ne comporte pas de `macKey`.
+ * @param plaintext Data to encrypt.
+ * @param key 64-byte authenticated key.
+ * @returns A type 2 `EncString`.
+ * @throws {UnsupportedEncryptionError} If the key has no `macKey`.
  */
 export async function encryptBytes(
   plaintext: Uint8Array,
@@ -109,8 +107,8 @@ export async function encryptBytes(
 ): Promise<EncString> {
   if (key.macKey === undefined) {
     throw new UnsupportedEncryptionError(
-      'Chiffrement refusé : clé de 32 octets, sans macKey. ' +
-        "Zwarden n'écrit jamais de donnée non authentifiée.",
+      'Encryption refused: 32-byte key, without a macKey. ' +
+        'Zwarden never writes unauthenticated data.',
     );
   }
 
@@ -122,12 +120,12 @@ export async function encryptBytes(
 }
 
 /**
- * Chiffre du texte, encodé en UTF-8.
+ * Encrypts text, encoded as UTF-8.
  *
- * @param plaintext Texte à chiffrer.
- * @param key Clé de 64 octets, authentifiée.
- * @returns `EncString` de type 2.
- * @throws {UnsupportedEncryptionError} Si la clé ne comporte pas de `macKey`.
+ * @param plaintext Text to encrypt.
+ * @param key 64-byte authenticated key.
+ * @returns A type 2 `EncString`.
+ * @throws {UnsupportedEncryptionError} If the key has no `macKey`.
  */
 export async function encryptString(
   plaintext: string,
@@ -137,24 +135,24 @@ export async function encryptString(
 }
 
 /**
- * Déchiffre vers des octets bruts, après vérification du MAC.
+ * Decrypts to raw bytes, after MAC verification.
  *
- * Politique appliquée, du plus permissif au plus strict :
+ * The policy applied, from most permissive to strictest:
  *
- * | Type | Clé authentifiée | Résultat                                  |
- * |------|------------------|-------------------------------------------|
- * | 2    | oui              | MAC vérifié, puis déchiffrement            |
- * | 2    | non              | refus — clé inadaptée                      |
- * | 0    | non              | déchiffré — coffre legacy, à migrer        |
- * | 0    | oui              | refus — tentative de rétrogradation        |
- * | 1    | —                | refus — AES-128 obsolète                   |
- * | 3-6  | —                | refus — RSA, hors périmètre de ce service  |
+ * | Type | Authenticated key | Outcome                                    |
+ * |------|-------------------|--------------------------------------------|
+ * | 2    | yes               | MAC verified, then decrypted               |
+ * | 2    | no                | refused — unsuitable key                   |
+ * | 0    | no                | decrypted — legacy vault, to be migrated   |
+ * | 0    | yes               | refused — downgrade attempt                |
+ * | 1    | —                 | refused — AES-128 obsolete                 |
+ * | 3-6  | —                 | refused — RSA, outside this service's scope |
  *
- * @param encString Donnée chiffrée analysée.
- * @param key Clé de déchiffrement.
- * @returns Données en clair.
- * @throws {MacMismatchError} Si le MAC est absent ou ne correspond pas.
- * @throws {UnsupportedEncryptionError} Si la combinaison type / clé est refusée.
+ * @param encString Parsed encrypted data.
+ * @param key Decryption key.
+ * @returns Plaintext.
+ * @throws {MacMismatchError} If the MAC is missing or does not match.
+ * @throws {UnsupportedEncryptionError} If the type / key combination is refused.
  */
 export async function decryptBytes(
   encString: EncString,
@@ -169,21 +167,21 @@ export async function decryptBytes(
 
     case EncryptionType.AesCbc128_HmacSha256_B64:
       throw new UnsupportedEncryptionError(
-        'Type 1 (AES-128) obsolète : le coffre doit être ré-chiffré en type 2',
+        'Type 1 (AES-128) is obsolete: the vault must be re-encrypted as type 2',
       );
 
     default:
       throw new UnsupportedEncryptionError(
-        `Type ${encString.encryptionType} : chiffrement RSA, hors périmètre du service symétrique`,
+        `Type ${encString.encryptionType}: RSA encryption, outside the symmetric service's scope`,
       );
   }
 }
 
 /**
- * Déchiffre du type 2, après vérification du MAC.
+ * Decrypts type 2, after MAC verification.
  *
- * L'ordre des opérations est la propriété de sécurité centrale du module :
- * vérifier d'abord, déchiffrer ensuite. Voir l'en-tête de fichier.
+ * The order of operations is this module's central security property: verify
+ * first, decrypt second. See the file header.
  */
 async function decryptAuthenticated(
   encString: EncString,
@@ -191,14 +189,14 @@ async function decryptAuthenticated(
 ): Promise<Uint8Array> {
   if (key.macKey === undefined) {
     throw new UnsupportedEncryptionError(
-      'Donnée authentifiée présentée avec une clé de 32 octets, sans macKey',
+      'Authenticated data presented with a 32-byte key, without a macKey',
     );
   }
 
   if (encString.mac === undefined) {
-    // Structurellement impossible après `EncString.parse`, donc forcément une
-    // instance construite à la main. Traité comme un échec d'authentification,
-    // pas comme une erreur de programmation.
+    // Structurally impossible after `EncString.parse`, so necessarily a
+    // hand-built instance. Treated as an authentication failure, not as a
+    // programming error.
     throw new MacMismatchError();
   }
 
@@ -216,10 +214,10 @@ async function decryptAuthenticated(
 }
 
 /**
- * Déchiffre du type 0, sans aucune garantie d'intégrité.
+ * Decrypts type 0, with no integrity guarantee at all.
  *
- * Toléré uniquement pour lire puis migrer un coffre ancien. Une clé
- * authentifiée signale une tentative de rétrogradation et fait échouer l'appel.
+ * Tolerated solely to read and then migrate an old vault. An authenticated key
+ * signals a downgrade attempt and fails the call.
  */
 async function decryptLegacyUnauthenticated(
   encString: EncString,
@@ -227,8 +225,8 @@ async function decryptLegacyUnauthenticated(
 ): Promise<Uint8Array> {
   if (key.macKey !== undefined) {
     throw new UnsupportedEncryptionError(
-      'Donnée de type 0 (non authentifiée) présentée avec une clé authentifiée : ' +
-        'rétrogradation refusée',
+      'Type 0 (unauthenticated) data presented with an authenticated key: ' +
+        'downgrade refused',
     );
   }
 
@@ -236,20 +234,19 @@ async function decryptLegacyUnauthenticated(
 }
 
 /**
- * Déchiffre une donnée RSA (types 3 et 4) avec la clé privée du compte.
+ * Decrypts RSA data (types 3 and 4) with the account's private key.
  *
- * Usage unique dans l'écosystème Bitwarden : déballer les **clés
- * d'organisation**, que le serveur partage chiffrées vers la clé publique de
- * chaque membre. Le type réellement émis est le 4 (OAEP SHA-1) ; le 3 (OAEP
- * SHA-256) est accepté par complétude. Les types 5 et 6 (RSA + MAC) sont un
- * legacy jamais généralisé : refusés.
+ * Single use in the Bitwarden ecosystem: unwrapping **organisation keys**, which
+ * the server shares encrypted to each member's public key. The type actually
+ * emitted is 4 (OAEP SHA-1); 3 (OAEP SHA-256) is accepted for completeness.
+ * Types 5 and 6 (RSA + MAC) are a legacy that never took hold: refused.
  *
- * @param encString Donnée chiffrée analysée, de type 3 ou 4.
- * @param pkcs8PrivateKey Clé privée RSA du compte, DER/PKCS#8 — elle-même
- *   obtenue en déchiffrant `profile.privateKey` avec la clé du coffre.
- * @returns Données en clair.
- * @throws {UnsupportedEncryptionError} Si le type n'est pas 3 ou 4.
- * @throws {DOMException} Si le bloc ne se déchiffre pas avec cette clé.
+ * @param encString Parsed encrypted data, of type 3 or 4.
+ * @param pkcs8PrivateKey The account's RSA private key, DER/PKCS#8 — itself
+ *   obtained by decrypting `profile.privateKey` with the vault key.
+ * @returns Plaintext.
+ * @throws {UnsupportedEncryptionError} If the type is neither 3 nor 4.
+ * @throws {DOMException} If the block does not decrypt under this key.
  */
 export async function decryptRsaBytes(
   encString: EncString,
@@ -265,7 +262,7 @@ export async function decryptRsaBytes(
       break;
     default:
       throw new UnsupportedEncryptionError(
-        `Type ${encString.encryptionType} : déchiffrement RSA limité aux types 3 et 4`,
+        `Type ${encString.encryptionType}: RSA decryption is limited to types 3 and 4`,
       );
   }
 
@@ -274,13 +271,13 @@ export async function decryptRsaBytes(
 }
 
 /**
- * Déchiffre vers du texte UTF-8.
+ * Decrypts to UTF-8 text.
  *
- * @param encString Donnée chiffrée analysée.
- * @param key Clé de déchiffrement.
- * @returns Texte en clair.
- * @throws {MacMismatchError} Si le MAC est absent ou ne correspond pas.
- * @throws {UnsupportedEncryptionError} Si la combinaison type / clé est refusée.
+ * @param encString Parsed encrypted data.
+ * @param key Decryption key.
+ * @returns Plaintext.
+ * @throws {MacMismatchError} If the MAC is missing or does not match.
+ * @throws {UnsupportedEncryptionError} If the type / key combination is refused.
  */
 export async function decryptString(
   encString: EncString,
@@ -290,19 +287,18 @@ export async function decryptString(
 }
 
 /**
- * Déchiffre un champ optionnel provenant du serveur.
+ * Decrypts an optional field coming from the server.
  *
- * Un item corrompu ne doit pas faire échouer la synchronisation entière : la
- * fonction renvoie `null` et laisse l'appelant décider. Les erreurs restent
- * observables via `onError`, volontairement **obligatoire** : un champ qui
- * disparaît sans trace est indiscernable d'une attaque de suppression, le
- * compilateur impose donc à chaque appelant de choisir explicitement quoi en
- * faire.
+ * One corrupted item must not fail the whole sync: the function returns `null`
+ * and lets the caller decide. Errors stay observable through `onError`, which is
+ * deliberately **mandatory**: a field that vanishes without trace is
+ * indistinguishable from a deletion attack, so the compiler forces every caller
+ * to choose explicitly what to do about it.
  *
- * @param value Chaîne sérialisée, `null` ou `undefined`.
- * @param key Clé de déchiffrement.
- * @param onError Notification d'échec, pour journalisation ou télémétrie.
- * @returns Texte en clair, ou `null` si le champ est absent ou illisible.
+ * @param value Serialised string, `null` or `undefined`.
+ * @param key Decryption key.
+ * @param onError Failure notification, for logging or telemetry.
+ * @returns Plaintext, or `null` if the field is absent or unreadable.
  */
 export async function decryptStringOrNull(
   value: string | null | undefined,

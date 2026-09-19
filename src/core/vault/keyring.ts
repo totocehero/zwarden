@@ -1,19 +1,17 @@
 /**
- * @file Trousseau de clés du coffre : clé personnelle + clés d'organisation.
+ * @file The vault's keyring: personal key + organisation keys.
  *
- * Un item personnel est chiffré avec la clé du coffre ; un item partagé, avec
- * la clé de **son organisation**. Ces clés d'organisation arrivent dans le
- * profil de synchronisation, chiffrées en RSA vers la clé publique du membre.
- * La chaîne de déballage :
+ * A personal item is encrypted with the vault key; a shared item, with **its
+ * organisation's** key. Those organisation keys arrive in the sync profile,
+ * RSA-encrypted to the member's public key. The unwrapping chain:
  *
  * ```
- *   clé du coffre ──déchiffre──► clé privée RSA (profile.privateKey, type 2)
- *   clé privée RSA ──déchiffre──► clé d'organisation (organizations[].key, type 4)
- *   clé d'organisation ──déchiffre──► items de l'organisation
+ *   vault key ──decrypts──► RSA private key (profile.privateKey, type 2)
+ *   RSA private key ──decrypts──► organisation key (organizations[].key, type 4)
+ *   organisation key ──decrypts──► the organisation's items
  * ```
  *
- * Le trousseau se reconstruit à chaque synchronisation : rien de tout cela
- * n'est persisté.
+ * The keyring is rebuilt on every sync: none of this is persisted.
  */
 
 import { type ProfileOrganizationResponse, type SyncResponse, readField } from '../api/models.js';
@@ -22,36 +20,35 @@ import { decryptBytes, decryptRsaBytes } from '../crypto/cryptoService.js';
 import { wipe } from '../crypto/encoding.js';
 import { SymmetricCryptoKey } from '../crypto/symmetricCryptoKey.js';
 
-/** Levée (via `onError`) quand un item d'organisation n'a pas de clé connue. */
+/** Raised (through `onError`) when an organisation item has no known key. */
 export class MissingOrgKeyError extends Error {
   override readonly name = 'MissingOrgKeyError';
-  /** Identifiant stable pour l'interface : les messages servent aux journaux. */
+  /** Stable identifier for the UI: the messages are for logs. */
   readonly code = 'missing-org-key';
 
   constructor(readonly organizationId: string) {
-    super(`Clé d'organisation indisponible : ${organizationId}`);
+    super(`Organisation key unavailable: ${organizationId}`);
   }
 }
 
-/** Clés nécessaires au déchiffrement de l'ensemble du coffre. */
+/** The keys needed to decrypt the whole vault. */
 export interface VaultKeys {
   readonly userKey: SymmetricCryptoKey;
-  /** Clés d'organisation déballées, indexées par identifiant d'organisation. */
+  /** Unwrapped organisation keys, indexed by organisation identifier. */
   readonly orgKeys: ReadonlyMap<string, SymmetricCryptoKey>;
 }
 
 /**
- * Construit le trousseau à partir du profil de synchronisation.
+ * Builds the keyring from the sync profile.
  *
- * Robuste par construction : une organisation dont la clé ne se déballe pas
- * est signalée via `onError` et ignorée — ses items seront illisibles, le
- * reste du coffre non. Sans organisation, aucune cryptographie RSA n'est
- * touchée.
+ * Robust by construction: an organisation whose key fails to unwrap is reported
+ * through `onError` and skipped — its items will be unreadable, the rest of the
+ * vault will not. With no organisation, no RSA cryptography is touched at all.
  *
- * @param profile Champ `profile` de la réponse de synchronisation.
- * @param userKey Clé du coffre.
- * @param onError Notification de chaque clé impossible à déballer.
- * @returns Trousseau, avec les clés d'organisation résolues.
+ * @param profile The `profile` field of the sync response.
+ * @param userKey The vault key.
+ * @param onError Notification for each key that cannot be unwrapped.
+ * @returns The keyring, with organisation keys resolved.
  */
 export async function buildVaultKeys(
   profile: SyncResponse['profile'],
@@ -68,7 +65,7 @@ export async function buildVaultKeys(
 
   const protectedPrivateKey = readField<string>(profile, 'privateKey');
   if (protectedPrivateKey == null || protectedPrivateKey === '') {
-    onError(new Error('Profil sans clé privée : clés d’organisation indéchiffrables'));
+    onError(new Error('Profile without a private key: organisation keys are undecryptable'));
     return { userKey, orgKeys };
   }
 
@@ -95,8 +92,8 @@ export async function buildVaultKeys(
       }
     }
   } finally {
-    // La clé privée n'a plus d'usage une fois les clés d'organisation
-    // déballées. Best-effort, comme tout effacement en JavaScript.
+    // The private key has no further use once the organisation keys are
+    // unwrapped. Best-effort, like every erasure in JavaScript.
     wipe(pkcs8);
   }
 
@@ -104,18 +101,18 @@ export async function buildVaultKeys(
 }
 
 /**
- * Efface tout le matériel de clé d'un trousseau.
+ * Erases all of a keyring's key material.
  *
- * À appeler au verrouillage, et c'est le point : `userKey.destroy()` seul
- * laissait les clés d'organisation — capables de déchiffrer tous les items
- * partagés — en mémoire jusqu'au passage du ramasse-miettes, sans être
- * écrasées. L'incohérence était d'autant plus nette que la clé privée RSA,
- * elle, est bien effacée dès son dernier usage ({@link buildVaultKeys}).
+ * To be called at lock time, and that is the point: `userKey.destroy()` alone
+ * left the organisation keys — able to decrypt every shared item — in memory
+ * until the garbage collector came round, without being overwritten. The
+ * inconsistency was all the sharper given that the RSA private key *is* erased
+ * as soon as it has served its purpose ({@link buildVaultKeys}).
  *
- * Accepte aussi bien une clé nue qu'un trousseau : l'appelant verrouille sans
- * avoir à savoir dans quel cas il est.
+ * Accepts a bare key as readily as a keyring: the caller locks without having to
+ * know which case it is in.
  *
- * Best-effort, comme tout effacement en JavaScript — voir
+ * Best-effort, like every erasure in JavaScript — see
  * `SymmetricCryptoKey.destroy()`.
  */
 export function destroyVaultKeys(keys: SymmetricCryptoKey | VaultKeys): void {
@@ -130,10 +127,10 @@ export function destroyVaultKeys(keys: SymmetricCryptoKey | VaultKeys): void {
 }
 
 /**
- * Clé de base d'un item : celle du coffre, ou celle de son organisation.
+ * An item's base key: the vault's, or its organisation's.
  *
- * @returns `null` si l'item appartient à une organisation dont la clé n'a pas
- *   pu être déballée.
+ * @returns `null` if the item belongs to an organisation whose key could not be
+ *   unwrapped.
  */
 export function keyForCipher(cipher: unknown, keys: VaultKeys): SymmetricCryptoKey | null {
   const organizationId = readField<string | null>(cipher, 'organizationId') ?? null;

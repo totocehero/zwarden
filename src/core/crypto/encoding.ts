@@ -1,33 +1,32 @@
 /**
- * @file Conversions d'encodage et comparaisons sûres.
+ * @file Encoding conversions and safe comparisons.
  *
- * Convention du projet : toute donnée binaire circule en `Uint8Array`. On ne
- * laisse jamais fuiter de « binary string » (chaîne dont chaque code unit
- * représente un octet) hors de ce module — c'est une source classique de
- * corruption silencieuse dès qu'un octet dépasse 0x7f et qu'un `TextEncoder`
- * repasse dessus.
+ * Project convention: all binary data travels as `Uint8Array`. No "binary
+ * string" (a string whose every code unit stands for one byte) ever escapes
+ * this module — that is a classic source of silent corruption the moment a byte
+ * exceeds 0x7f and a `TextEncoder` passes over it.
  *
- * Ces fonctions manipulent du matériel de clé et des ciphertexts : toute
- * modification ici doit être accompagnée d'un aller-retour sur les 256 valeurs
- * d'octet (voir `tests/encoding.test.ts`).
+ * These functions handle key material and ciphertexts: any change here must
+ * come with a round trip over all 256 byte values (see
+ * `tests/encoding.test.ts`).
  */
 
 /**
- * Découpage utilisé pour `String.fromCharCode(...)`.
+ * Chunk size used for `String.fromCharCode(...)`.
  *
- * L'opérateur spread se traduit par un appel avec autant d'arguments que
- * d'éléments ; au-delà de quelques dizaines de milliers, on déborde la pile.
- * 8192 reste très en dessous de la limite tout en amortissant le coût d'appel.
+ * The spread operator turns into a call with as many arguments as there are
+ * elements; past a few tens of thousands, the stack overflows. 8192 stays well
+ * below the limit while still amortising call overhead.
  */
 const FROM_CHAR_CODE_CHUNK = 8192;
 
 /**
- * Méthodes base64 natives de `Uint8Array` (proposition TC39 arraybuffer-base64),
- * disponibles dans les navigateurs cibles récents. Détectées une fois au
- * chargement du module ; leur absence bascule sur le repli `btoa`/`atob`.
+ * Native base64 methods on `Uint8Array` (TC39 arraybuffer-base64 proposal),
+ * available in recent target browsers. Detected once at module load; their
+ * absence falls back to `btoa`/`atob`.
  *
- * Les types ne sont pas encore dans `lib.es2022`, d'où les élargissements
- * locaux — confinés à ces deux constantes.
+ * The types are not in `lib.es2022` yet, hence the local widenings — confined
+ * to these two constants.
  */
 const NATIVE_TO_BASE64 = (Uint8Array.prototype as Uint8Array & { toBase64?: () => string })
   .toBase64;
@@ -36,25 +35,25 @@ const NATIVE_FROM_BASE64 = (
 ).fromBase64;
 
 /**
- * Encode des octets en base64 standard (RFC 4648 §4), avec padding.
+ * Encodes bytes as standard base64 (RFC 4648 §4), with padding.
  *
- * Utilise `Uint8Array.prototype.toBase64` quand la plateforme l'offre — code
- * natif dédié, plus rapide que `btoa` — sinon {@link toBase64Js}. Une
- * implémentation manuelle en JS a été mesurée plus lente que les deux (voir
- * `scripts/bench-base64.mjs`) : on ne réimplémente pas ce que la plateforme
- * fait mieux.
+ * Uses `Uint8Array.prototype.toBase64` where the platform offers it —
+ * purpose-built native code, faster than `btoa` — otherwise {@link toBase64Js}.
+ * A hand-written JS implementation measured slower than both (see
+ * `scripts/bench-base64.mjs`): we do not reimplement what the platform does
+ * better.
  *
- * @param bytes Octets à encoder.
- * @returns Chaîne base64 avec padding `=`.
+ * @param bytes Bytes to encode.
+ * @returns Base64 string with `=` padding.
  */
 export function toBase64(bytes: Uint8Array): string {
   return NATIVE_TO_BASE64 !== undefined ? NATIVE_TO_BASE64.call(bytes) : toBase64Js(bytes);
 }
 
 /**
- * Repli de {@link toBase64} sur `btoa`, pour les plateformes sans
- * `Uint8Array.prototype.toBase64`. Exporté pour que les tests couvrent les
- * deux chemins quelle que soit la plateforme d'exécution.
+ * Fallback for {@link toBase64} on `btoa`, for platforms without
+ * `Uint8Array.prototype.toBase64`. Exported so tests cover both paths whatever
+ * the host platform.
  */
 export function toBase64Js(bytes: Uint8Array): string {
   let binary = '';
@@ -65,38 +64,38 @@ export function toBase64Js(bytes: Uint8Array): string {
 }
 
 /**
- * Encode des octets en base64url sans padding (RFC 4648 §5).
+ * Encodes bytes as unpadded base64url (RFC 4648 §5).
  *
- * Forme attendue notamment par l'en-tête `Auth-Email` de l'API. Centralisé ici
- * pour respecter la convention du module : aucune « binary string » ne circule
- * ailleurs.
+ * The form the API's `Auth-Email` header expects, among others. Centralised
+ * here to honour the module convention: no "binary string" travels anywhere
+ * else.
  *
- * @param bytes Octets à encoder.
- * @returns Chaîne base64url, sans `=` final.
+ * @param bytes Bytes to encode.
+ * @returns Base64url string, without trailing `=`.
  */
 export function toBase64Url(bytes: Uint8Array): string {
   return toBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 /**
- * Décode une chaîne base64 vers des octets.
+ * Decodes a base64 string into bytes.
  *
- * Tolérant en entrée, volontairement : les espaces et retours ligne sont
- * ignorés et l'alphabet URL-safe (`-` et `_`) est accepté. Les payloads
- * transitent par plusieurs implémentations serveur et clients tiers ; refuser
- * un coffre déchiffrable pour un `\n` parasite serait une régression
- * fonctionnelle sans bénéfice de sécurité.
+ * Deliberately lenient on input: whitespace and newlines are ignored, and the
+ * URL-safe alphabet (`-` and `_`) is accepted. Payloads pass through several
+ * server implementations and third-party clients; refusing a perfectly
+ * decryptable vault over a stray `\n` would be a functional regression with no
+ * security benefit.
  *
- * Le padding manquant est reconstitué : les décodeurs stricts le refusent,
- * mais un base64 non paddé reste décodable sans ambiguïté.
+ * Missing padding is restored: strict decoders reject it, but unpadded base64
+ * remains unambiguously decodable.
  *
- * Le décodage lui-même passe par `Uint8Array.fromBase64` quand il existe,
- * sinon par {@link fromBase64Js}.
+ * The decoding itself goes through `Uint8Array.fromBase64` where it exists,
+ * otherwise {@link fromBase64Js}.
  *
- * @param input Chaîne base64, standard ou URL-safe.
- * @returns Octets décodés.
- * @throws {DOMException | SyntaxError} Si l'entrée contient des caractères
- *   hors alphabet après normalisation.
+ * @param input Base64 string, standard or URL-safe.
+ * @returns Decoded bytes.
+ * @throws {DOMException | SyntaxError} If the input holds characters outside
+ *   the alphabet after normalisation.
  */
 export function fromBase64(input: string): Uint8Array {
   const normalized = input.replace(/\s+/g, '').replace(/-/g, '+').replace(/_/g, '/');
@@ -108,11 +107,11 @@ export function fromBase64(input: string): Uint8Array {
 }
 
 /**
- * Repli de {@link fromBase64} sur `atob`.
+ * Fallback for {@link fromBase64} on `atob`.
  *
- * Attend une entrée déjà normalisée : alphabet standard, padding présent —
- * c'est {@link fromBase64} qui s'en charge. Exporté pour que les tests couvrent
- * les deux chemins quelle que soit la plateforme d'exécution.
+ * Expects already-normalised input: standard alphabet, padding present — that
+ * is {@link fromBase64}'s job. Exported so tests cover both paths whatever the
+ * host platform.
  */
 export function fromBase64Js(padded: string): Uint8Array {
   const binary = atob(padded);
@@ -123,29 +122,28 @@ export function fromBase64Js(padded: string): Uint8Array {
   return out;
 }
 
-/** Alphabet base32, RFC 4648 — celui des secrets TOTP. */
+/** Base32 alphabet, RFC 4648 — the one TOTP secrets use. */
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 
-/** Levée par {@link fromBase32} sur un caractère hors alphabet. */
+/** Thrown by {@link fromBase32} on a character outside the alphabet. */
 export class Base32Error extends Error {
   override readonly name = 'Base32Error';
   readonly code = 'base32-invalid';
 }
 
 /**
- * Décode du base32 (RFC 4648).
+ * Decodes base32 (RFC 4648).
  *
- * Utilisé pour les seuls secrets TOTP, que les sites publient dans cet
- * alphabet. Tolérant sur la forme — casse indifférente, espaces et tirets
- * ignorés, padding facultatif — parce que ces secrets sont recopiés à la main
- * depuis une page web ou lus dans un QR code, et qu'un « 2FA cassé » pour un
- * espace de trop serait incompréhensible. Strict, en revanche, sur
- * l'alphabet : un caractère étranger signale une erreur de recopie, pas une
- * variante de forme.
+ * Used for TOTP secrets alone, which sites publish in this alphabet. Lenient
+ * about shape — case-insensitive, spaces and dashes ignored, padding optional —
+ * because those secrets get copied by hand from a web page or read out of a QR
+ * code, and "2FA is broken" over one extra space would be baffling. Strict
+ * about the alphabet, though: a foreign character signals a transcription
+ * mistake, not a variant spelling.
  *
- * @param input Chaîne base32.
- * @returns Octets décodés.
- * @throws {Base32Error} Caractère hors alphabet.
+ * @param input Base32 string.
+ * @returns Decoded bytes.
+ * @throws {Base32Error} Character outside the alphabet.
  */
 export function fromBase32(input: string): Uint8Array {
   const normalized = input.replace(/[\s-]/g, '').replace(/=+$/, '').toUpperCase();
@@ -157,7 +155,7 @@ export function fromBase32(input: string): Uint8Array {
   for (const char of normalized) {
     const value = BASE32_ALPHABET.indexOf(char);
     if (value === -1) {
-      throw new Base32Error(`Caractère hors alphabet base32 : ${JSON.stringify(char)}`);
+      throw new Base32Error(`Character outside the base32 alphabet: ${JSON.stringify(char)}`);
     }
     buffer = (buffer << 5) | value;
     bits += 5;
@@ -167,8 +165,8 @@ export function fromBase32(input: string): Uint8Array {
       written += 1;
     }
   }
-  // Les bits restants (< 8) sont le rembourrage de la dernière lettre : les
-  // ignorer est ce que prescrit la RFC.
+  // The leftover bits (< 8) are the last letter's padding: ignoring them is
+  // what the RFC prescribes.
   return out.subarray(0, written);
 }
 
@@ -176,34 +174,34 @@ const UTF8_ENCODER = /* @__PURE__ */ new TextEncoder();
 const UTF8_DECODER = /* @__PURE__ */ new TextDecoder('utf-8', { fatal: false });
 
 /**
- * Encode du texte en UTF-8.
+ * Encodes text as UTF-8.
  *
- * @param text Texte source.
- * @returns Octets UTF-8.
+ * @param text Source text.
+ * @returns UTF-8 bytes.
  */
 export function toUtf8Bytes(text: string): Uint8Array {
   return UTF8_ENCODER.encode(text);
 }
 
 /**
- * Décode des octets UTF-8 en texte.
+ * Decodes UTF-8 bytes into text.
  *
- * Le décodeur est non strict (`fatal: false`) : une séquence invalide produit
- * U+FFFD plutôt qu'une exception. C'est délibéré — un champ de coffre corrompu
- * doit rester affichable et signalable, pas faire échouer la synchronisation.
+ * The decoder is non-strict (`fatal: false`): an invalid sequence yields U+FFFD
+ * rather than an exception. That is deliberate — a corrupted vault field must
+ * stay displayable and reportable, not fail the whole sync.
  *
- * @param bytes Octets UTF-8.
- * @returns Texte décodé, caractères invalides remplacés par U+FFFD.
+ * @param bytes UTF-8 bytes.
+ * @returns Decoded text, invalid characters replaced by U+FFFD.
  */
 export function fromUtf8Bytes(bytes: Uint8Array): string {
   return UTF8_DECODER.decode(bytes);
 }
 
 /**
- * Concatène plusieurs tampons en un seul.
+ * Concatenates several buffers into one.
  *
- * @param parts Tampons à concaténer, dans l'ordre.
- * @returns Nouveau tampon contenant la concaténation.
+ * @param parts Buffers to concatenate, in order.
+ * @returns A new buffer holding the concatenation.
  */
 export function concatBytes(...parts: Uint8Array[]): Uint8Array {
   let total = 0;
@@ -221,20 +219,20 @@ export function concatBytes(...parts: Uint8Array[]): Uint8Array {
 }
 
 /**
- * Compare deux tampons en temps constant.
+ * Compares two buffers in constant time.
  *
- * Indispensable pour la vérification de MAC. Une comparaison naïve s'arrête au
- * premier octet divergent : le temps de réponse révèle alors combien d'octets
- * de tête sont corrects, ce qui permet de forger un MAC valide octet par octet
- * en 256 × 32 requêtes au lieu de 2^256.
+ * Indispensable for MAC verification. A naive comparison stops at the first
+ * differing byte: the response time then reveals how many leading bytes are
+ * correct, which lets an attacker forge a valid MAC byte by byte in 256 × 32
+ * requests instead of 2^256.
  *
- * La durée dépend uniquement de la longueur des entrées, jamais de leur
- * contenu. Ici les MAC font toujours 32 octets, donc la longueur n'est pas un
- * secret ; on évite malgré tout tout retour anticipé.
+ * The duration depends only on the input lengths, never on their contents. MACs
+ * here are always 32 bytes, so the length is not a secret; we avoid any early
+ * return all the same.
  *
- * @param a Premier tampon.
- * @param b Second tampon.
- * @returns `true` si les tampons sont identiques.
+ * @param a First buffer.
+ * @param b Second buffer.
+ * @returns `true` if the buffers are identical.
  */
 export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
   let diff = a.length ^ b.length;
@@ -246,14 +244,14 @@ export function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 /**
- * Écrase un tampon sensible en place.
+ * Overwrites a sensitive buffer in place.
  *
- * Best-effort assumé. Un moteur JS à GC générationnel a pu recopier le tampon
- * lors d'une promotion mémoire, et rien en JavaScript ne permet de garantir
- * l'effacement de ces copies. Cela réduit la fenêtre d'exposition (dumps
- * mémoire, hibernation) sans l'éliminer.
+ * Best-effort, and known to be. A JS engine with a generational GC may have
+ * copied the buffer during a memory promotion, and nothing in JavaScript can
+ * guarantee those copies are erased. This narrows the exposure window (memory
+ * dumps, hibernation) without closing it.
  *
- * @param bytes Tampon à effacer.
+ * @param bytes Buffer to erase.
  */
 export function wipe(bytes: Uint8Array): void {
   bytes.fill(0);

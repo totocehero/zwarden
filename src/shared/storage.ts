@@ -1,17 +1,17 @@
 /**
- * @file Stockage partagé entre popup, page d'options et service worker.
+ * @file Storage shared between the popup, the options page and the service
+ * worker.
  *
- * Deux niveaux, à ne jamais confondre :
+ * Two levels, never to be confused:
  *
- * - `chrome.storage.local` — préférences durables : paramètres, identifiant
- *   d'appareil, jetons de dispense 2FA. **Jamais de clé, jamais de mot de
- *   passe.**
- * - `chrome.storage.session` — état déverrouillé : clé de coffre et jetons de
- *   session. Mémoire pure, réservée aux contextes de confiance de
- *   l'extension, purgée à la fermeture du navigateur.
+ * - `chrome.storage.local` — durable preferences: settings, device identifier,
+ *   2FA remember tokens. **Never a key, never a password.**
+ * - `chrome.storage.session` — unlocked state: vault key and session tokens.
+ *   Pure memory, restricted to the extension's trusted contexts, purged when the
+ *   browser closes.
  *
- * Toutes les fonctions tolèrent l'absence de `chrome.*` (aperçu Vite, tests)
- * en se comportant comme un stockage vide.
+ * Every function tolerates the absence of `chrome.*` (Vite preview, tests) by
+ * behaving as empty storage.
  */
 
 import type { KdfConfig } from '../core/crypto/kdf.js';
@@ -22,34 +22,33 @@ import {
   type PasswordOptions,
 } from '../core/generator/password.js';
 
-/** Paramètres de l'application, tels qu'édités dans la page d'options. */
+/** Application settings, as edited in the options page. */
 export interface AppSettings {
   readonly serverUrl: string;
   readonly email: string;
-  /** Nom affiché dans les sessions actives côté serveur. */
+  /** Name shown among the server's active sessions. */
   readonly deviceName: string;
-  /** Délai réseau, en secondes. */
+  /** Network timeout, in seconds. */
   readonly timeoutSeconds: number;
   /**
-   * Verrouillage automatique après inactivité, en minutes — « inactivité »
-   * signifiant : aucune activité dans le navigateur (changement d'onglet,
-   * de fenêtre, navigation) ni dans la popup. 0 = jamais (verrouillage à la
-   * fermeture du navigateur seulement), qui est le défaut.
+   * Auto-lock after inactivity, in minutes — "inactivity" meaning: no activity
+   * in the browser (tab switch, window switch, navigation) nor in the popup.
+   * 0 = never (lock on browser close only), which is the default.
    */
   readonly autoLockMinutes: number;
   /**
-   * Verrouiller dès que la session du système est verrouillée (écran de
-   * veille, `Win+L`, suspension). Indépendant du délai d'inactivité : c'est
-   * le filet qui rend le défaut « fermeture du navigateur » tenable — on
-   * s'éloigne d'une machine bien plus souvent qu'on ne ferme son navigateur.
+   * Lock as soon as the system session locks (screensaver, `Win+L`, suspend).
+   * Independent of the inactivity delay: it is the safety net that makes the
+   * "browser close" default tenable — one walks away from a machine far more
+   * often than one closes the browser.
    */
   readonly lockOnSystemLock: boolean;
   /**
-   * Proposer d'enregistrer un identifiant saisi sur un site absent du coffre.
-   * Désactivé, le détecteur n'est même pas injecté dans les pages.
+   * Offer to save credentials entered on a site the vault does not know.
+   * Switched off, the detector is not even injected into pages.
    */
   readonly offerToSave: boolean;
-  /** Effacement du presse-papiers après une copie, en secondes. 0 = jamais. */
+  /** Clipboard wipe after a copy, in seconds. 0 = never. */
   readonly clipboardClearSeconds: number;
 }
 
@@ -83,7 +82,7 @@ function readBoolean(source: Record<string, unknown>, key: string, fallback: boo
   return typeof value === 'boolean' ? value : fallback;
 }
 
-/** Charge les paramètres, valeurs par défaut pour tout champ absent ou invalide. */
+/** Loads the settings, falling back to defaults for any missing or invalid field. */
 export async function loadSettings(): Promise<AppSettings> {
   if (!hasLocal) {
     return DEFAULT_SETTINGS;
@@ -114,19 +113,19 @@ export async function loadSettings(): Promise<AppSettings> {
   };
 }
 
-/** Enregistre un sous-ensemble de paramètres. */
+/** Saves a subset of the settings. */
 export async function saveSettings(patch: Partial<AppSettings>): Promise<void> {
   if (hasLocal) {
     await chrome.storage.local.set(patch);
   }
 }
 
-// --- Identifiant d'appareil --------------------------------------------------
+// --- Device identifier -------------------------------------------------------
 
 /**
- * Identifiant d'appareil stable : généré une fois, persisté. Le régénérer à
- * chaque connexion créerait une session serveur par déverrouillage et
- * déclencherait les alertes « nouvel appareil ».
+ * Stable device identifier: generated once, persisted. Regenerating it on every
+ * connection would create one server session per unlock and trigger "new device"
+ * alerts.
  */
 export async function getDeviceId(): Promise<string> {
   if (!hasLocal) {
@@ -139,7 +138,7 @@ export async function getDeviceId(): Promise<string> {
   return regenerateDeviceId();
 }
 
-/** Régénère l'identifiant d'appareil. Le serveur verra un nouvel appareil. */
+/** Regenerates the device identifier. The server will see a new device. */
 export async function regenerateDeviceId(): Promise<string> {
   const id = crypto.randomUUID();
   if (hasLocal) {
@@ -148,11 +147,11 @@ export async function regenerateDeviceId(): Promise<string> {
   return id;
 }
 
-// --- Jetons de dispense 2FA --------------------------------------------------
+// --- 2FA remember tokens -----------------------------------------------------
 
 const REMEMBER_PREFIX = '2faRemember:';
 
-/** Clé de stockage du jeton de dispense, propre au couple compte/serveur. */
+/** Storage key for the remember token, specific to the account/server pair. */
 function rememberKey(serverUrl: string, email: string): string {
   return `${REMEMBER_PREFIX}${email.trim().toLowerCase()}@${serverUrl}`;
 }
@@ -183,9 +182,9 @@ export async function clearRememberToken(serverUrl: string, email: string): Prom
 }
 
 /**
- * Oublie toutes les dispenses 2FA de cet appareil, tous comptes confondus.
+ * Forgets every 2FA exemption on this device, across all accounts.
  *
- * @returns Le nombre de dispenses supprimées.
+ * @returns How many exemptions were removed.
  */
 export async function clearAllRememberTokens(): Promise<number> {
   if (!hasLocal) {
@@ -199,36 +198,34 @@ export async function clearAllRememberTokens(): Promise<number> {
   return keys.length;
 }
 
-// --- Proposition d'enregistrement --------------------------------------------
+// --- Save proposal -----------------------------------------------------------
 
 /**
- * Identifiants saisis dans une page, en attente d'une décision de
- * l'utilisateur.
+ * Credentials entered in a page, awaiting the user's decision.
  *
- * **Contient un mot de passe en clair** : vit donc dans
- * `chrome.storage.session` — mémoire pure, purgée à la fermeture du
- * navigateur — au même titre que la clé du coffre, et jamais sur disque. Une
- * seule capture est retenue à la fois : la dernière saisie est celle qui
- * intéresse l'utilisateur, et empiler des mots de passe en clair serait une
- * surface gratuite.
+ * **Holds a cleartext password**: it therefore lives in
+ * `chrome.storage.session` — pure memory, purged when the browser closes — on
+ * the same footing as the vault key, and never on disk. Only one capture is kept
+ * at a time: the last entry is the one the user cares about, and stacking up
+ * cleartext passwords would be surface for free.
  */
 export interface PendingSave {
-  /** Origine de la page (schéma + hôte + port), pour l'URI de l'item créé. */
+  /** The page's origin (scheme + host + port), for the created item's URI. */
   readonly origin: string;
-  /** Hôte seul, pour l'affichage et la liste d'exclusion. */
+  /** Host alone, for display and for the exclusion list. */
   readonly host: string;
   readonly username: string;
   readonly password: string;
-  /** Instant de la capture, pour l'expiration. */
+  /** When the capture happened, for expiry. */
   readonly capturedAt: number;
 }
 
 const PENDING_KEY = 'pendingSave';
 
 /**
- * Durée de vie d'une capture. Passé ce délai, la proposition ne se rattache
- * plus à rien dans la tête de l'utilisateur, et garder un mot de passe en
- * clair en mémoire pour rien n'a aucune contrepartie.
+ * How long a capture lives. Past that, the proposal no longer connects to
+ * anything in the user's mind, and keeping a cleartext password in memory for
+ * nothing buys nothing at all.
  */
 export const PENDING_TTL_MS = 10 * 60_000;
 
@@ -238,7 +235,7 @@ export async function savePendingSave(pending: PendingSave): Promise<void> {
   }
 }
 
-/** Capture en attente, `null` si aucune ou si elle a expiré. */
+/** The pending capture, `null` if there is none or it has expired. */
 export async function loadPendingSave(now: number = Date.now()): Promise<PendingSave | null> {
   if (!hasSession) {
     return null;
@@ -274,14 +271,14 @@ export async function clearPendingSave(): Promise<void> {
   }
 }
 
-// --- Badge de l'icône --------------------------------------------------------
+// --- Icon badge --------------------------------------------------------------
 
 const hasAction = typeof chrome !== 'undefined' && typeof chrome.action !== 'undefined';
 
 /**
- * Pastille sur l'icône de l'extension, unique signal visible d'une
- * proposition en attente. Volontairement muet : pas de notification système,
- * pas d'interface injectée dans la page.
+ * A badge on the extension's icon, the only visible signal of a pending
+ * proposal. Deliberately quiet: no system notification, no UI injected into the
+ * page.
  */
 export async function setSaveBadge(visible: boolean): Promise<void> {
   if (!hasAction) {
@@ -293,11 +290,11 @@ export async function setSaveBadge(visible: boolean): Promise<void> {
   }
 }
 
-// --- Sites où ne jamais proposer --------------------------------------------
+// --- Sites never to offer on -------------------------------------------------
 
 const NEVER_SAVE_KEY = 'neverSaveHosts';
 
-/** Hôtes pour lesquels l'utilisateur a demandé qu'on ne propose plus rien. */
+/** Hosts for which the user asked that nothing be offered any more. */
 export async function loadNeverSaveHosts(): Promise<readonly string[]> {
   if (!hasLocal) {
     return [];
@@ -317,7 +314,7 @@ export async function addNeverSaveHost(host: string): Promise<void> {
   }
 }
 
-/** Vide la liste d'exclusion. @returns Le nombre d'hôtes oubliés. */
+/** Empties the exclusion list. @returns How many hosts were forgotten. */
 export async function clearNeverSaveHosts(): Promise<number> {
   const hosts = await loadNeverSaveHosts();
   if (hasLocal && hosts.length > 0) {
@@ -326,17 +323,17 @@ export async function clearNeverSaveHosts(): Promise<number> {
   return hosts.length;
 }
 
-// --- Options du générateur ---------------------------------------------------
+// --- Generator options -------------------------------------------------------
 
 const GENERATOR_KEY = 'generatorOptions';
 
 /**
- * Préférences du générateur de mots de passe.
+ * Password generator preferences.
  *
- * Stockage à part plutôt qu'ajout à `AppSettings` : ce sont des réglages
- * d'outil, modifiés depuis la popup au fil de l'usage, pas des paramètres
- * d'application édités dans la page d'options. Les mêler ferait écrire la
- * popup dans le même objet que la page d'options, et l'un écraserait l'autre.
+ * Stored apart rather than added to `AppSettings`: these are tool settings,
+ * changed from the popup as one goes, not application settings edited in the
+ * options page. Mixing them would have the popup writing into the same object as
+ * the options page, and one would overwrite the other.
  */
 export async function loadGeneratorOptions(): Promise<PasswordOptions> {
   if (!hasLocal) {
@@ -368,29 +365,28 @@ export async function saveGeneratorOptions(options: PasswordOptions): Promise<vo
   }
 }
 
-// --- Usage récent ------------------------------------------------------------
+// --- Recent use --------------------------------------------------------------
 
 /**
- * Horodatages de dernier usage, par identifiant d'item. Persistés dans
- * `chrome.storage.local` : l'intérêt du classement est justement de survivre
- * à la fermeture du navigateur.
+ * Last-use timestamps, by item identifier. Persisted in
+ * `chrome.storage.local`: the whole point of the ordering is precisely to
+ * survive the browser closing.
  *
- * **Ce que cela expose.** Des identifiants d'items (UUID opaques) et des
- * horodatages — jamais un nom, une URL, un identifiant de connexion ni un
- * mot de passe. Qui lit le profil du navigateur apprend qu'un item a été
- * utilisé à telle heure, pas lequel ni sur quel site. La règle de
- * `docs/CRYPTO.md` — aucune clé, aucun secret sur disque — tient.
+ * **What this exposes.** Item identifiers (opaque UUIDs) and timestamps — never
+ * a name, a URL, a username or a password. Whoever reads the browser profile
+ * learns that an item was used at a given time, not which one nor on which site.
+ * The rule from `docs/CRYPTO.md` — no key, no secret on disk — holds.
  */
 const LAST_USED_KEY = 'lastUsed';
 
 /**
- * Nombre d'items retenus. Au-delà, les plus anciens sont oubliés : le
- * classement ne sert que pour la tête de liste, et un coffre de plusieurs
- * milliers d'items ne doit pas faire grossir le stockage indéfiniment.
+ * How many items are kept. Beyond that, the oldest are forgotten: the ordering
+ * only matters for the head of the list, and a vault of several thousand items
+ * must not grow storage without bound.
  */
 const LAST_USED_MAX = 100;
 
-/** Horodatages de dernier usage, vides si aucun n'a été enregistré. */
+/** Last-use timestamps, empty if none was ever recorded. */
 export async function loadLastUsed(): Promise<Readonly<Record<string, number>>> {
   if (!hasLocal) {
     return {};
@@ -410,10 +406,10 @@ export async function loadLastUsed(): Promise<Readonly<Record<string, number>>> 
 }
 
 /**
- * Note qu'un item vient de servir — copie, remplissage ou révélation.
+ * Records that an item has just been used — copied, filled or revealed.
  *
- * @param id Identifiant de l'item.
- * @param now Instant courant.
+ * @param id Item identifier.
+ * @param now Current instant.
  */
 export async function markUsed(id: string, now: number = Date.now()): Promise<void> {
   if (!hasLocal) {
@@ -423,7 +419,7 @@ export async function markUsed(id: string, now: number = Date.now()): Promise<vo
   await chrome.storage.local.set({ [LAST_USED_KEY]: pruneLastUsed(merged) });
 }
 
-/** Ne garde que les `LAST_USED_MAX` usages les plus récents. Fonction pure. */
+/** Keeps only the `LAST_USED_MAX` most recent uses. A pure function. */
 export function pruneLastUsed(
   lastUsed: Readonly<Record<string, number>>,
 ): Record<string, number> {
@@ -435,16 +431,16 @@ export function pruneLastUsed(
   return Object.fromEntries(entries.slice(0, LAST_USED_MAX));
 }
 
-/** Oublie tout le classement d'usage. */
+/** Forgets the whole use ordering. */
 export async function clearLastUsed(): Promise<void> {
   if (hasLocal) {
     await chrome.storage.local.remove(LAST_USED_KEY);
   }
 }
 
-// --- Session déverrouillée ---------------------------------------------------
+// --- Unlocked session --------------------------------------------------------
 
-/** Session déverrouillée, telle que conservée dans `chrome.storage.session`. */
+/** The unlocked session, as kept in `chrome.storage.session`. */
 export interface StoredSession {
   readonly userKeyB64: string;
   readonly accessToken: string;
@@ -453,30 +449,29 @@ export interface StoredSession {
   readonly serverUrl: string;
   readonly email: string;
   /**
-   * Dernière réponse de synchronisation, telle quelle — champs sensibles
-   * toujours chiffrés. Permet d'afficher le coffre immédiatement à
-   * l'ouverture de la popup, avant le rafraîchissement réseau. Même stockage
-   * mémoire que la clé : aucune surface supplémentaire.
+   * The last sync response, as-is — sensitive fields still encrypted. Lets the
+   * vault be displayed the instant the popup opens, before the network refresh.
+   * Same memory storage as the key: no extra surface.
    */
   readonly cachedSync: SyncResponse | null;
   /**
-   * Hash local du mot de passe maître, tel que produit par `unlock`.
+   * Local hash of the master password, as produced by `unlock`.
    *
-   * Sert à vérifier une nouvelle saisie **sans réseau** quand un item exige
-   * de redemander le mot de passe (`reprompt`). Il ne peut pas être rejoué
-   * auprès du serveur — son nombre d'itérations diffère du hash
-   * d'autorisation — et il vit dans le même stockage mémoire que la clé du
-   * coffre, laquelle est strictement plus sensible : aucune surface nouvelle.
+   * Used to verify a fresh entry **without a network** when an item demands the
+   * password again (`reprompt`). It cannot be replayed against the server — its
+   * iteration count differs from the authorization hash's — and it lives in the
+   * same memory storage as the vault key, which is strictly more sensitive: no
+   * new surface at all.
    */
   readonly localPasswordHash: string;
-  /** Paramètres KDF du compte, pour redériver la clé maître à la vérification. */
+  /** The account's KDF parameters, to re-derive the master key on verification. */
   readonly kdfConfig: KdfConfig;
 }
 
 /**
- * Relit des paramètres KDF stockés. `null` si la forme ne correspond à aucun
- * des deux KDF admis — on préfère traiter la session comme absente plutôt que
- * de garder une session dont on ne saurait plus vérifier le mot de passe.
+ * Reads back stored KDF parameters. `null` if the shape matches neither of the
+ * two admitted KDFs — we would rather treat the session as absent than keep a
+ * session whose password we could no longer verify.
  */
 function readKdfConfig(value: unknown): KdfConfig | null {
   if (typeof value !== 'object' || value === null) {
@@ -520,11 +515,11 @@ export async function loadStoredSession(): Promise<StoredSession | null> {
     typeof s.expiresAt === 'number' &&
     typeof s.serverUrl === 'string' &&
     typeof s.email === 'string' &&
-    // Exigés, non facultatifs : une session sans eux ne saurait pas vérifier
-    // le mot de passe maître, et un item `reprompt` s'ouvrirait sans garde.
-    // Le coût est nul en pratique — ce stockage est purgé à la fermeture du
-    // navigateur, donc seule une session en cours au moment d'une mise à jour
-    // de l'extension demandera un déverrouillage de plus.
+    // Required, not optional: a session without them could not verify the
+    // master password, and a `reprompt` item would open with no guard. The cost
+    // is nil in practice — this storage is purged when the browser closes, so
+    // only a session in progress at the moment of an extension update will ask
+    // for one extra unlock.
     typeof s.localPasswordHash === 'string' &&
     kdfConfig !== null
   ) {
@@ -555,40 +550,40 @@ export async function clearStoredSession(): Promise<void> {
   }
 }
 
-// --- Verrouillage automatique ------------------------------------------------
+// --- Auto-lock ---------------------------------------------------------------
 
 /**
- * Nom de l'alarme de surveillance. `chrome.alarms` est le seul minuteur qui
- * survive à la mort du service worker MV3 : c'est lui, pas un `setTimeout`,
- * qui porte le verrouillage automatique.
+ * Name of the watch alarm. `chrome.alarms` is the only timer that survives the
+ * death of an MV3 service worker: it, not a `setTimeout`, is what carries the
+ * auto-lock.
  *
- * L'alarme n'est **pas** l'échéance : elle est un battement périodique (une
- * minute) qui compare l'horodatage de dernière activité au délai configuré.
- * Une échéance portée directement par l'alarme obligerait à la recréer à
- * chaque événement d'activité — dizaines de fois par minute lors d'une
- * navigation normale, et Chrome limite le débit de création.
+ * The alarm is **not** the deadline: it is a periodic heartbeat (one minute)
+ * that compares the last-activity timestamp against the configured delay. A
+ * deadline carried directly by the alarm would force it to be recreated on every
+ * activity event — dozens of times a minute during ordinary browsing, and Chrome
+ * rate-limits creation.
  */
 export const AUTOLOCK_ALARM_NAME = 'zwarden-autolock';
 
-/** Période du battement. Le verrouillage peut donc tarder d'au plus 1 min. */
+/** The heartbeat's period. Locking can therefore be up to 1 min late. */
 const WATCH_PERIOD_MINUTES = 1;
 
-/** Clé de l'horodatage de dernière activité, dans `chrome.storage.session`. */
+/** Key of the last-activity timestamp, in `chrome.storage.session`. */
 const ACTIVITY_KEY = 'lastActivityAt';
 
 /**
- * Écriture minimale entre deux enregistrements d'activité. Sans ce seuil, un
- * changement d'onglet réveillerait le service worker pour une écriture à
- * chaque événement ; avec lui, l'horodatage retarde d'au plus 20 s sur la
- * réalité — négligeable face à un délai qui se compte en minutes.
+ * Minimum gap between two activity records. Without this threshold, a tab switch
+ * would wake the service worker for a write on every single event; with it, the
+ * timestamp lags reality by at most 20 s — negligible against a delay counted in
+ * minutes.
  */
 const ACTIVITY_THROTTLE_MS = 20_000;
 
 /**
- * Enregistre une activité de l'utilisateur : le compte à rebours repart.
+ * Records user activity: the countdown restarts.
  *
- * Appelable depuis n'importe quel contexte de confiance (service worker,
- * popup) : l'horodatage vit dans le même stockage mémoire que la session.
+ * Callable from any trusted context (service worker, popup): the timestamp lives
+ * in the same memory storage as the session.
  */
 export async function recordActivity(now: number = Date.now()): Promise<void> {
   if (!hasSession) {
@@ -602,7 +597,7 @@ export async function recordActivity(now: number = Date.now()): Promise<void> {
   await chrome.storage.session.set({ [ACTIVITY_KEY]: now });
 }
 
-/** Horodatage de la dernière activité, `null` si aucune n'a été enregistrée. */
+/** The last-activity timestamp, `null` if none was ever recorded. */
 export async function loadLastActivity(): Promise<number | null> {
   if (!hasSession) {
     return null;
@@ -613,12 +608,12 @@ export async function loadLastActivity(): Promise<number | null> {
 }
 
 /**
- * Décide s'il faut verrouiller. Fonction pure — c'est elle qui porte la règle,
- * et elle seule est testable sans navigateur.
+ * Decides whether to lock. A pure function — it is what carries the rule, and it
+ * alone is testable without a browser.
  *
- * @param lastActivityAt Horodatage de dernière activité, ou `null`.
- * @param minutes Délai configuré ; 0 ou moins = jamais.
- * @param now Instant courant.
+ * @param lastActivityAt Last-activity timestamp, or `null`.
+ * @param minutes Configured delay; 0 or less = never.
+ * @param now Current instant.
  */
 export function shouldAutoLock(
   lastActivityAt: number | null,
@@ -632,9 +627,9 @@ export function shouldAutoLock(
 }
 
 /**
- * Arme la surveillance d'inactivité et enregistre une activité immédiate.
- * Appelé au déverrouillage, à la réouverture de la popup sur une session
- * vivante, et après modification du réglage. `minutes = 0` désarme.
+ * Arms the inactivity watch and records immediate activity. Called at unlock, on
+ * reopening the popup onto a live session, and after the setting changes.
+ * `minutes = 0` disarms.
  */
 export async function startAutoLockWatch(minutes: number): Promise<void> {
   if (minutes <= 0) {
@@ -643,9 +638,9 @@ export async function startAutoLockWatch(minutes: number): Promise<void> {
   }
   await recordActivity();
   if (hasAlarms) {
-    // Attendue : sans cela, la fonction rend la main avant que l'alarme
-    // existe, et l'appelant qui verrouille juste après pourrait la créer
-    // après le `clear` censé l'effacer.
+    // Awaited: without this, the function returns before the alarm exists, and a
+    // caller locking right afterwards could create it after the `clear` meant to
+    // remove it.
     await chrome.alarms.create(AUTOLOCK_ALARM_NAME, {
       delayInMinutes: WATCH_PERIOD_MINUTES,
       periodInMinutes: WATCH_PERIOD_MINUTES,
@@ -654,8 +649,8 @@ export async function startAutoLockWatch(minutes: number): Promise<void> {
 }
 
 /**
- * Désarme la surveillance et oublie l'horodatage. Appelé au verrouillage —
- * sans quoi le battement continuerait à réveiller le service worker pour rien.
+ * Disarms the watch and forgets the timestamp. Called at lock time — otherwise
+ * the heartbeat would keep waking the service worker for nothing.
  */
 export async function stopAutoLockWatch(): Promise<void> {
   if (hasAlarms) {
@@ -666,29 +661,29 @@ export async function stopAutoLockWatch(): Promise<void> {
   }
 }
 
-// --- Effacement du presse-papiers --------------------------------------------
+// --- Clipboard wipe ----------------------------------------------------------
 
 /**
- * Nom de l'alarme d'effacement du presse-papiers.
+ * Name of the clipboard-wipe alarm.
  *
- * Portée par `chrome.alarms` et non par un `setTimeout` de la popup : un
- * `setTimeout` meurt avec la popup, et c'est précisément quand l'utilisateur
- * referme la popup que l'effacement compte. La popup garde tout de même son
- * minuteur — le premier des deux qui aboutit gagne, et si l'alarme échoue le
- * comportement d'avant subsiste.
+ * Carried by `chrome.alarms` rather than a `setTimeout` in the popup: a
+ * `setTimeout` dies with the popup, and it is precisely when the user closes the
+ * popup that the wipe matters. The popup keeps its own timer all the same — the
+ * first of the two to land wins, and if the alarm fails the previous behaviour
+ * remains.
  */
 export const CLIPBOARD_ALARM_NAME = 'zwarden-clipboard';
 
 /**
- * Délai minimal d'une alarme MV3, en secondes.
+ * Minimum delay of an MV3 alarm, in seconds.
  *
- * Chrome ramène à trente secondes toute alarme plus courte. Le réglage de dix
- * secondes reste donc tenu par la popup tant qu'elle est ouverte, et l'alarme ne
- * sert que de filet — plus tard que demandé, mais là où il n'y avait rien.
+ * Chrome raises any shorter alarm to thirty seconds. The ten-second setting is
+ * therefore honoured by the popup while it is open, and the alarm serves only as
+ * a net — later than asked, but where there used to be nothing.
  */
 export const ALARM_MIN_SECONDS = 30;
 
-/** Programme l'écrasement du presse-papiers. `seconds <= 0` annule. */
+/** Schedules the clipboard overwrite. `seconds <= 0` cancels. */
 export async function scheduleClipboardWipe(seconds: number): Promise<void> {
   if (!hasAlarms) {
     return;
@@ -708,27 +703,27 @@ export async function cancelClipboardWipe(): Promise<void> {
   }
 }
 
-// --- Verrouillage complet ----------------------------------------------------
+// --- Full lock ---------------------------------------------------------------
 
 /**
- * Verrouille : purge de tout ce que l'état déverrouillé a laissé derrière lui.
+ * Locks: purges everything the unlocked state left behind.
  *
- * Session, horodatage d'activité, alarme, capture en attente et pastille : la
- * règle « verrouiller, c'est tout purger » (`docs/EXTENSION.md` §2) n'a de
- * valeur que si elle est appliquée d'un seul geste. Chaque appelant qui
- * réécrirait la liste serait une occasion d'en oublier un morceau — et le
- * morceau oublié serait un mot de passe en clair.
+ * Session, activity timestamp, alarm, pending capture and badge: the rule "to
+ * lock is to purge everything" (`docs/EXTENSION.md` §2) is only worth something
+ * if it is applied in a single gesture. Every caller that rewrote the list would
+ * be one more chance to forget a piece — and the forgotten piece would be a
+ * cleartext password.
  *
- * Ne détruit pas la clé en mémoire de l'appelant : `userKey.destroy()` reste
- * à sa charge, lui seul la détient.
+ * It does not destroy the caller's in-memory key: `userKey.destroy()` stays
+ * their responsibility, since they alone hold it.
  */
 export async function lockVault(): Promise<void> {
   await clearStoredSession();
   await clearPendingSave();
   await stopAutoLockWatch();
   await setSaveBadge(false);
-  // Le presse-papiers peut contenir un secret sorti du coffre : verrouiller sans
-  // l'effacer laisserait dehors ce qu'on vient de ranger. L'alarme est avancée
-  // au plus tôt plutôt qu'annulée.
+  // The clipboard may hold a secret taken out of the vault: locking without
+  // wiping it would leave outside what we have just put away. The alarm is
+  // brought forward rather than cancelled.
   await scheduleClipboardWipe(1);
 }

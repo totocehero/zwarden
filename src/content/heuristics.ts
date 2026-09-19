@@ -1,53 +1,53 @@
 /**
- * @file Heuristiques de détection d'identifiants — la décision, sans le DOM global.
+ * @file Credential-detection heuristics — the decision, without the global DOM.
  *
- * ## Pourquoi ce fichier existe séparément du détecteur
+ * ## Why this file is separate from the detector
  *
- * `detector.ts` est un script de contenu : il s'accroche à `document`, lit
- * `location`, parle au service worker. Rien de tout cela n'est testable, et
- * c'est précisément pour cette raison que les décisions ne doivent pas y vivre.
+ * `detector.ts` is a content script: it hooks onto `document`, reads `location`,
+ * talks to the service worker. None of that is testable, and it is precisely for
+ * that reason that the decisions must not live there.
  *
- * Ici, aucune API d'extension, aucun événement, aucun état global : des
- * fonctions qui reçoivent un sous-arbre DOM et rendent un verdict. C'est ce qui
- * permet de rejouer sur des fragments HTML les cas qui, autrement, ne se
- * vérifieraient qu'à la main sur un vrai site — le bouton « afficher le mot de
- * passe », le formulaire de création de compte, la page sans `<form>`.
+ * Here there is no extension API, no event, no global state: functions that take
+ * a DOM subtree and return a verdict. That is what makes it possible to replay,
+ * on HTML fragments, the cases that would otherwise only ever be checked by hand
+ * on a real site — the "show password" button, the account-creation form, the
+ * page with no `<form>`.
  *
- * Le détecteur n'en garde que ce qui exige le vrai navigateur : le câblage des
- * événements, la déduplication temporelle, et l'envoi du message.
+ * The detector keeps only what needs a real browser: wiring the events,
+ * deduplicating in time, and sending the message.
  */
 
 /**
- * Test de visibilité d'un champ, injectable.
+ * A field visibility test, injectable.
  *
- * Le test réel est `offsetParent !== null` : il couvre `display:none` et les
- * champs détachés, qui sont les cas rencontrés. Mais il repose sur la mise en
- * page, que jsdom n'implémente pas — `offsetParent` y vaut toujours `null`.
- * Sans cette couture, aucune des décisions de ce fichier ne serait vérifiable
- * autrement qu'à la main sur un vrai site. C'est le même procédé que la source
- * aléatoire injectable du générateur, pour la même raison.
+ * The real test is `offsetParent !== null`: it covers `display:none` and
+ * detached fields, which are the cases that occur. But it relies on layout,
+ * which jsdom does not implement — `offsetParent` is always `null` there.
+ * Without this seam, none of this file's decisions would be verifiable other
+ * than by hand on a real site. It is the same device as the generator's
+ * injectable random source, for the same reason.
  */
 export type VisibilityTest = (element: HTMLElement) => boolean;
 
-/** Test de visibilité réel, celui du navigateur. */
-export const estAffiche: VisibilityTest = (element) => element.offsetParent !== null;
+/** The real visibility test, the browser's. */
+export const isDisplayed: VisibilityTest = (element) => element.offsetParent !== null;
 
-/** Identifiants repérés dans une page, prêts à être transmis au worker. */
+/** Credentials spotted in a page, ready to be handed to the worker. */
 export interface CaptureCandidate {
   readonly username: string;
   readonly password: string;
 }
 
 /**
- * Champs mot de passe visibles et remplis, dans l'ordre du document.
+ * Password fields that are visible and filled, in document order.
  *
- * `offsetParent === null` sert de test de visibilité : il couvre `display:none`
- * et les champs détachés, qui sont les cas réels — un champ que l'utilisateur
- * n'a pas pu remplir n'a pas à être capturé.
+ * `offsetParent === null` acts as the visibility test: it covers `display:none`
+ * and detached fields, which are the real cases — a field the user could not
+ * have filled has no business being captured.
  */
 export function filledPasswords(
   root: ParentNode,
-  visible: VisibilityTest = estAffiche,
+  visible: VisibilityTest = isDisplayed,
 ): HTMLInputElement[] {
   return [...root.querySelectorAll<HTMLInputElement>('input[type="password"]')].filter(
     (input) => input.value !== '' && visible(input),
@@ -55,19 +55,19 @@ export function filledPasswords(
 }
 
 /**
- * Reconnaît un bouton « afficher le mot de passe ».
+ * Recognises a "show password" button.
  *
- * C'est le faux positif structurel du repli sur le clic : l'œil de révélation
- * est un bouton, il est à côté d'un champ mot de passe rempli, et il est cliqué
- * au moment exact où une capture semblerait justifiée. Deux marques le
- * distinguent d'une soumission, et aucune ne repose sur son libellé — un
- * libellé est traduit, une structure ne l'est pas :
+ * This is the click fallback's structural false positive: the reveal eye is a
+ * button, it sits next to a filled password field, and it is clicked at exactly
+ * the moment a capture would seem warranted. Two marks tell it apart from a
+ * submission, and neither rests on its label — a label is translated, a
+ * structure is not:
  *
- * - `aria-pressed` désigne un bouton à deux états ; une soumission n'en a pas ;
- * - un `type="button"` explicite logé dans le bloc du champ lui-même, qui est
- *   l'emplacement de l'œil dans la quasi-totalité des formulaires.
+ * - `aria-pressed` denotes a two-state button; a submission has none;
+ * - an explicit `type="button"` lodged in the field's own block, which is where
+ *   the eye sits in very nearly every form.
  */
-export function estBasculeAffichage(control: Element, password: HTMLInputElement): boolean {
+export function isVisibilityToggle(control: Element, password: HTMLInputElement): boolean {
   if (control.hasAttribute('aria-pressed')) {
     return true;
   }
@@ -79,22 +79,21 @@ export function estBasculeAffichage(control: Element, password: HTMLInputElement
 }
 
 /**
- * Écarte un champ texte qui n'est pas un identifiant mais un mot de passe.
+ * Rules out a text field that is not a username but a password.
  *
- * Deux marques, et la première suffit presque toujours :
+ * Two marks, and the first almost always suffices:
  *
- * - **sa valeur est exactement le mot de passe capturé.** C'est le motif
- *   « afficher le mot de passe » à deux champs : le site garde un `password` et
- *   un `text` miroir, et bascule la visibilité entre les deux. Le miroir est un
- *   champ texte rempli, visible, souvent placé juste avant le champ mot de
- *   passe — donc le candidat idéal pour la règle de proximité, qui livrait alors
- *   le mot de passe comme identifiant. Un identifiant égal au mot de passe n'est
- *   jamais ce que l'utilisateur voulait : le refuser ne coûte rien et ferme
- *   toutes les variantes du motif d'un coup ;
- * - le site l'annonce lui-même comme un mot de passe (`autocomplete`).
+ * - **its value is exactly the captured password.** This is the two-field "show
+ *   password" pattern: the site keeps a `password` and a `text` mirror, and
+ *   toggles visibility between the two. The mirror is a filled, visible text
+ *   field, often placed just before the password field — hence the perfect
+ *   candidate for the proximity rule, which then handed the password over as the
+ *   username. A username equal to the password is never what the user wanted:
+ *   refusing it costs nothing and closes every variant of the pattern at once;
+ * - the site itself announces it as a password (`autocomplete`).
  */
-function estMotDePasseDeguise(input: HTMLInputElement, motDePasse: string): boolean {
-  if (input.value === motDePasse) {
+function isDisguisedPassword(input: HTMLInputElement, password: string): boolean {
+  if (input.value === password) {
     return true;
   }
   const auto = input.getAttribute('autocomplete');
@@ -102,21 +101,21 @@ function estMotDePasseDeguise(input: HTMLInputElement, motDePasse: string): bool
 }
 
 /**
- * Devine l'identifiant associé à un champ mot de passe.
+ * Guesses the username that goes with a password field.
  *
- * Par ordre de fiabilité : l'annotation explicite du site
- * (`autocomplete="username"`), puis un champ e-mail, puis le dernier champ
- * texte rempli **avant** le mot de passe — l'ordre visuel est le seul indice
- * quand le site n'annote rien. Faute de mieux : chaîne vide, l'utilisateur
- * complétera dans la popup.
+ * In order of reliability: the site's explicit annotation
+ * (`autocomplete="username"`), then an email field, then the last text field
+ * filled **before** the password — visual order is the only clue when the site
+ * annotates nothing. Failing all that: the empty string, and the user completes
+ * it in the popup.
  *
- * Dans tous les cas, un champ qui porte le mot de passe est écarté — voir
- * {@link estMotDePasseDeguise}.
+ * In every case, a field carrying the password is ruled out — see
+ * {@link isDisguisedPassword}.
  */
 export function guessUsername(
   scope: ParentNode,
   password: HTMLInputElement,
-  visible: VisibilityTest = estAffiche,
+  visible: VisibilityTest = isDisplayed,
 ): string {
   const annotated = scope.querySelector<HTMLInputElement>(
     'input[autocomplete="username"], input[autocomplete="email"]',
@@ -124,7 +123,7 @@ export function guessUsername(
   if (
     annotated !== null &&
     annotated.value !== '' &&
-    !estMotDePasseDeguise(annotated, password.value)
+    !isDisguisedPassword(annotated, password.value)
   ) {
     return annotated.value;
   }
@@ -133,15 +132,15 @@ export function guessUsername(
     ...scope.querySelectorAll<HTMLInputElement>('input[type="email"], input[type="text"]'),
   ].filter(
     (input) =>
-      input.value !== '' && visible(input) && !estMotDePasseDeguise(input, password.value),
+      input.value !== '' && visible(input) && !isDisguisedPassword(input, password.value),
   );
 
   let best = '';
   for (const candidate of candidates) {
-    // `compareDocumentPosition` plutôt qu'un index : le champ mot de passe
-    // n'est pas forcément dans la même sous-arborescence que le champ texte.
-    const avant = password.compareDocumentPosition(candidate) & Node.DOCUMENT_POSITION_PRECEDING;
-    if (avant !== 0) {
+    // `compareDocumentPosition` rather than an index: the password field is not
+    // necessarily in the same subtree as the text field.
+    const precedes = password.compareDocumentPosition(candidate) & Node.DOCUMENT_POSITION_PRECEDING;
+    if (precedes !== 0) {
       best = candidate.value;
     }
   }
@@ -149,32 +148,32 @@ export function guessUsername(
 }
 
 /**
- * Verdict complet : y a-t-il quelque chose à capturer dans ce sous-arbre ?
+ * The full verdict: is there anything to capture in this subtree?
  *
- * @param scope Formulaire soumis, ou le document quand il n'y a pas de `<form>`.
- * @param control Contrôle cliqué, si la capture vient du repli sur le clic. Il
- *   est alors examiné : tout ce qui ressemble à une bascule d'affichage est
- *   écarté.
- * @param visible Test de visibilité — voir {@link VisibilityTest}.
- * @returns Les identifiants à transmettre, ou `null` s'il n'y a rien à proposer.
+ * @param scope The submitted form, or the document when there is no `<form>`.
+ * @param control The clicked control, if the capture comes from the click
+ *   fallback. It is then examined: anything resembling a visibility toggle is
+ *   ruled out.
+ * @param visible Visibility test — see {@link VisibilityTest}.
+ * @returns The credentials to hand over, or `null` if there is nothing to offer.
  */
 export function findCapture(
   scope: ParentNode,
   control: Element | null = null,
-  visible: VisibilityTest = estAffiche,
+  visible: VisibilityTest = isDisplayed,
 ): CaptureCandidate | null {
   const passwords = filledPasswords(scope, visible);
   const password = passwords[0];
   if (password === undefined) {
     return null;
   }
-  if (control !== null && estBasculeAffichage(control, password)) {
+  if (control !== null && isVisibilityToggle(control, password)) {
     return null;
   }
-  // Deux champs mot de passe remplis et différents : c'est une création de
-  // compte ou un changement de mot de passe avec confirmation. On garde le
-  // premier ; s'ils diffèrent, la saisie n'est pas encore valide et le site la
-  // refusera — inutile de proposer quoi que ce soit.
+  // Two filled, differing password fields: this is account creation or a
+  // password change with confirmation. We keep the first; if they differ, the
+  // entry is not valid yet and the site will refuse it — no point offering
+  // anything.
   if (passwords.length > 1 && passwords.some((p) => p.value !== password.value)) {
     return null;
   }

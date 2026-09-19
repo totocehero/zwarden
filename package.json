@@ -1,7 +1,7 @@
 {
   "name": "zwarden",
   "version": "0.1.0",
-  "description": "Gestionnaire de mots de passe open source, compatible Vaultwarden / API Bitwarden. Conçu pour la légèreté.",
+  "description": "Open-source password manager, compatible with Vaultwarden / the Bitwarden API. Built to stay light.",
   "license": "AGPL-3.0-only",
   "type": "module",
   "private": true,

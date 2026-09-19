@@ -1,13 +1,13 @@
 <!doctype html>
 <meta charset="utf-8" />
-<title>Zwarden — presse-papiers</title>
+<title>Zwarden — clipboard</title>
 <!--
-  Document hors écran, jamais visible. Il n'existe que pour donner au service
-  worker MV3 un accès au presse-papiers : un worker n'a pas de DOM, et le
-  presse-papiers en exige un.
+  An offscreen document, never visible. It exists solely to give the MV3 service
+  worker access to the clipboard: a worker has no DOM, and the clipboard requires
+  one.
 
-  Le `<textarea>` est le tampon de `document.execCommand('copy')`, seule méthode
-  qui fonctionne sans document au premier plan.
+  The <textarea> is the buffer for document.execCommand('copy'), the only method
+  that works without a focused document.
 -->
-<textarea id="tampon" aria-hidden="true"></textarea>
+<textarea id="buffer" aria-hidden="true"></textarea>
 <script type="module" src="offscreen.js"></script>

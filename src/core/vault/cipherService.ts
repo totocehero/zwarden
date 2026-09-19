@@ -1,33 +1,33 @@
 /**
- * @file Déchiffrement des items du coffre vers des vues exploitables.
+ * @file Decrypting vault items into usable views.
  *
- * ## Deux niveaux de vue, délibérément
+ * ## Two levels of view, deliberately
  *
- * - {@link CipherOverview} — le strict nécessaire pour la liste et le filtrage
- *   par domaine : nom et URIs. C'est ce qui est déchiffré au déverrouillage.
- * - {@link CipherDetails} — identifiant, mot de passe, TOTP, notes :
- *   déchiffrés **à la demande**, quand l'utilisateur ouvre l'item.
+ * - {@link CipherOverview} — the bare minimum for the list and for filtering by
+ *   domain: name and URIs. That is what gets decrypted at unlock.
+ * - {@link CipherDetails} — username, password, TOTP, notes: decrypted **on
+ *   demand**, when the user opens the item.
  *
- * Ce découpage réduit la latence d'ouverture de la popup et, surtout, limite
- * la quantité de secrets en clair simultanément en mémoire.
+ * This split cuts the popup's opening latency and, above all, limits how many
+ * cleartext secrets sit in memory at once.
  *
- * ## Clé par item
+ * ## Per-item key
  *
- * Un item peut porter sa propre clé (`cipher.key`), elle-même enveloppée par
- * la clé du coffre. Le cas échéant, c'est elle qui déchiffre les champs. Cette
- * résolution est centralisée dans {@link resolveItemKey} — elle était
- * auparavant dupliquée chez chaque consommateur.
+ * An item may carry its own key (`cipher.key`), itself wrapped by the vault key.
+ * Where it does, that is what decrypts the fields. This resolution is
+ * centralised in {@link resolveItemKey} — it used to be duplicated in every
+ * consumer.
  *
- * ## Tolérance de casse
+ * ## Case tolerance
  *
- * Tous les accès aux champs passent par `readField` : l'API a migré de
- * PascalCase vers camelCase au fil des versions, et un accès direct recrée la
- * première cause de casse d'interopérabilité entre clients tiers.
+ * Every field access goes through `readField`: the API migrated from PascalCase
+ * to camelCase over successive versions, and direct access recreates the leading
+ * cause of interoperability breakage for third-party clients.
  *
- * ## Robustesse
+ * ## Robustness
  *
- * Un champ illisible produit `null` et une notification `onError` — jamais un
- * rejet qui ferait échouer la liste entière. Voir `decryptStringOrNull`.
+ * An unreadable field yields `null` and an `onError` notification — never a
+ * rejection that would fail the whole list. See `decryptStringOrNull`.
  */
 
 import { EncString } from '../crypto/encString.js';
@@ -37,15 +37,15 @@ import { type CipherResponse, readField } from '../api/models.js';
 import { MissingOrgKeyError, type VaultKeys, keyForCipher } from './keyring.js';
 
 /**
- * Clés acceptées par les fonctions de déchiffrement : la clé du coffre seule
- * (coffre sans organisation), ou le trousseau complet.
+ * The keys the decryption functions accept: the vault key alone (a vault with no
+ * organisation), or the full keyring.
  */
 export type CipherKeys = SymmetricCryptoKey | VaultKeys;
 
 /**
- * Clé de base d'un item. Pour un item d'organisation sans clé déballée,
- * notifie `onError` et rend `null` — l'item sera présenté illisible, sans
- * faire échouer la liste.
+ * An item's base key. For an organisation item whose key was not unwrapped, it
+ * notifies `onError` and returns `null` — the item is shown as unreadable
+ * without failing the list.
  */
 function baseKeyFor(
   cipher: CipherResponse,
@@ -62,64 +62,64 @@ function baseKeyFor(
   return key;
 }
 
-/** Vue de liste : le nécessaire pour afficher, chercher et filtrer. */
+/** List view: what it takes to display, search and filter. */
 export interface CipherOverview {
   readonly id: string;
   readonly type: number;
-  /** Nom déchiffré, ou `null` si absent ou illisible. */
+  /** Decrypted name, or `null` if absent or unreadable. */
   readonly name: string | null;
   /**
-   * Identifiant de connexion déchiffré. Nécessaire dès la liste : c'est lui
-   * qui départage plusieurs comptes sur un même site.
+   * Decrypted login username. Needed as early as the list: it is what tells
+   * several accounts on the same site apart.
    */
   readonly username: string | null;
-  /** URIs déchiffrées, pour le filtrage par onglet actif. */
+  /** Decrypted URIs, for filtering by active tab. */
   readonly uris: readonly string[];
   /**
-   * `true` si l'item embarque au moins une passkey (FIDO2). Détecté par la
-   * simple présence des entrées — aucun déchiffrement requis pour la liste.
+   * `true` if the item carries at least one passkey (FIDO2). Detected from the
+   * mere presence of the entries — no decryption needed for the list.
    */
   readonly hasPasskey: boolean;
   /**
-   * `true` si l'item porte un secret TOTP. Comme `hasPasskey`, déduit de la
-   * seule présence du champ chiffré : la liste sait donc afficher le bouton
-   * sans déchiffrer un secret que l'utilisateur n'a pas demandé.
+   * `true` if the item carries a TOTP secret. Like `hasPasskey`, inferred from
+   * the mere presence of the encrypted field: the list can therefore show the
+   * button without decrypting a secret nobody asked for.
    */
   readonly hasTotp: boolean;
   /**
-   * `true` si l'item exige une nouvelle saisie du mot de passe maître avant
-   * de livrer un secret (`reprompt = 1` côté Bitwarden).
+   * `true` if the item demands the master password be entered again before any
+   * secret is handed over (`reprompt = 1` on Bitwarden's side).
    *
-   * C'est une protection choisie par l'utilisateur, item par item : elle est
-   * portée par l'aperçu — donc disponible sans rien déchiffrer — parce que la
-   * garde doit pouvoir se poser **avant** le déchiffrement, pas après.
+   * This is a protection the user chooses, item by item: it is carried by the
+   * overview — hence available without decrypting anything — because the guard
+   * must be able to stand **before** decryption, not after.
    */
   readonly reprompt: boolean;
   readonly organizationId: string | null;
-  /** Dossier personnel de l'item, ou `null`. Nom à résoudre via `labels.ts`. */
+  /** The item's personal folder, or `null`. Name resolved through `labels.ts`. */
   readonly folderId: string | null;
-  /** Collections de l'item. Noms à résoudre via `labels.ts`. */
+  /** The item's collections. Names resolved through `labels.ts`. */
   readonly collectionIds: readonly string[];
 }
 
 /**
- * Cherche l'item que des identifiants saisis mettraient à jour.
+ * Finds the item that entered credentials would update.
  *
- * Le critère est le couple (origine, identifiant de connexion) : c'est ce qui
- * distingue « j'ai changé mon mot de passe » de « j'ai un second compte sur
- * ce site ». Se tromper de sens écraserait un mot de passe encore valide,
- * d'où un rapprochement volontairement strict — l'origine exacte, jamais le
- * domaine (`uriMatch.ts`, et §4 de `docs/EXTENSION.md`).
+ * The criterion is the (origin, username) pair: that is what tells "I changed my
+ * password" from "I have a second account on this site". Getting it wrong in the
+ * second direction would overwrite a still-valid password, hence a deliberately
+ * strict match — the exact origin, never the domain (`uriMatch.ts`, and §4 of
+ * `docs/EXTENSION.md`).
  *
- * Un identifiant vide ne rapproche rien : le site ne l'annonçait pas, le
- * deviner reviendrait à écraser au hasard.
+ * An empty username matches nothing: the site did not announce it, and guessing
+ * would amount to overwriting at random.
  *
- * @param items Items déchiffrés du coffre.
- * @param origin Origine de la page où la saisie a eu lieu.
- * @param username Identifiant saisi.
- * @param matchesOrigin Test de correspondance d'origine (`uriMatch.ts`),
- *   injecté pour garder ce module sans dépendance sur la couche URI.
- * @returns L'item à mettre à jour, ou `null` s'il s'agit d'un nouvel item.
+ * @param items Decrypted vault items.
+ * @param origin Origin of the page where the entry happened.
+ * @param username Username entered.
+ * @param matchesOrigin Origin-matching test (`uriMatch.ts`), injected to keep
+ *   this module free of any dependency on the URI layer.
+ * @returns The item to update, or `null` if this is a new item.
  */
 export function findSaveCandidate(
   items: readonly CipherOverview[],
@@ -143,30 +143,28 @@ export function findSaveCandidate(
 }
 
 /**
- * Construit le test de réutilisation à passer à {@link decryptCipherList}.
+ * Builds the reuse test to hand to {@link decryptCipherList}.
  *
- * ## Le problème
+ * ## The problem
  *
- * Modifier un mot de passe déclenchait une resynchronisation, et donc le
- * redéchiffrement de **tous** les aperçus : deux mille items déchiffrés pour un
- * champ changé. Le coût est invisible sur un coffre de démonstration et
- * dominant sur un vrai.
+ * Changing one password triggered a resync, and therefore the re-decryption of
+ * **every** overview: two thousand items decrypted for one changed field. The
+ * cost is invisible on a demo vault and dominant on a real one.
  *
- * ## Pourquoi c'est sûr
+ * ## Why it is safe
  *
- * `revisionDate` est estampillée par le serveur à chaque écriture. À identifiant
- * et date de révision inchangés, le contenu chiffré est le même — donc le clair
- * aussi. On ne réutilise jamais sur la seule foi de l'identifiant : un item
- * modifié depuis un autre appareil porte une date différente et sera
- * redéchiffré.
+ * `revisionDate` is stamped by the server on every write. With the identifier
+ * and the revision date unchanged, the encrypted content is the same — so the
+ * plaintext is too. We never reuse on the identifier alone: an item edited from
+ * another device carries a different date and gets re-decrypted.
  *
- * Une réponse d'écriture serait une source plus directe, mais tous les serveurs
- * ne renvoient pas l'item complet — un `collectionIds` absent effacerait
- * silencieusement ses collections de l'affichage. La synchronisation reste donc
- * la référence ; seul le déchiffrement est évité.
+ * A write response would be a more direct source, but not every server returns
+ * the complete item — a missing `collectionIds` would silently erase its
+ * collections from the display. The sync therefore stays the reference; only the
+ * decryption is skipped.
  *
- * @param previous Aperçus déjà déchiffrés.
- * @param previousRaw Items chiffrés correspondants, pour lire leur révision.
+ * @param previous Overviews already decrypted.
+ * @param previousRaw The matching encrypted items, to read their revision.
  */
 export function reuseByRevision(
   previous: readonly CipherOverview[],
@@ -189,31 +187,31 @@ export function reuseByRevision(
 }
 
 /**
- * Issue d'une capture d'identifiants, une fois le coffre consulté.
+ * The outcome of a credentials capture, once the vault has been consulted.
  *
- * Trois cas, et le premier est le plus fréquent : une connexion ordinaire, où
- * le coffre sait déjà tout. Le taire est ce qui donne du sens à la pastille —
- * s'allumer à chaque connexion réussie la rendrait insignifiante.
+ * Three cases, and the first is the most frequent: an ordinary sign-in, where
+ * the vault already knows everything. Staying quiet about it is what gives the
+ * badge meaning — lighting up on every successful sign-in would make it
+ * meaningless.
  */
 export type ProposalOutcome =
-  | { readonly kind: 'aucune' }
-  | { readonly kind: 'creation' }
-  | { readonly kind: 'miseAJour'; readonly item: CipherOverview };
+  | { readonly kind: 'none' }
+  | { readonly kind: 'create' }
+  | { readonly kind: 'update'; readonly item: CipherOverview };
 
 /**
- * Tranche ce qu'il faut proposer à l'utilisateur.
+ * Decides what to offer the user.
  *
- * Seule cette fonction porte la règle, et elle est pure : le déchiffrement du
- * mot de passe existant est fait par l'appelant, qui détient les clés. C'est ce
- * découpage qui rend la règle vérifiable — elle vivait auparavant au milieu
- * d'un composant, mêlée à des appels réseau et à de l'état d'interface.
+ * This function alone carries the rule, and it is pure: decrypting the existing
+ * password is the caller's job, since the caller holds the keys. That split is
+ * what makes the rule testable — it used to live in the middle of a component,
+ * entangled with network calls and UI state.
  *
- * @param existing Item rapproché par {@link findSaveCandidate}, ou `null`.
- * @param capturedPassword Mot de passe que l'utilisateur vient de saisir.
- * @param existingPassword Mot de passe déchiffré de l'item rapproché. `null` si
- *   l'item est illisible — on propose alors la mise à jour plutôt que de se
- *   taire : ne rien dire sur la foi d'une comparaison impossible ferait perdre
- *   la saisie.
+ * @param existing Item matched by {@link findSaveCandidate}, or `null`.
+ * @param capturedPassword Password the user has just entered.
+ * @param existingPassword Decrypted password of the matched item. `null` if the
+ *   item is unreadable — we then offer the update rather than stay quiet: saying
+ *   nothing on the strength of an impossible comparison would lose the entry.
  */
 export function decideProposal(
   existing: CipherOverview | null,
@@ -221,26 +219,26 @@ export function decideProposal(
   existingPassword: string | null,
 ): ProposalOutcome {
   if (existing === null) {
-    return { kind: 'creation' };
+    return { kind: 'create' };
   }
   if (existingPassword === capturedPassword) {
-    return { kind: 'aucune' };
+    return { kind: 'none' };
   }
-  return { kind: 'miseAJour', item: existing };
+  return { kind: 'update', item: existing };
 }
 
 /**
- * Classe les items les plus récemment utilisés en tête.
+ * Sorts the most recently used items to the top.
  *
- * Ce qu'on cherche à reproduire est un réflexe : le compte dont on vient de
- * se servir est celui dont on se resservira. Les items jamais utilisés
- * gardent leur ordre d'origine — remonter au hasard ceux qu'on n'a jamais
- * touchés brouillerait le repère plus qu'il ne l'aiderait.
+ * What this reproduces is a reflex: the account you have just used is the one
+ * you will use again. Items never used keep their original order — floating up
+ * ones you have never touched at random would blur the landmark more than help
+ * it.
  *
- * Tri stable et pur : c'est la même liste, réordonnée, sans effet de bord.
+ * Stable and pure: the same list, reordered, with no side effect.
  *
- * @param items Items déchiffrés, dans l'ordre du serveur.
- * @param lastUsed Horodatages de dernier usage, par identifiant.
+ * @param items Decrypted items, in the server's order.
+ * @param lastUsed Last-use timestamps, by identifier.
  */
 export function sortByLastUsed(
   items: readonly CipherOverview[],
@@ -259,43 +257,42 @@ export function sortByLastUsed(
 }
 
 /**
- * Passkey déchiffrée pour l'affichage. La clé privée (`keyValue`) n'est
- * volontairement **pas** exposée ici : elle ne sera déchiffrée qu'au moment
- * de signer une cérémonie WebAuthn.
+ * A passkey decrypted for display. The private key (`keyValue`) is deliberately
+ * **not** exposed here: it will only be decrypted at the moment of signing a
+ * WebAuthn ceremony.
  */
 export interface PasskeyView {
-  /** Domaine du site (RP ID), par exemple `npmjs.com`. */
+  /** The site's domain (RP ID), for example `npmjs.com`. */
   readonly rpId: string | null;
-  /** Identifiant de compte associé chez le site. */
+  /** The associated account identifier at the site. */
   readonly userName: string | null;
 }
 
-/** Vue détaillée : champs sensibles, déchiffrés à la demande. */
+/** Detailed view: sensitive fields, decrypted on demand. */
 export interface CipherDetails {
   readonly username: string | null;
   readonly password: string | null;
   readonly totp: string | null;
   readonly notes: string | null;
-  /** Passkeys de l'item, métadonnées déchiffrées. */
+  /** The item's passkeys, metadata decrypted. */
   readonly passkeys: readonly PasskeyView[];
 }
 
-/** Concurrence par défaut du déchiffrement de liste. */
+/** Default concurrency for list decryption. */
 const DEFAULT_CONCURRENCY = 8;
 
-/** Forme brute d'une entrée d'URI, dans l'une ou l'autre casse. */
+/** Raw shape of a URI entry, in either casing. */
 type RawUriEntry = Record<string, unknown>;
 
 /**
- * Résout la clé qui déchiffre les champs d'un item.
+ * Resolves the key that decrypts an item's fields.
  *
- * @param cipher Item brut, tel que renvoyé par la synchronisation.
- * @param userKey Clé de base de l'item : celle du coffre, ou celle de son
- *   organisation.
- * @returns La clé propre à l'item si `cipher.key` est présent, sinon la clé
- *   de base elle-même.
- * @throws {EncStringParseError | MacMismatchError} Si la clé enveloppée est
- *   malformée ou falsifiée — l'item entier est alors illisible.
+ * @param cipher Raw item, as returned by the sync.
+ * @param userKey The item's base key: the vault's, or its organisation's.
+ * @returns The item's own key if `cipher.key` is present, otherwise the base key
+ *   itself.
+ * @throws {EncStringParseError | MacMismatchError} If the wrapped key is
+ *   malformed or forged — the whole item is then unreadable.
  */
 export async function resolveItemKey(
   cipher: CipherResponse,
@@ -308,21 +305,21 @@ export async function resolveItemKey(
   return new SymmetricCryptoKey(await decryptBytes(EncString.parse(wrapped), userKey));
 }
 
-/** Extrait le sous-objet `login` en tolérant les deux casses. */
+/** Extracts the `login` sub-object, tolerating either casing. */
 function readLogin(cipher: CipherResponse): Record<string, unknown> | undefined {
   return readField<Record<string, unknown>>(cipher, 'login') ?? undefined;
 }
 
 /**
- * Déchiffre la vue de liste d'un item.
+ * Decrypts an item's list view.
  *
- * Jamais de rejet : un item dont la clé propre est illisible produit une vue
- * aux champs `null`, et l'échec est notifié via `onError`.
+ * Never rejects: an item whose own key is unreadable yields a view with `null`
+ * fields, and the failure is reported through `onError`.
  *
- * @param cipher Item brut.
- * @param keys Clé du coffre seule, ou trousseau complet (organisations).
- * @param onError Notification de chaque champ ou clé illisible.
- * @returns Vue de liste, champs illisibles à `null`.
+ * @param cipher Raw item.
+ * @param keys The vault key alone, or the full keyring (organisations).
+ * @param onError Notification for each unreadable field or key.
+ * @returns List view, unreadable fields set to `null`.
  */
 export async function decryptCipherOverview(
   cipher: CipherResponse,
@@ -331,11 +328,11 @@ export async function decryptCipherOverview(
 ): Promise<CipherOverview> {
   const login = readLogin(cipher);
   const meta = readCipherMetadata(cipher, login);
-  const vide: CipherOverview = { ...meta, name: null, username: null, uris: [] };
+  const empty: CipherOverview = { ...meta, name: null, username: null, uris: [] };
 
   const baseKey = baseKeyFor(cipher, keys, onError);
   if (baseKey === null) {
-    return vide;
+    return empty;
   }
 
   let itemKey: SymmetricCryptoKey;
@@ -343,7 +340,7 @@ export async function decryptCipherOverview(
     itemKey = await resolveItemKey(cipher, baseKey);
   } catch (error) {
     onError(error);
-    return vide;
+    return empty;
   }
 
   const rawUris = readField<readonly RawUriEntry[]>(login, 'uris') ?? [];
@@ -364,16 +361,16 @@ export async function decryptCipherOverview(
 }
 
 /**
- * Lit tout ce qu'un item dit de lui-même **sans déchiffrement** : identité,
- * appartenance, et les trois indicateurs que la liste doit connaître avant de
- * déchiffrer quoi que ce soit.
+ * Reads everything an item says about itself **without decryption**: identity,
+ * membership, and the three flags the list must know before decrypting
+ * anything.
  *
- * Extrait pour une raison de fond autant que de longueur : ces champs
- * apparaissaient deux fois dans l'appelant — une fois pour l'item illisible,
- * une fois pour l'item déchiffré — et deux copies d'une liste de onze champs
- * sont deux occasions d'en oublier un. L'ajout de `reprompt` a failli être
- * exactement cet oubli, et un `reprompt` omis dans la branche « illisible »
- * aurait retiré la garde d'un item précisément quand son déchiffrement échoue.
+ * Extracted for a reason of substance as much as of length: these fields
+ * appeared twice in the caller — once for the unreadable item, once for the
+ * decrypted one — and two copies of an eleven-field list are two chances to
+ * forget one. Adding `reprompt` came within a hair of being exactly that
+ * oversight, and a `reprompt` missing from the "unreadable" branch would have
+ * stripped an item's guard precisely when its decryption fails.
  */
 function readCipherMetadata(
   cipher: CipherResponse,
@@ -385,9 +382,9 @@ function readCipherMetadata(
     type: readField<number>(cipher, 'type') ?? 0,
     hasPasskey: (readField<readonly unknown[]>(login, 'fido2Credentials') ?? []).length > 0,
     hasTotp: totpField != null && totpField !== '',
-    // 0 = aucune garde, 1 = redemander le mot de passe maître. Toute autre
-    // valeur est traitée comme une garde : se tromper dans ce sens fait
-    // redemander un mot de passe, l'autre livre un secret sans garde.
+    // 0 = no guard, 1 = ask for the master password again. Any other value is
+    // treated as a guard: erring this way asks for a password, erring the other
+    // hands over a secret with no guard at all.
     reprompt: (readField<number>(cipher, 'reprompt') ?? 0) !== 0,
     organizationId: readField<string | null>(cipher, 'organizationId') ?? null,
     folderId: readField<string | null>(cipher, 'folderId') ?? null,
@@ -396,12 +393,12 @@ function readCipherMetadata(
 }
 
 /**
- * Déchiffre les champs sensibles d'un item, à la demande.
+ * Decrypts an item's sensitive fields, on demand.
  *
- * @param cipher Item brut.
- * @param keys Clé du coffre seule, ou trousseau complet (organisations).
- * @param onError Notification de chaque champ ou clé illisible.
- * @returns Champs sensibles, illisibles à `null`.
+ * @param cipher Raw item.
+ * @param keys The vault key alone, or the full keyring (organisations).
+ * @param onError Notification for each unreadable field or key.
+ * @returns Sensitive fields, unreadable ones set to `null`.
  */
 export async function decryptCipherDetails(
   cipher: CipherResponse,
@@ -448,18 +445,18 @@ export async function decryptCipherDetails(
 }
 
 /**
- * Déchiffre les vues de liste d'une collection d'items.
+ * Decrypts the list views of a collection of items.
  *
- * Concurrence bornée : assez de déchiffrements en vol pour amortir les
- * allers-retours WebCrypto (le cache de `CryptoKey` fait le reste), pas au
- * point de saturer le thread au détriment de l'interface. L'ordre d'entrée
- * est préservé.
+ * Bounded concurrency: enough decryptions in flight to amortise the WebCrypto
+ * round trips (the `CryptoKey` cache handles the rest), not so many as to
+ * saturate the thread at the UI's expense. Input order is preserved.
  *
- * @param ciphers Items bruts, typiquement `sync.ciphers`.
- * @param keys Clé du coffre seule, ou trousseau complet (organisations).
- * @param onError Notification de chaque champ ou clé illisible.
- * @param concurrency Déchiffrements simultanés.
- * @returns Vues de liste, dans l'ordre d'entrée.
+ * @param ciphers Raw items, typically `sync.ciphers`.
+ * @param keys The vault key alone, or the full keyring (organisations).
+ * @param onError Notification for each unreadable field or key.
+ * @param concurrency Simultaneous decryptions.
+ * @param reuse Optional test that returns an already-decrypted overview.
+ * @returns List views, in input order.
  */
 export async function decryptCipherList(
   ciphers: readonly CipherResponse[],
@@ -471,8 +468,8 @@ export async function decryptCipherList(
   const out = new Array<CipherOverview>(ciphers.length);
   let next = 0;
 
-  // Pool de workers : chacun consomme le prochain index disponible. Pas de
-  // section critique — `next++` est atomique en JavaScript mono-thread.
+  // A worker pool: each consumes the next available index. No critical section —
+  // `next++` is atomic in single-threaded JavaScript.
   const workers = Array.from({ length: Math.max(1, Math.min(concurrency, ciphers.length)) }, async () => {
     while (next < ciphers.length) {
       const index = next++;
@@ -485,7 +482,7 @@ export async function decryptCipherList(
   return out;
 }
 
-/** Champs modifiables d'un item. Chaîne vide = champ effacé. */
+/** An item's editable fields. Empty string = field cleared. */
 export interface CipherEdit {
   readonly name: string;
   readonly username: string;
@@ -496,17 +493,17 @@ export interface CipherEdit {
 }
 
 /**
- * Construit le corps d'une **création** d'item de connexion.
+ * Builds the body of a login item **creation**.
  *
- * Volontairement plus pauvre que la mise à jour : un item né d'une saisie
- * capturée n'a ni dossier, ni organisation, ni champs personnalisés, ni
- * historique. Il est chiffré directement avec la clé du coffre — sans clé
- * d'item propre — ce qui est la forme que l'aller-retour d'interopérabilité
- * valide contre un vrai Vaultwarden (`tests/integration`).
+ * Deliberately poorer than an update: an item born of a captured entry has no
+ * folder, no organisation, no custom fields and no history. It is encrypted
+ * directly with the vault key — with no item key of its own — which is the shape
+ * the interoperability round trip validates against a real Vaultwarden
+ * (`tests/integration`).
  *
- * @param edit Valeurs en clair. `totp` et `notes` sont acceptés vides.
- * @param userKey Clé du coffre.
- * @returns Corps prêt pour `ApiClient.createCipher`.
+ * @param edit Cleartext values. `totp` and `notes` are accepted empty.
+ * @param userKey The vault key.
+ * @returns A body ready for `ApiClient.createCipher`.
  */
 export async function buildCipherCreatePayload(
   edit: CipherEdit,
@@ -543,40 +540,17 @@ export async function buildCipherCreatePayload(
   };
 }
 
-/** Nombre d'entrées conservées dans l'historique de mots de passe. */
+/** How many entries the password history keeps. */
 const PASSWORD_HISTORY_LIMIT = 5;
 
 /**
- * Construit le corps complet d'une mise à jour d'item.
+ * The base key an item must be rewritten under: the vault's, or its
+ * organisation's.
  *
- * Le serveur **remplace** les données de l'item par ce qu'il reçoit : le corps
- * est donc reconstruit à partir de l'item existant — les champs non édités
- * (dossier, favori, champs personnalisés, clé d'item…) sont repris tels
- * quels, déjà chiffrés — et seuls les champs édités sont rechiffrés.
- *
- * Le chiffrement utilise exactement le contexte du déchiffrement : clé
- * d'organisation pour un item partagé, puis clé propre à l'item si elle
- * existe (et elle est conservée dans le corps).
- *
- * Si le mot de passe change (`recordPasswordHistory`), l'ancien — encore
- * chiffré, jamais relu en clair ici — est ajouté en tête de l'historique,
- * plafonné à {@link PASSWORD_HISTORY_LIMIT} entrées.
- *
- * @param cipher Item brut existant, tel que renvoyé par la synchronisation.
- * @param edit Nouvelles valeurs en clair.
- * @param keys Clé du coffre seule, ou trousseau complet (organisations).
- * @param recordPasswordHistory Consigner l'ancien mot de passe.
- * @returns Corps prêt pour `ApiClient.updateCipher`.
- * @throws {MissingOrgKeyError} Item d'organisation sans clé déballée.
- */
-/**
- * Clé de base sous laquelle réécrire un item : celle du coffre, ou celle de son
- * organisation.
- *
- * Contrairement à la lecture — où une clé manquante donne un item illisible et
- * un `onError` — l'écriture **lève**. Réécrire un item d'organisation avec la
- * clé du coffre produirait un item que plus personne, propriétaire compris, ne
- * saurait déchiffrer : mieux vaut refuser d'écrire.
+ * Unlike reading — where a missing key yields an unreadable item and an
+ * `onError` — writing **throws**. Rewriting an organisation item with the vault
+ * key would produce an item nobody, the owner included, could decrypt: better to
+ * refuse to write.
  */
 function requireBaseKey(cipher: CipherResponse, keys: CipherKeys): SymmetricCryptoKey {
   if (keys instanceof SymmetricCryptoKey) {
@@ -589,6 +563,29 @@ function requireBaseKey(cipher: CipherResponse, keys: CipherKeys): SymmetricCryp
   return resolved;
 }
 
+/**
+ * Builds the complete body of an item update.
+ *
+ * The server **replaces** the item's data with what it receives: the body is
+ * therefore rebuilt from the existing item — unedited fields (folder, favourite,
+ * custom fields, item key…) are carried over as-is, already encrypted — and only
+ * the edited fields are re-encrypted.
+ *
+ * Encryption uses exactly the decryption context: the organisation key for a
+ * shared item, then the item's own key if it has one (and it is preserved in the
+ * body).
+ *
+ * If the password changes (`recordPasswordHistory`), the old one — still
+ * encrypted, never read back in the clear here — is added at the head of the
+ * history, capped at {@link PASSWORD_HISTORY_LIMIT} entries.
+ *
+ * @param cipher The existing raw item, as returned by the sync.
+ * @param edit New cleartext values.
+ * @param keys The vault key alone, or the full keyring (organisations).
+ * @param recordPasswordHistory Whether to record the old password.
+ * @returns A body ready for `ApiClient.updateCipher`.
+ * @throws {MissingOrgKeyError} Organisation item with no unwrapped key.
+ */
 export async function buildCipherUpdatePayload(
   cipher: CipherResponse,
   edit: CipherEdit,
@@ -606,8 +603,8 @@ export async function buildCipherUpdatePayload(
   const login = readLogin(cipher);
   const wrappedItemKey = readField<string>(cipher, 'key');
 
-  // Champs repris de l'item existant, jamais recalculés : une mise à jour
-  // remplace l'item entier côté serveur, et tout champ omis est perdu.
+  // Fields carried over from the existing item, never recomputed: an update
+  // replaces the whole item server-side, and any omitted field is lost.
   const payload: Record<string, unknown> = {
     type,
     organizationId: readField<string | null>(cipher, 'organizationId') ?? null,
@@ -616,7 +613,7 @@ export async function buildCipherUpdatePayload(
     reprompt: readField<number>(cipher, 'reprompt') ?? 0,
     name: await enc(edit.name),
     notes: await encOrNull(edit.notes),
-    // Champs personnalisés : repris tels quels, déjà chiffrés.
+    // Custom fields: carried over as-is, already encrypted.
     fields: readField<unknown>(cipher, 'fields') ?? [],
   };
 
@@ -632,10 +629,10 @@ export async function buildCipherUpdatePayload(
   return payload;
 }
 
-/** Chiffreur de champ, tel que fourni par l'appelant qui détient la clé d'item. */
+/** Field encryptor, as supplied by the caller that holds the item key. */
 type FieldEncryptor = (text: string) => Promise<string>;
 
-/** Section `login` d'une mise à jour : champs édités, passkeys préservées. */
+/** An update's `login` section: edited fields, passkeys preserved. */
 async function buildLoginSection(
   edit: CipherEdit,
   login: unknown,
@@ -654,19 +651,19 @@ async function buildLoginSection(
     password: await encOrNull(edit.password),
     totp: await encOrNull(edit.totp),
     uris,
-    // Les passkeys ne sont pas éditables ici : reprises telles quelles, déjà
-    // chiffrées. Les omettre les effacerait du serveur.
+    // Passkeys are not editable here: carried over as-is, already encrypted.
+    // Omitting them would erase them from the server.
     fido2Credentials: readField<unknown>(login, 'fido2Credentials') ?? null,
   };
 }
 
 /**
- * Historique de mots de passe, l'ancien en tête.
+ * Password history, the old one at the head.
  *
- * L'ancien mot de passe est déjà chiffré — il est repris tel quel depuis l'item
- * existant, jamais rechiffré : le rechiffrer avec une autre clé d'item le
- * rendrait illisible, et c'est précisément l'historique qu'on consulte quand on
- * a perdu l'accès à un compte.
+ * The old password is already encrypted — it is carried over as-is from the
+ * existing item, never re-encrypted: re-encrypting it under a different item key
+ * would make it unreadable, and the history is precisely what one consults after
+ * losing access to an account.
  */
 function buildPasswordHistory(
   cipher: CipherResponse,

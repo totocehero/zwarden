@@ -1,156 +1,150 @@
 # Zwarden
 
-Extension navigateur de gestion de mots de passe, open source, compatible
-[Vaultwarden](https://github.com/dani-garcia/vaultwarden) et l'API Bitwarden.
+An open-source browser password manager, compatible with
+[Vaultwarden](https://github.com/dani-garcia/vaultwarden) and the Bitwarden API.
 
-Objectif : la même compatibilité, un ordre de grandeur en moins de poids.
+The goal: the same compatibility, an order of magnitude less weight.
 
-## Provenance du code
+## Where this code comes from
 
-**Ce dépôt ne contient aucune ligne écrite par un humain.** Code, tests et
-documentation ont été entièrement produits par un modèle de langage (Claude),
-sous direction humaine : périmètre, arbitrages et validations. Les pieds
-`Co-Authored-By` des commits en gardent la trace.
+**This repository contains no line written by a human.** Code, tests and
+documentation were produced entirely by a language model (Claude), under human
+direction: scope, trade-offs and validation. The commits' `Co-Authored-By`
+trailers keep the record.
 
-Ce que cela implique, dit franchement : les choix cryptographiques sont
-vérifiés par des vecteurs officiels (RFC 4231 / 5869 / 6238 / 7914) et un
-aller-retour d'interopérabilité contre un vrai Vaultwarden, mais **aucun audit
-de sécurité humain indépendant n'a été conduit**. Pour un gestionnaire de mots
-de passe, c'est une information qui vous appartient avant d'y confier un
-coffre.
+What that implies, said plainly: the cryptographic choices are verified against
+official vectors (RFC 4231 / 5869 / 6238 / 7914) and an interoperability round
+trip against a real Vaultwarden, but **no independent human security audit has
+been conducted**. For a password manager, that is a fact you are entitled to
+before trusting it with a vault.
 
-## Pourquoi
+## Why
 
-L'extension Bitwarden officielle (2026.7.0) mesurée sur disque — **46,4 Mo**
-décompressée, hors sourcemaps :
+The official Bitwarden extension (2026.7.0), measured on disk — **46.4 MB**
+uncompressed, excluding source maps:
 
-| Poste | Taille | Conséquence |
+| Item | Size | Consequence |
 |---|---|---|
-| `background.js` | 3,3 Mo | service worker MV3 tué après 30 s d'inactivité → 3,3 Mo reparsés à chaque réveil |
-| module WASM (SDK Rust) | 7,4 Mo **× 2** | chargé au démarrage — et le paquet contient deux copies **octet pour octet identiques** |
-| bundles d'autofill (`bootstrap-autofill-overlay*.js` × 3) | 4,9 Mo | candidats à l'injection dans les pages visitées ; le « détecteur » à `document_start` est en réalité un déclencheur inconditionnel de 164 octets, sans détection de formulaire |
-| popup Angular (JS + CSS) | 6,7 Mo | plusieurs centaines de ms avant le premier rendu |
-| traductions (63 locales) | 15 Mo | embarquées intégralement, quelle que soit la langue |
+| `background.js` | 3.3 MB | an MV3 service worker killed after 30 s idle → 3.3 MB reparsed on every wake-up |
+| WASM module (Rust SDK) | 7.4 MB **× 2** | loaded at start-up — and the package holds two **byte-for-byte identical** copies |
+| autofill bundles (`bootstrap-autofill-overlay*.js` × 3) | 4.9 MB | candidates for injection into visited pages; the "detector" at `document_start` is in fact a 164-byte unconditional trigger, with no form detection |
+| Angular popup (JS + CSS) | 6.7 MB | several hundred ms before the first render |
+| translations (63 locales) | 15 MB | shipped in full, whatever the language |
 
-Zwarden vise **< 300 Ko** au total.
+Zwarden aims for **under 300 KB** in total.
 
-Les leviers, dans l'ordre d'impact :
+The levers, in order of impact:
 
-1. **WebCrypto natif** plutôt qu'un SDK Rust compilé en WASM. AES-256-CBC,
-   HMAC-SHA256, PBKDF2-SHA256 et SHA-2 sont déjà dans le navigateur : natifs,
-   à temps constant, audités, et 0 octet de bundle. Seul Argon2id nécessite du
-   WASM (~45 Ko), chargé en import dynamique et uniquement au déverrouillage
-   d'un compte configuré ainsi.
-2. **Autofill en deux étages** : un détecteur de formulaire léger à
-   `document_start`, le moteur d'autofill injecté seulement quand un champ
-   pertinent est détecté.
-3. **Preact** (~10 Ko de runtime) au lieu d'Angular.
-4. **Service worker mince** : logique lourde en modules dynamiques, état
-   volatil en `chrome.storage.session`.
+1. **Native WebCrypto** rather than a Rust SDK compiled to WASM. AES-256-CBC,
+   HMAC-SHA256, PBKDF2-SHA256 and SHA-2 are already in the browser: native,
+   constant-time, audited, and 0 bytes of bundle. Argon2id alone needs WASM
+   (~45 KB), loaded through a dynamic import and only when unlocking an account
+   configured that way.
+2. **Two-stage autofill**: a light form detector at `document_start`, the
+   autofill engine injected only once a relevant field is detected.
+3. **Preact** (~10 KB of runtime) instead of Angular.
+4. **A thin service worker**: heavy logic in dynamic modules, volatile state in
+   `chrome.storage.session`.
 
-## État
+## Status
 
-Le noyau cryptographique est implémenté et testé. Le reste est en cours.
+The cryptographic core is implemented and tested. The rest is in progress.
 
-- [x] Encodage (base64, UTF-8, comparaison à temps constant)
-- [x] `EncString` — analyse et sérialisation des 7 types Bitwarden
-- [x] `SymmetricCryptoKey` — clés 32/64 octets
-- [x] AES-256-CBC + HMAC-SHA256, Encrypt-then-MAC
-- [x] Dérivation de clé : PBKDF2-SHA256 et Argon2id
-- [x] 301 tests, dont les vecteurs RFC 4231 / 5869 / 6238 / 7914
-- [x] **Interopérabilité validée contre Vaultwarden 2026.6.0** — authentification,
-      déchiffrement de la clé de coffre, et aller-retour écriture/lecture complet
-- [x] Client API : prelogin, authentification, rafraîchissement de session,
-      synchronisation, création et suppression d'items — sans jamais voir ni
-      clé ni mot de passe
-- [x] Couche coffre : orchestrateur de déverrouillage (`unlock()`, hygiène
-      mémoire incluse) et déchiffrement d'items (clé par item, vues
-      partielles, casse tolérée)
-- [ ] Service worker et cycle de vie du verrouillage
-- [ ] Popup (déverrouillage, liste, recherche, copie) — deux vues commutables :
-      « Bitwarden-like » (disposition classique, zéro réapprentissage pour les
-      migrants) et « Zwarden » (filtrée sur l'onglet actif, pilotage clavier)
-- [x] Coffres d'organisation : clé privée RSA et clés d'organisation
-      déballées, items partagés lisibles
-- [x] Tags : dossiers et collections déchiffrés, chips filtrantes (phase 1/3
-      — assignation puis partage par tag à venir)
-- [x] Remplissage depuis la popup — geste explicite, correspondance
-      d'origine stricte
-- [x] Édition d'items depuis la popup — champs préservés, clé d'item et
-      clés d'organisation respectées, historique de mots de passe
-- [x] Items récemment utilisés en tête de liste
-- [x] Proposition d'enregistrer un identifiant saisi sur un site inconnu —
-      pastille sur l'icône, décision dans la popup, rien d'injecté dans la page
-- [x] Codes TOTP sur les lignes du coffre — vecteurs RFC 6238 rejoués
-      (SHA-1/256/512), `otpauth://` analysée, décompte et copie
-- [x] Générateur de mots de passe — tirage sans biais, composition garantie
-- [x] Garde par item (`reprompt`) — un item marqué « redemander le mot de passe
-      maître » ne livre aucun secret sans une nouvelle saisie, vérifiée hors
-      réseau
-- [x] Raccourcis clavier — ouvrir, engendrer et copier, verrouiller
-- [x] Écrasement du presse-papiers qui survit à la fermeture de la popup
-      (document hors écran + alarme)
-- [ ] Création d'items depuis la popup (formulaire complet)
-- [ ] Dérivation de clé dans le service worker (popup sans clé) — et, avec elle,
-      le raccourci d'autofill
-- [ ] Autofill automatique (détection de formulaire, suggestion en page)
+- [x] Encoding (base64, UTF-8, constant-time comparison)
+- [x] `EncString` — parsing and serialising Bitwarden's 7 types
+- [x] `SymmetricCryptoKey` — 32/64-byte keys
+- [x] AES-256-CBC + HMAC-SHA256, encrypt-then-MAC
+- [x] Key derivation: PBKDF2-SHA256 and Argon2id
+- [x] 301 tests, including the RFC 4231 / 5869 / 6238 / 7914 vectors
+- [x] **Interoperability validated against Vaultwarden 2026.6.0** —
+      authentication, vault key decryption, and a complete write/read round trip
+- [x] API client: prelogin, authentication, session refresh, sync, item creation
+      and deletion — without ever seeing a key or a password
+- [x] Vault layer: the unlock orchestrator (`unlock()`, memory hygiene included)
+      and item decryption (per-item key, partial views, case tolerance)
+- [ ] Service worker and the locking life cycle
+- [ ] Popup (unlock, list, search, copy) — two switchable views:
+      "Bitwarden-like" (the classic layout, nothing to relearn for people
+      migrating) and "Zwarden" (filtered on the active tab, keyboard-driven)
+- [x] Organisation vaults: RSA private key and organisation keys unwrapped,
+      shared items readable
+- [x] Tags: folders and collections decrypted, filtering chips (phase 1 of 3 —
+      assignment then sharing by tag to come)
+- [x] Filling from the popup — an explicit gesture, strict origin matching
+- [x] Editing items from the popup — fields preserved, item key and organisation
+      keys respected, password history
+- [x] Recently used items at the top of the list
+- [x] Offering to save a credential entered on an unknown site — a badge on the
+      icon, the decision in the popup, nothing injected into the page
+- [x] TOTP codes on the vault's rows — RFC 6238 vectors replayed
+      (SHA-1/256/512), `otpauth://` parsed, countdown and copy
+- [x] Password generator — unbiased draw, guaranteed composition
+- [x] Per-item guard (`reprompt`) — an item marked "ask for the master password
+      again" hands over no secret without a fresh entry, verified offline
+- [x] Keyboard shortcuts — open, generate and copy, lock
+- [x] Clipboard overwrite that survives the popup closing (offscreen document +
+      alarm)
+- [ ] Creating items from the popup (a complete form)
+- [ ] Key derivation in the service worker (a popup with no key) — and, with it,
+      the autofill shortcut
+- [ ] Automatic autofill (form detection, in-page suggestion)
 
-## Modèle de sécurité
+## Security model
 
-Le serveur est traité comme **non fiable**. Il ne voit jamais ni le mot de passe
-maître, ni la clé maître, ni aucun contenu en clair.
+The server is treated as **untrusted**. It never sees the master password, the
+master key, or any cleartext content.
 
-Décisions notables, dont certaines sont plus strictes que Bitwarden :
+Notable decisions, some of them stricter than Bitwarden's:
 
-- **MAC vérifié avant tout déchiffrement.** Le ciphertext ne touche jamais AES
-  si le HMAC ne correspond pas — c'est ce qui ferme les oracles de padding sur
-  CBC. La comparaison est à temps constant.
-- **Refus des rétrogradations.** Une donnée de type 2 (authentifiée) présentée
-  comme type 0 (non authentifiée) est rejetée. Sans cela, un serveur hostile
-  peut dépouiller le MAC et retrouver un oracle de padding.
-- **Écriture toujours authentifiée.** Chiffrer avec une clé sans `macKey` lève
-  une erreur. Le type 0 reste lisible pour la migration d'anciens coffres.
-- **Paramètres KDF validés, dans les deux sens.** `iterations` et `memory`
-  viennent du serveur *avant* authentification : un serveur compromis peut
-  annoncer 1 itération pour rendre la clé maître triviale à casser hors ligne —
-  ou des valeurs absurdes (2³¹ itérations, mémoire Argon2 en gibioctets) pour
-  geler le client au déverrouillage. Zwarden rejette les configurations sous le
-  plancher OWASP, au-dessus des maxima du client officiel, et les valeurs non
-  entières. Bitwarden ne fait aucune de ces vérifications.
-- **AES-128 (type 1) refusé** en déchiffrement : ré-chiffrement requis.
+- **The MAC is verified before any decryption.** A ciphertext never touches AES
+  if the HMAC does not match — that is what closes padding oracles on CBC. The
+  comparison is constant-time.
+- **Downgrades are refused.** Type 2 (authenticated) data presented as type 0
+  (unauthenticated) is rejected. Without that, a hostile server can strip the
+  MAC and recover a padding oracle.
+- **Writes are always authenticated.** Encrypting with a key that has no
+  `macKey` raises an error. Type 0 stays readable, to migrate old vaults.
+- **KDF parameters validated, in both directions.** `iterations` and `memory`
+  come from the server *before* authentication: a compromised server can
+  announce 1 iteration to make the master key trivial to crack offline — or
+  absurd values (2³¹ iterations, Argon2 memory in gibibytes) to freeze the
+  client at unlock. Zwarden rejects configurations below the OWASP floor, above
+  the official client's maxima, and non-integer values. Bitwarden performs
+  neither check.
+- **AES-128 (type 1) refused** for decryption: re-encryption required.
 
-## Compatibilité
+## Compatibility
 
-Format de chiffrement identique à Bitwarden, donc les coffres sont
-interopérables dans les deux sens :
+The encryption format is identical to Bitwarden's, so vaults are interoperable
+in both directions:
 
 ```
 2.<iv b64>|<ciphertext b64>|<mac b64>
 ```
 
-- clé maître : `PBKDF2-SHA256(mdp, e-mail normalisé, n)` ou `Argon2id(mdp, SHA-256(e-mail))`
-- clé étirée : `HKDF-Expand(clé maître, "enc"|"mac")` — Expand seul, sans Extract
-- hash serveur : `PBKDF2-SHA256(clé maître, mdp, 1 itération)`
+- master key: `PBKDF2-SHA256(pw, normalised email, n)` or `Argon2id(pw, SHA-256(email))`
+- stretched key: `HKDF-Expand(master key, "enc"|"mac")` — Expand alone, no Extract
+- server hash: `PBKDF2-SHA256(master key, pw, 1 iteration)`
 
-## Développement
+## Development
 
 ```bash
 npm install
 npm test          # 301 tests
-npm run typecheck # TypeScript strict
-npm run lint      # ESLint : promesses perdues, comparaisons laxistes
+npm run typecheck # strict TypeScript
+npm run lint      # ESLint: lost promises, loose comparisons
 npm run build
-npm run size      # budget de poids de dist/
+npm run size      # size budget for dist/
 ```
 
 ## Documentation
 
-- [`docs/CRYPTO.md`](docs/CRYPTO.md) — modèle de menace, hiérarchie des clés,
-  schéma de chiffrement, durcissements et leurs justifications.
-- [`docs/EXTENSION.md`](docs/EXTENSION.md) — décisions d'ergonomie et de
-  sécurité de l'extension : déverrouillage, cycle de verrouillage, deux vues
-  de popup, règles d'autofill.
+- [`docs/CRYPTO.md`](docs/CRYPTO.md) — threat model, key hierarchy, encryption
+  scheme, hardening measures and the reasoning behind them.
+- [`docs/EXTENSION.md`](docs/EXTENSION.md) — the extension's usability and
+  security decisions: unlocking, the locking cycle, the two popup views, the
+  autofill rules.
 
 ## Licence
 
-AGPL-3.0-only — voir [`LICENSE`](LICENSE).
+AGPL-3.0-only — see [`LICENSE`](LICENSE).

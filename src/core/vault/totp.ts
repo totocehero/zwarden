@@ -1,54 +1,52 @@
 /**
- * @file Codes à usage unique (TOTP, RFC 6238).
+ * @file One-time codes (TOTP, RFC 6238).
  *
- * ## Ce que le coffre stocke, et ce qu'il faut en faire
+ * ## What the vault stores, and what to do with it
  *
- * Le champ `totp` d'un item Bitwarden n'a pas une forme unique. Trois cas se
- * rencontrent dans la nature, et un gestionnaire qui n'en gère qu'un affiche
- * des codes faux :
+ * A Bitwarden item's `totp` field has no single shape. Three cases occur in the
+ * wild, and a manager that handles only one of them displays wrong codes:
  *
  * ```
- *   JBSWY3DPEHPK3PXP                    secret base32 nu
- *   otpauth://totp/GitHub:moi?secret=…  URI complète, avec ses paramètres
- *   steam://…                           variante Steam (hors périmètre)
+ *   JBSWY3DPEHPK3PXP                    bare base32 secret
+ *   otpauth://totp/GitHub:me?secret=…   full URI, with its parameters
+ *   steam://…                           Steam variant (out of scope)
  * ```
  *
- * L'URI porte éventuellement `digits`, `period` et `algorithm` : les ignorer
- * donnerait un code de six chiffres là où le site en attend huit, ou un code
- * SHA-1 là où il attend SHA-256. Ce sont des échecs silencieux — le code
- * s'affiche, il est simplement refusé — d'où l'analyse explicite ici.
+ * The URI may carry `digits`, `period` and `algorithm`: ignoring them would give
+ * a six-digit code where the site expects eight, or a SHA-1 code where it expects
+ * SHA-256. Those are silent failures — the code shows up, it is simply refused —
+ * hence the explicit parsing here.
  *
- * ## Séparation des responsabilités
+ * ## Separation of concerns
  *
- * Ce module ne touche ni au coffre, ni au réseau, ni à l'horloge : `now` est
- * un paramètre. C'est ce qui rend les vecteurs de la RFC rejouables tels
- * quels.
+ * This module touches neither the vault, nor the network, nor the clock: `now`
+ * is a parameter. That is what makes the RFC's vectors replayable as they stand.
  */
 
 import { fromBase32 } from '../crypto/encoding.js';
 import { type OtpAlgorithm, hmacForOtp } from '../crypto/primitives.js';
 
-/** Paramètres d'un générateur TOTP, valeurs par défaut résolues. */
+/** A TOTP generator's parameters, with defaults resolved. */
 export interface TotpConfig {
-  /** Secret partagé, décodé. */
+  /** Shared secret, decoded. */
   readonly secret: Uint8Array;
-  /** Nombre de chiffres du code. */
+  /** Number of digits in the code. */
   readonly digits: number;
-  /** Durée de validité d'un code, en secondes. */
+  /** How long a code stays valid, in seconds. */
   readonly period: number;
   readonly algorithm: OtpAlgorithm;
 }
 
-/** Levée lorsque le champ `totp` de l'item est inexploitable. */
+/** Thrown when an item's `totp` field is unusable. */
 export class TotpError extends Error {
   override readonly name = 'TotpError';
   readonly code = 'totp-invalid';
 }
 
-/** Valeurs par défaut de RFC 6238, celles que suppose tout site qui se tait. */
+/** RFC 6238 defaults, the ones any silent site assumes. */
 const DEFAULTS = { digits: 6, period: 30, algorithm: 'SHA-1' as OtpAlgorithm };
 
-/** Traduit le nom d'algorithme d'une URI vers celui de WebCrypto. */
+/** Translates a URI's algorithm name into WebCrypto's. */
 function toWebCryptoAlgorithm(raw: string | null): OtpAlgorithm {
   switch (raw?.toUpperCase()) {
     case undefined:
@@ -62,33 +60,33 @@ function toWebCryptoAlgorithm(raw: string | null): OtpAlgorithm {
     case 'SHA-512':
       return 'SHA-512';
     default:
-      throw new TotpError(`Algorithme TOTP non pris en charge : ${raw}`);
+      throw new TotpError(`Unsupported TOTP algorithm: ${raw}`);
   }
 }
 
-/** Lit un entier de paramètre d'URI, valeur par défaut si absent ou aberrant. */
+/** Reads an integer URI parameter, falling back if absent or absurd. */
 function readInt(params: URLSearchParams, key: string, fallback: number, min: number, max: number): number {
   const raw = params.get(key);
   if (raw === null) {
     return fallback;
   }
   const value = Number.parseInt(raw, 10);
-  // Un paramètre hors bornes est une erreur de saisie du site, pas une
-  // instruction : mieux vaut le défaut de la RFC qu'un code impossible.
+  // An out-of-range parameter is the site's data-entry mistake, not an
+  // instruction: the RFC default beats an impossible code.
   return Number.isFinite(value) && value >= min && value <= max ? value : fallback;
 }
 
 /**
- * Analyse le champ `totp` d'un item.
+ * Parses an item's `totp` field.
  *
- * @param raw Contenu déchiffré du champ, secret nu ou URI `otpauth://`.
- * @returns Paramètres résolus, prêts pour {@link generateTotp}.
- * @throws {TotpError} Champ vide, schéma inconnu, secret absent ou illisible.
+ * @param raw Decrypted field contents, a bare secret or an `otpauth://` URI.
+ * @returns Resolved parameters, ready for {@link generateTotp}.
+ * @throws {TotpError} Empty field, unknown scheme, missing or unreadable secret.
  */
 export function parseTotp(raw: string): TotpConfig {
   const trimmed = raw.trim();
   if (trimmed === '') {
-    throw new TotpError('Champ TOTP vide');
+    throw new TotpError('Empty TOTP field');
   }
 
   if (!trimmed.toLowerCase().startsWith('otpauth://')) {
@@ -99,17 +97,17 @@ export function parseTotp(raw: string): TotpConfig {
   try {
     url = new URL(trimmed);
   } catch {
-    throw new TotpError('URI otpauth:// illisible');
+    throw new TotpError('Unreadable otpauth:// URI');
   }
   if (url.host.toLowerCase() !== 'totp') {
-    // `otpauth://hotp/…` est un compteur, pas une horloge : afficher un code
-    // TOTP pour un item HOTP donnerait un code faux à chaque fois.
-    throw new TotpError(`Type de code non pris en charge : ${url.host}`);
+    // `otpauth://hotp/…` is a counter, not a clock: showing a TOTP code for an
+    // HOTP item would give a wrong code every single time.
+    throw new TotpError(`Unsupported code type: ${url.host}`);
   }
 
   const secret = url.searchParams.get('secret');
   if (secret === null || secret === '') {
-    throw new TotpError('URI otpauth:// sans paramètre secret');
+    throw new TotpError('otpauth:// URI without a secret parameter');
   }
 
   return {
@@ -125,33 +123,33 @@ function decodeSecret(raw: string): Uint8Array {
   try {
     secret = fromBase32(raw);
   } catch (error) {
-    throw new TotpError(`Secret TOTP illisible : ${(error as Error).message}`);
+    throw new TotpError(`Unreadable TOTP secret: ${(error as Error).message}`);
   }
   if (secret.length === 0) {
-    throw new TotpError('Secret TOTP vide');
+    throw new TotpError('Empty TOTP secret');
   }
   return secret;
 }
 
 /**
- * Calcule le code courant.
+ * Computes the current code.
  *
- * @param config Paramètres résolus par {@link parseTotp}.
- * @param now Instant, en millisecondes depuis l'époque.
- * @returns Code, complété de zéros à gauche à la longueur demandée.
+ * @param config Parameters resolved by {@link parseTotp}.
+ * @param now Instant, in milliseconds since the epoch.
+ * @returns The code, zero-padded on the left to the requested length.
  */
 export async function generateTotp(config: TotpConfig, now: number = Date.now()): Promise<string> {
   const counter = Math.floor(now / 1000 / config.period);
 
-  // Compteur sur 8 octets, gros-boutiste. `BigInt` plutôt qu'un décalage :
-  // au-delà de 2^31 les opérateurs binaires de JavaScript repassent en 32
-  // bits signés — le bogue attend l'an 2038 pour se manifester.
+  // 8-byte big-endian counter. `BigInt` rather than a shift: past 2^31
+  // JavaScript's bitwise operators fall back to signed 32 bits — the bug waits
+  // until 2038 to show itself.
   const bytes = new Uint8Array(8);
   new DataView(bytes.buffer).setBigUint64(0, BigInt(counter), false);
 
   const mac = await hmacForOtp(config.algorithm, config.secret, bytes);
 
-  // Troncature dynamique, RFC 4226 §5.3.
+  // Dynamic truncation, RFC 4226 §5.3.
   const offset = mac[mac.length - 1]! & 0x0f;
   const binary =
     ((mac[offset]! & 0x7f) << 24) |
@@ -163,16 +161,16 @@ export async function generateTotp(config: TotpConfig, now: number = Date.now())
 }
 
 /**
- * Secondes restantes avant l'expiration du code courant.
+ * Seconds left before the current code expires.
  *
- * @param config Paramètres résolus.
- * @param now Instant, en millisecondes depuis l'époque.
+ * @param config Resolved parameters.
+ * @param now Instant, in milliseconds since the epoch.
  */
 export function secondsRemaining(config: TotpConfig, now: number = Date.now()): number {
   return config.period - Math.floor(now / 1000) % config.period;
 }
 
-/** Insère une espace au milieu du code : `123456` → `123 456`. */
+/** Inserts a space in the middle of the code: `123456` → `123 456`. */
 export function formatTotp(code: string): string {
   const half = Math.ceil(code.length / 2);
   return `${code.slice(0, half)} ${code.slice(half)}`;

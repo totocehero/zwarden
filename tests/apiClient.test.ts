@@ -1,10 +1,10 @@
 /**
- * @file Tests unitaires du client API, avec un `fetch` simulé.
+ * @file Unit tests for the API client, with a stubbed `fetch`.
  *
- * Le test d'intégration (`tests/integration/`) valide l'interopérabilité
- * contre un vrai Vaultwarden ; ici on valide le comportement du client face
- * aux réponses dégradées qu'un vrai serveur ne renvoie pas sur demande :
- * limitation de débit, corps non-JSON, jeton absent, second facteur.
+ * The integration test (`tests/integration/`) validates interoperability against
+ * a real Vaultwarden; here we validate the client's behaviour against the
+ * degraded responses a real server will not produce on request: rate limiting,
+ * non-JSON bodies, a missing token, a second factor.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -19,13 +19,13 @@ import {
 import { DeviceType, readField } from '../src/core/api/models.js';
 import { KdfType } from '../src/core/crypto/kdf.js';
 
-/** Appel capturé par le `fetch` simulé. */
+/** A call captured by the stubbed `fetch`. */
 interface Captured {
   url: string;
   init: RequestInit | undefined;
 }
 
-/** Construit un client branché sur un `fetch` simulé, en capturant les appels. */
+/** Builds a client wired to a stubbed `fetch`, capturing the calls. */
 function clientWith(
   handler: (url: string, init?: RequestInit) => Response,
   captured?: Captured[],
@@ -43,32 +43,32 @@ function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status });
 }
 
-/** Hash d'autorisation factice : la dérivation est couverte par kdf.test.ts. */
-const HASH = 'hash-d-autorisation-b64';
+/** A dummy authorization hash: derivation is covered by kdf.test.ts. */
+const HASH = 'authorization-hash-b64';
 
-describe('validation de serverUrl', () => {
-  it('accepte HTTPS', () => {
+describe('serverUrl validation', () => {
+  it('accepts HTTPS', () => {
     expect(() => clientWith(() => new Response(''))).not.toThrow();
   });
 
   it.each(['http://localhost:8080', 'http://127.0.0.1', 'http://vault.localhost'])(
-    'tolère HTTP vers localhost : %s',
+    'tolerates HTTP towards localhost: %s',
     (url) => {
       expect(() => clientWith(() => new Response(''), undefined, url)).not.toThrow();
     },
   );
 
-  it('refuse HTTP vers un hôte distant', () => {
+  it('refuses HTTP towards a remote host', () => {
     expect(() => clientWith(() => new Response(''), undefined, 'http://vault.example.com')).toThrow(
       RangeError,
     );
   });
 
-  it('refuse une chaîne qui n’est pas une URL', () => {
+  it('refuses a string that is not a URL', () => {
     expect(() => clientWith(() => new Response(''), undefined, 'pas une url')).toThrow(RangeError);
   });
 
-  it('retire les slashs finaux', async () => {
+  it('strips trailing slashes', async () => {
     const captured: Captured[] = [];
     const client = clientWith(
       () => jsonResponse(200, { kdf: 0, kdfIterations: 600_000 }),
@@ -82,7 +82,7 @@ describe('validation de serverUrl', () => {
 });
 
 describe('prelogin', () => {
-  it('lit une réponse camelCase (Argon2id)', async () => {
+  it('reads a camelCase response (Argon2id)', async () => {
     const client = clientWith(() =>
       jsonResponse(200, { kdf: 1, kdfIterations: 3, kdfMemory: 64, kdfParallelism: 4 }),
     );
@@ -95,7 +95,7 @@ describe('prelogin', () => {
     });
   });
 
-  it('lit une réponse PascalCase (PBKDF2)', async () => {
+  it('reads a PascalCase response (PBKDF2)', async () => {
     const client = clientWith(() => jsonResponse(200, { Kdf: 0, KdfIterations: 600_000 }));
 
     expect(await client.prelogin('a@b.c')).toEqual({
@@ -104,7 +104,7 @@ describe('prelogin', () => {
     });
   });
 
-  it('normalise l’e-mail transmis', async () => {
+  it('normalises the email it sends', async () => {
     const captured: Captured[] = [];
     const client = clientWith(() => jsonResponse(200, { kdf: 0, kdfIterations: 600_000 }), captured);
 
@@ -112,23 +112,23 @@ describe('prelogin', () => {
     expect(String(captured[0]!.init?.body)).toBe(JSON.stringify({ email: 'user@example.com' }));
   });
 
-  it('traduit un 200 non-JSON en ApiError', async () => {
-    // Cas réel : page de garde d'un reverse-proxy ou portail captif.
+  it('translates a non-JSON 200 into an ApiError', async () => {
+    // A real case: a reverse proxy's landing page, or a captive portal.
     const client = clientWith(() => new Response('<html>Maintenance</html>', { status: 200 }));
 
-    await expect(client.prelogin('a@b.c')).rejects.toThrow(/JSON attendu/);
+    await expect(client.prelogin('a@b.c')).rejects.toThrow(/JSON expected/);
   });
 
-  it('traduit un échec HTTP en ApiError avec le statut', async () => {
+  it('translates an HTTP failure into an ApiError carrying the status', async () => {
     const client = clientWith(() => new Response('oups', { status: 500 }));
 
-    const erreur = await client.prelogin('a@b.c').catch((e: unknown) => e);
-    expect(erreur).toBeInstanceOf(ApiError);
-    expect((erreur as ApiError).status).toBe(500);
-    expect((erreur as ApiError).body).toBe('oups');
+    const error = await client.prelogin('a@b.c').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(500);
+    expect((error as ApiError).body).toBe('oups');
   });
 
-  it('borne chaque requête par un AbortSignal', async () => {
+  it('bounds every request with an AbortSignal', async () => {
     const captured: Captured[] = [];
     const client = clientWith(() => jsonResponse(200, { kdf: 0, kdfIterations: 600_000 }), captured);
 
@@ -137,48 +137,48 @@ describe('prelogin', () => {
   });
 });
 
-describe('limitation de débit (HTTP 429)', () => {
-  it('lit Retry-After en secondes', async () => {
+describe('rate limiting (HTTP 429)', () => {
+  it('reads Retry-After in seconds', async () => {
     const client = clientWith(() =>
       new Response('', { status: 429, headers: { 'Retry-After': '42' } }),
     );
 
-    const erreur = await client.prelogin('a@b.c').catch((e: unknown) => e);
-    expect(erreur).toBeInstanceOf(RateLimitedError);
-    expect((erreur as RateLimitedError).retryAfterSeconds).toBe(42);
+    const error = await client.prelogin('a@b.c').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RateLimitedError);
+    expect((error as RateLimitedError).retryAfterSeconds).toBe(42);
   });
 
-  it('tolère l’absence de Retry-After', async () => {
+  it('tolerates a missing Retry-After', async () => {
     const client = clientWith(() => new Response('', { status: 429 }));
 
-    const erreur = await client.prelogin('a@b.c').catch((e: unknown) => e);
-    expect(erreur).toBeInstanceOf(RateLimitedError);
-    expect((erreur as RateLimitedError).retryAfterSeconds).toBeUndefined();
+    const error = await client.prelogin('a@b.c').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(RateLimitedError);
+    expect((error as RateLimitedError).retryAfterSeconds).toBeUndefined();
   });
 });
 
 describe('login', () => {
   const TOKEN_OK = {
-    access_token: 'jeton-acces',
-    refresh_token: 'jeton-rafraichissement',
+    access_token: 'access-token',
+    refresh_token: 'refresh-token',
     expires_in: 3600,
     token_type: 'Bearer',
     Key: '2.aaa|bbb|ccc',
     PrivateKey: '2.ddd|eee|fff',
   };
 
-  it('renvoie la session et la clé de coffre enveloppée', async () => {
+  it('returns the session and the wrapped vault key', async () => {
     const client = clientWith(() => jsonResponse(200, TOKEN_OK));
     const session = await client.login('a@b.c', HASH);
 
-    expect(session.accessToken).toBe('jeton-acces');
-    expect(session.refreshToken).toBe('jeton-rafraichissement');
+    expect(session.accessToken).toBe('access-token');
+    expect(session.refreshToken).toBe('refresh-token');
     expect(session.protectedUserKey).toBe('2.aaa|bbb|ccc');
     expect(session.protectedPrivateKey).toBe('2.ddd|eee|fff');
     expect(session.expiresAt).toBeGreaterThan(Date.now());
   });
 
-  it('transmet le hash — et uniquement le hash — comme mot de passe', async () => {
+  it('sends the hash — and only the hash — as the password', async () => {
     const captured: Captured[] = [];
     const client = clientWith(() => jsonResponse(200, TOKEN_OK), captured);
 
@@ -192,7 +192,7 @@ describe('login', () => {
     expect(form.get('deviceType')).toBe(String(DeviceType.ChromeExtension));
   });
 
-  it('annonce le type d’appareil configuré', async () => {
+  it('announces the configured device type', async () => {
     const captured: Captured[] = [];
     const fetchFn: typeof fetch = async (input, init) => {
       captured.push({ url: String(input), init });
@@ -210,28 +210,28 @@ describe('login', () => {
     expect(form.get('deviceType')).toBe(String(DeviceType.FirefoxExtension));
   });
 
-  it('traduit une demande de second facteur (forme tableau)', async () => {
+  it('translates a second-factor demand (array shape)', async () => {
     const client = clientWith(() =>
       jsonResponse(400, { error: 'invalid_grant', TwoFactorProviders: ['0', '3'] }),
     );
 
-    const erreur = await client.login('a@b.c', HASH).catch((e: unknown) => e);
-    expect(erreur).toBeInstanceOf(TwoFactorRequiredError);
-    expect((erreur as TwoFactorRequiredError).providers).toEqual(['0', '3']);
-    expect((erreur as TwoFactorRequiredError).code).toBe('two-factor-required');
+    const error = await client.login('a@b.c', HASH).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(TwoFactorRequiredError);
+    expect((error as TwoFactorRequiredError).providers).toEqual(['0', '3']);
+    expect((error as TwoFactorRequiredError).code).toBe('two-factor-required');
   });
 
-  it('traduit une demande de second facteur (forme objet)', async () => {
+  it('translates a second-factor demand (object shape)', async () => {
     const client = clientWith(() =>
       jsonResponse(400, { error: 'invalid_grant', TwoFactorProviders2: { '1': null } }),
     );
 
-    const erreur = await client.login('a@b.c', HASH).catch((e: unknown) => e);
-    expect(erreur).toBeInstanceOf(TwoFactorRequiredError);
-    expect((erreur as TwoFactorRequiredError).providers).toEqual(['1']);
+    const error = await client.login('a@b.c', HASH).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(TwoFactorRequiredError);
+    expect((error as TwoFactorRequiredError).providers).toEqual(['1']);
   });
 
-  it('joint le second facteur au formulaire', async () => {
+  it('attaches the second factor to the form', async () => {
     const captured: Captured[] = [];
     const client = clientWith(() => jsonResponse(200, TOKEN_OK), captured);
 
@@ -243,7 +243,7 @@ describe('login', () => {
     expect(form.get('twoFactorRemember')).toBe('1');
   });
 
-  it('n’envoie aucun champ de second facteur sans second facteur', async () => {
+  it('sends no second-factor field when there is no second factor', async () => {
     const captured: Captured[] = [];
     const client = clientWith(() => jsonResponse(200, TOKEN_OK), captured);
 
@@ -254,7 +254,7 @@ describe('login', () => {
     expect(form.get('twoFactorToken')).toBeNull();
   });
 
-  it('expose le jeton de dispense renvoyé par le serveur', async () => {
+  it('exposes the remember token the server returns', async () => {
     const client = clientWith(() =>
       jsonResponse(200, { ...TOKEN_OK, TwoFactorToken: 'jeton-de-dispense' }),
     );
@@ -267,41 +267,41 @@ describe('login', () => {
     expect(session.twoFactorRememberToken).toBe('jeton-de-dispense');
   });
 
-  it('traduit une exigence de captcha', async () => {
+  it('translates a captcha requirement', async () => {
     const client = clientWith(() =>
       jsonResponse(400, { error: 'invalid_grant', HCaptcha_SiteKey: 'cle-site-hcaptcha' }),
     );
 
-    const erreur = await client.login('a@b.c', HASH).catch((e: unknown) => e);
-    expect(erreur).toBeInstanceOf(CaptchaRequiredError);
-    expect((erreur as CaptchaRequiredError).siteKey).toBe('cle-site-hcaptcha');
-    expect((erreur as CaptchaRequiredError).code).toBe('captcha-required');
+    const error = await client.login('a@b.c', HASH).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(CaptchaRequiredError);
+    expect((error as CaptchaRequiredError).siteKey).toBe('cle-site-hcaptcha');
+    expect((error as CaptchaRequiredError).code).toBe('captcha-required');
   });
 
-  it('rejette un 200 sans jeton d’accès', async () => {
+  it('rejects a 200 without an access token', async () => {
     const client = clientWith(() => jsonResponse(200, { token_type: 'Bearer' }));
 
-    await expect(client.login('a@b.c', HASH)).rejects.toThrow(/sans jeton d'accès/);
+    await expect(client.login('a@b.c', HASH)).rejects.toThrow(/without an access token/);
   });
 
-  it('traduit un corps d’erreur non-JSON en ApiError', async () => {
+  it('translates a non-JSON error body into an ApiError', async () => {
     const client = clientWith(() => new Response('Bad Gateway', { status: 502 }));
 
-    const erreur = await client.login('a@b.c', HASH).catch((e: unknown) => e);
-    expect(erreur).toBeInstanceOf(ApiError);
-    expect((erreur as ApiError).status).toBe(502);
-    expect((erreur as ApiError).code).toBe('api-error');
+    const error = await client.login('a@b.c', HASH).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(502);
+    expect((error as ApiError).code).toBe('api-error');
   });
 });
 
 describe('refreshToken', () => {
-  it('renvoie une nouvelle session à partir du jeton de rafraîchissement', async () => {
+  it('returns a new session from the refresh token', async () => {
     const captured: Captured[] = [];
     const client = clientWith(
       () =>
         jsonResponse(200, {
-          access_token: 'nouveau-jeton',
-          refresh_token: 'nouveau-rafraichissement',
+          access_token: 'new-token',
+          refresh_token: 'new-refresh',
           expires_in: 3600,
           token_type: 'Bearer',
           Key: '2.aaa|bbb|ccc',
@@ -309,82 +309,82 @@ describe('refreshToken', () => {
       captured,
     );
 
-    const session = await client.refreshToken('ancien-rafraichissement');
+    const session = await client.refreshToken('old-refresh');
 
-    expect(session.accessToken).toBe('nouveau-jeton');
-    expect(session.refreshToken).toBe('nouveau-rafraichissement');
+    expect(session.accessToken).toBe('new-token');
+    expect(session.refreshToken).toBe('new-refresh');
     expect(session.protectedUserKey).toBe('2.aaa|bbb|ccc');
 
     const form = new URLSearchParams(String(captured[0]!.init?.body));
     expect(form.get('grant_type')).toBe('refresh_token');
-    expect(form.get('refresh_token')).toBe('ancien-rafraichissement');
+    expect(form.get('refresh_token')).toBe('old-refresh');
     expect(form.get('client_id')).toBe('zwarden');
   });
 
-  it('traduit un jeton expiré en ApiError', async () => {
+  it('translates an expired token into an ApiError', async () => {
     const client = clientWith(() => jsonResponse(400, { error: 'invalid_grant' }));
 
-    const erreur = await client.refreshToken('expire').catch((e: unknown) => e);
-    expect(erreur).toBeInstanceOf(ApiError);
-    expect((erreur as ApiError).status).toBe(400);
+    const error = await client.refreshToken('expired').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(400);
   });
 });
 
 describe('updateCipher', () => {
-  it('émet un PUT complet sur l’item', async () => {
+  it('issues a complete PUT on the item', async () => {
     const captured: Captured[] = [];
     const client = clientWith(() => jsonResponse(200, { id: 'id-1', type: 1 }), captured);
-    const corps = { type: 1, name: '2.aaa|bbb|ccc' };
+    const body = { type: 1, name: '2.aaa|bbb|ccc' };
 
-    const résultat = await client.updateCipher('jeton', 'id-1', corps);
+    const result = await client.updateCipher('token', 'id-1', body);
 
-    expect(résultat.id).toBe('id-1');
+    expect(result.id).toBe('id-1');
     expect(captured[0]!.url).toBe('https://vault.example.com/api/ciphers/id-1');
     expect(captured[0]!.init?.method).toBe('PUT');
-    expect(String(captured[0]!.init?.body)).toBe(JSON.stringify(corps));
+    expect(String(captured[0]!.init?.body)).toBe(JSON.stringify(body));
   });
 
-  it('remonte les échecs', async () => {
-    const client = clientWith(() => new Response('interdit', { status: 403 }));
+  it('surfaces failures', async () => {
+    const client = clientWith(() => new Response('forbidden', { status: 403 }));
 
-    const erreur = await client.updateCipher('jeton', 'id-1', {}).catch((e: unknown) => e);
-    expect(erreur).toBeInstanceOf(ApiError);
-    expect((erreur as ApiError).status).toBe(403);
+    const error = await client.updateCipher('token', 'id-1', {}).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(403);
   });
 });
 
 describe('deleteCipher', () => {
-  it('traite un 404 comme un succès (idempotence)', async () => {
+  it('treats a 404 as success (idempotence)', async () => {
     const client = clientWith(() => new Response('', { status: 404 }));
-    await expect(client.deleteCipher('jeton', 'id-inconnu')).resolves.toBeUndefined();
+    await expect(client.deleteCipher('token', 'unknown-id')).resolves.toBeUndefined();
   });
 
-  it('remonte les autres échecs', async () => {
-    const client = clientWith(() => new Response('interdit', { status: 403 }));
+  it('surfaces other failures', async () => {
+    const client = clientWith(() => new Response('forbidden', { status: 403 }));
 
-    const erreur = await client.deleteCipher('jeton', 'id').catch((e: unknown) => e);
-    expect(erreur).toBeInstanceOf(ApiError);
-    expect((erreur as ApiError).status).toBe(403);
+    const error = await client.deleteCipher('token', 'id').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(403);
   });
 });
 
-describe('normalisation de l’URL de serveur', () => {
+describe('server URL normalisation', () => {
   const base = { deviceIdentifier: 'id-1', fetchFn: (async () => new Response('{}')) as typeof fetch };
 
   /**
-   * La validation portait sur l'URL analysée mais renvoyait la chaîne d'entrée :
-   * paramètres et ancres survivaient, et la concaténation de chemin qui suit les
-   * rend destructeurs. `https://coffre.fr/#x` + `/api/sync` donne
-   * `https://coffre.fr/#x/api/sync`, où l'ancre avale le chemin.
+   * Validation covered the parsed URL but returned the input string: query
+   * strings and fragments survived, and the path concatenation that follows
+   * makes them destructive. `https://vault.example/#x` + `/api/sync` gives
+   * `https://vault.example/#x/api/sync`, where the fragment swallows the path.
    */
-  it('refuse une URL porteuse d’un paramètre ou d’une ancre', () => {
+  it('refuses a URL carrying a query string or a fragment', () => {
     expect(() => new ApiClient({ ...base, serverUrl: 'https://coffre.fr/#x' })).toThrow(RangeError);
     expect(() => new ApiClient({ ...base, serverUrl: 'https://coffre.fr/?debug=1' })).toThrow(
       RangeError,
     );
   });
 
-  it('conserve un chemin d’installation en sous-répertoire', async () => {
+  it('preserves a subdirectory installation path', async () => {
     const appels: string[] = [];
     const client = new ApiClient({
       deviceIdentifier: 'id-1',
@@ -398,33 +398,33 @@ describe('normalisation de l’URL de serveur', () => {
     expect(appels[0]).toBe('https://coffre.fr/bitwarden/identity/accounts/prelogin');
   });
 
-  it('exige HTTPS, sauf vers la boucle locale', () => {
+  it('requires HTTPS, except towards the loopback', () => {
     expect(() => new ApiClient({ ...base, serverUrl: 'http://coffre.fr' })).toThrow(RangeError);
     expect(() => new ApiClient({ ...base, serverUrl: 'http://localhost:8080' })).not.toThrow();
   });
 });
 
 describe('readField', () => {
-  it('lit indifféremment les deux casses', () => {
+  it('reads either casing indifferently', () => {
     expect(readField<string>({ accessToken: 'a' }, 'accessToken')).toBe('a');
     expect(readField<string>({ AccessToken: 'a' }, 'accessToken')).toBe('a');
     expect(readField<string>({ key: 'k' }, 'Key')).toBe('k');
   });
 
   /**
-   * `name in record` remontait la chaîne de prototypes : `constructor`,
-   * `toString` et `valueOf` répondaient toujours présents. Aucun champ de l'API
-   * n'entrait en collision, donc rien n'était exploitable — mais la garantie
-   * tenait à une coïncidence de nommage plutôt qu'à la structure du code.
+   * `name in record` walked the prototype chain: `constructor`, `toString` and
+   * `valueOf` always answered present. No API field collided with them, so
+   * nothing was exploitable — but the guarantee rested on a naming coincidence
+   * rather than on the structure of the code.
    */
-  it('ne lit jamais une propriété héritée du prototype', () => {
+  it('never reads a property inherited from the prototype', () => {
     expect(readField<unknown>({}, 'constructor')).toBeUndefined();
     expect(readField<unknown>({}, 'toString')).toBeUndefined();
     expect(readField<unknown>({}, 'valueOf')).toBeUndefined();
     expect(readField<unknown>({}, 'hasOwnProperty')).toBeUndefined();
   });
 
-  it('rend undefined sur une source non-objet', () => {
+  it('returns undefined for a non-object source', () => {
     expect(readField<unknown>(null, 'x')).toBeUndefined();
     expect(readField<unknown>('texte', 'x')).toBeUndefined();
   });

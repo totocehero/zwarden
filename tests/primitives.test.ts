@@ -22,57 +22,57 @@ function bytesToHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-describe('HMAC-SHA256 (vecteurs RFC 4231)', () => {
-  it('cas 1', async () => {
+describe('HMAC-SHA256 (RFC 4231 vectors)', () => {
+  it('case 1', async () => {
     const mac = await hmacSha256(hexToBytes('0b'.repeat(20)), toUtf8Bytes('Hi There'));
     expect(bytesToHex(mac)).toBe(
       'b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7',
     );
   });
 
-  it('cas 2', async () => {
+  it('case 2', async () => {
     const mac = await hmacSha256(toUtf8Bytes('Jefe'), toUtf8Bytes('what do ya want for nothing?'));
     expect(bytesToHex(mac)).toBe(
       '5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843',
     );
   });
 
-  it('produit le même MAC via une CryptoKey importée puis réutilisée', async () => {
+  it('produces the same MAC through an imported, reused CryptoKey', async () => {
     const raw = hexToBytes('0b'.repeat(20));
     const imported = await importHmacSha256Key(raw);
     const data = toUtf8Bytes('Hi There');
 
     const viaRaw = await hmacSha256(raw, data);
     const viaKey = await hmacSha256(imported, data);
-    const viaKeyBis = await hmacSha256(imported, data);
+    const viaKeyAgain = await hmacSha256(imported, data);
 
     expect(bytesToHex(viaKey)).toBe(bytesToHex(viaRaw));
-    expect(bytesToHex(viaKeyBis)).toBe(bytesToHex(viaRaw));
+    expect(bytesToHex(viaKeyAgain)).toBe(bytesToHex(viaRaw));
   });
 });
 
 describe('hmacSha256Verify', () => {
-  const key = toUtf8Bytes('clé de test');
-  const data = toUtf8Bytes('données authentifiées');
+  const key = toUtf8Bytes('test key');
+  const data = toUtf8Bytes('authenticated data');
 
-  it('accepte le MAC correct', async () => {
+  it('accepts the correct MAC', async () => {
     const mac = await hmacSha256(key, data);
     expect(await hmacSha256Verify(key, mac, data)).toBe(true);
   });
 
-  it('rejette un MAC altéré d’un seul bit', async () => {
+  it('rejects a MAC altered by a single bit', async () => {
     const mac = await hmacSha256(key, data);
     mac[0]! ^= 0x01;
     expect(await hmacSha256Verify(key, mac, data)).toBe(false);
   });
 
-  it('rejette le MAC d’une autre clé', async () => {
-    const mac = await hmacSha256(toUtf8Bytes('autre clé'), data);
+  it('rejects a MAC made with another key', async () => {
+    const mac = await hmacSha256(toUtf8Bytes('other key'), data);
     expect(await hmacSha256Verify(key, mac, data)).toBe(false);
   });
 });
 
-describe('PBKDF2-SHA256 (vecteurs RFC 7914 §11)', () => {
+describe('PBKDF2-SHA256 (RFC 7914 §11 vectors)', () => {
   it('c=1', async () => {
     const out = await pbkdf2Sha256(toUtf8Bytes('passwd'), toUtf8Bytes('salt'), 1, 64);
     expect(bytesToHex(out)).toBe(
@@ -90,9 +90,9 @@ describe('PBKDF2-SHA256 (vecteurs RFC 7914 §11)', () => {
   });
 });
 
-describe('HKDF-Expand SHA-256 (vecteurs RFC 5869)', () => {
-  // Cas A.1 : on part directement de la PRK, l'étape Extract étant hors périmètre.
-  it('cas A.1, L=42', async () => {
+describe('HKDF-Expand SHA-256 (RFC 5869 vectors)', () => {
+  // Case A.1: we start straight from the PRK, the Extract step being out of scope.
+  it('case A.1, L=42', async () => {
     const prk = hexToBytes('077709362c2e32df0ddc3f0dc47bba6390b6c73bb50f9c3122ec844ad7c2b3e5');
     const info = hexToBytes('f0f1f2f3f4f5f6f7f8f9');
     expect(bytesToHex(await hkdfExpandSha256(prk, info, 42))).toBe(
@@ -100,21 +100,21 @@ describe('HKDF-Expand SHA-256 (vecteurs RFC 5869)', () => {
     );
   });
 
-  it('cas A.3, info vide, L=42', async () => {
+  it('case A.3, empty info, L=42', async () => {
     const prk = hexToBytes('19ef24a32c717b167f33a91d6f648bdf96596776afdb6377ac434c1c293ccb04');
     expect(bytesToHex(await hkdfExpandSha256(prk, new Uint8Array(0), 42))).toBe(
       '8da4e775a563c18f715f802a063c5a31b8a11f5c5ee1879ec3454e5f3c738d2d9d201395faa4b61a96c8',
     );
   });
 
-  it('produit exactement la longueur demandée sur plusieurs blocs', async () => {
+  it('produces exactly the requested length across several blocks', async () => {
     const prk = new Uint8Array(32).fill(7);
     for (const len of [1, 31, 32, 33, 64, 100]) {
       expect((await hkdfExpandSha256(prk, 'enc', len)).length).toBe(len);
     }
   });
 
-  it('les info "enc" et "mac" donnent des sorties distinctes', async () => {
+  it('the "enc" and "mac" info values give distinct outputs', async () => {
     const prk = new Uint8Array(32).fill(42);
     const enc = await hkdfExpandSha256(prk, 'enc', 32);
     const mac = await hkdfExpandSha256(prk, 'mac', 32);
@@ -122,17 +122,17 @@ describe('HKDF-Expand SHA-256 (vecteurs RFC 5869)', () => {
   });
 });
 
-describe('fromBase64 sur des entrées adverses', () => {
-  // Le décodage s'appuie sur `atob`, qui rejette les entrées invalides.
-  // C'est le comportement voulu : sur du matériel cryptographique, ignorer
-  // silencieusement des octets illisibles masquerait une corruption de coffre
-  // ou une réponse serveur falsifiée. `EncString.parse` traduit ensuite ces
-  // échecs en `EncStringParseError`.
-  it.each(['Z', '!!!!', 'a=b=c'])('rejette l’entrée invalide %j', (input) => {
+describe('fromBase64 on adversarial input', () => {
+  // Decoding leans on `atob`, which rejects invalid input. That is the intended
+  // behaviour: on cryptographic material, silently ignoring unreadable bytes
+  // would mask vault corruption or a tampered server response.
+  // `EncString.parse` then translates those failures into
+  // `EncStringParseError`.
+  it.each(['Z', '!!!!', 'a=b=c'])('rejects the invalid input %j', (input) => {
     expect(() => fromBase64(input)).toThrow();
   });
 
-  it('accepte un base64 non paddé', () => {
+  it('accepts unpadded base64', () => {
     expect(fromBase64('Zm9vYmE')).toEqual(toUtf8Bytes('fooba'));
     expect(fromBase64('Zg')).toEqual(toUtf8Bytes('f'));
   });

@@ -1,21 +1,21 @@
 /**
- * @file Types des réponses de l'API Bitwarden / Vaultwarden.
+ * @file Types for the Bitwarden / Vaultwarden API responses.
  *
- * Ces interfaces décrivent des données **non fiables** : elles proviennent du
- * serveur, considéré comme hostile. Elles ne sont donc que des formes attendues,
- * pas des garanties. Toute valeur issue de ces types doit être validée avant
- * usage — en particulier les paramètres KDF (voir `assertKdfIsAcceptable`).
+ * These interfaces describe **untrusted** data: it comes from the server, which
+ * is treated as hostile. They are therefore expected shapes, not guarantees.
+ * Any value coming out of these types must be validated before use — the KDF
+ * parameters in particular (see `assertKdfIsAcceptable`).
  *
- * ## Casse des champs
+ * ## Field casing
  *
- * L'API a migré de PascalCase vers camelCase au fil des versions, et
- * Vaultwarden suit avec ses propres décalages. Plutôt que de figer un choix,
- * les accès passent par `readField()`, qui accepte les deux. C'est du code
- * défensif assumé : la casse est la première cause de casse d'interopérabilité
- * entre clients tiers et Vaultwarden.
+ * The API migrated from PascalCase to camelCase over successive versions, and
+ * Vaultwarden follows with offsets of its own. Rather than freezing a choice,
+ * every access goes through `readField()`, which accepts both. This is
+ * deliberate defensive code: casing is the leading cause of interoperability
+ * breakage between third-party clients and Vaultwarden.
  */
 
-/** Réponse de `POST /identity/accounts/prelogin`. */
+/** Response of `POST /identity/accounts/prelogin`. */
 export interface PreloginResponse {
   readonly kdf?: number;
   readonly kdfIterations?: number;
@@ -23,39 +23,39 @@ export interface PreloginResponse {
   readonly kdfParallelism?: number | null;
 }
 
-/** Réponse de `POST /identity/connect/token` en cas de succès. */
+/** Successful response of `POST /identity/connect/token`. */
 export interface TokenResponse {
   readonly access_token: string;
   readonly refresh_token?: string;
   readonly expires_in: number;
   readonly token_type: string;
-  /** Clé du coffre, enveloppée par la clé maître étirée. */
+  /** Vault key, wrapped by the stretched master key. */
   readonly Key?: string;
   readonly PrivateKey?: string;
   /**
-   * Jeton de dispense de second facteur, émis si `twoFactorRemember=1` a été
-   * demandé. À conserver et rejouer comme fournisseur 5 (`Remember`).
+   * Two-factor remember token, issued if `twoFactorRemember=1` was requested.
+   * To be kept and replayed as provider 5 (`Remember`).
    */
   readonly TwoFactorToken?: string;
 }
 
-/** Réponse d'erreur de `POST /identity/connect/token`. */
+/** Error response of `POST /identity/connect/token`. */
 export interface TokenErrorResponse {
   readonly error?: string;
   readonly error_description?: string;
-  /** Présent lorsqu'une seconde étape d'authentification est requise. */
+  /** Present when a second authentication step is required. */
   readonly TwoFactorProviders?: readonly string[];
   readonly TwoFactorProviders2?: Record<string, unknown>;
-  /** Présent lorsque le serveur exige un captcha avant de réessayer. */
+  /** Present when the server demands a captcha before retrying. */
   readonly HCaptcha_SiteKey?: string;
 }
 
 /**
- * Identifiants des fournisseurs de second facteur, tels que transmis par
- * l'API (sous forme de chaînes numériques dans les réponses d'erreur).
+ * Two-factor provider identifiers, as the API transmits them (as numeric
+ * strings in the error responses).
  *
- * Valeurs imposées par l'API, ne pas renuméroter. L'interface s'en sert pour
- * afficher un libellé et router vers le bon écran de saisie.
+ * Values imposed by the API, do not renumber. The UI uses them to show a label
+ * and to route to the right entry screen.
  */
 export const TwoFactorProvider = {
   Authenticator: 0,
@@ -71,12 +71,11 @@ export const TwoFactorProvider = {
 export type TwoFactorProvider = (typeof TwoFactorProvider)[keyof typeof TwoFactorProvider];
 
 /**
- * Passkey (identifiant FIDO2) rangée dans un item de connexion.
+ * A passkey (FIDO2 credential) stored inside a login item.
  *
- * Tous les champs sont des `EncString` sérialisées, sauf `creationDate`.
- * `keyValue` est la **clé privée** ECDSA P-256 (PKCS#8) : c'est elle qui
- * permet à l'extension de répondre aux cérémonies WebAuthn à la place d'une
- * clé matérielle.
+ * Every field is a serialised `EncString`, except `creationDate`. `keyValue` is
+ * the ECDSA P-256 **private key** (PKCS#8): it is what lets the extension answer
+ * WebAuthn ceremonies in place of a hardware key.
  */
 export interface Fido2CredentialResponse {
   readonly credentialId?: string | null;
@@ -94,7 +93,7 @@ export interface Fido2CredentialResponse {
   readonly creationDate?: string | null;
 }
 
-/** Item du coffre, tel que renvoyé par `GET /api/sync`. */
+/** A vault item, as returned by `GET /api/sync`. */
 export interface CipherResponse {
   readonly id: string;
   readonly type: number;
@@ -107,24 +106,24 @@ export interface CipherResponse {
     readonly uris?: ReadonlyArray<{ readonly uri?: string | null }> | null;
     readonly fido2Credentials?: readonly Fido2CredentialResponse[] | null;
   } | null;
-  /** Clé propre à l'item, si présente. Enveloppée par la clé du coffre. */
+  /** The item's own key, if present. Wrapped by the vault key. */
   readonly key?: string | null;
   readonly organizationId?: string | null;
-  /** Dossier personnel (un seul possible). */
+  /** Personal folder (only one possible). */
   readonly folderId?: string | null;
-  /** Collections d'organisation auxquelles l'item appartient. */
+  /** Organisation collections the item belongs to. */
   readonly collectionIds?: readonly string[] | null;
 }
 
-/** Dossier personnel. Le nom est chiffré avec la clé du coffre. */
+/** A personal folder. The name is encrypted with the vault key. */
 export interface FolderResponse {
   readonly id?: string;
   readonly name?: string | null;
 }
 
 /**
- * Collection d'organisation — l'unité de contrôle d'accès du partage.
- * Le nom est chiffré avec la clé de **l'organisation**, pas celle du coffre.
+ * An organisation collection — sharing's unit of access control.
+ * The name is encrypted with **the organisation's** key, not the vault's.
  */
 export interface CollectionResponse {
   readonly id?: string;
@@ -134,18 +133,18 @@ export interface CollectionResponse {
   readonly hidePasswords?: boolean;
 }
 
-/** Organisation dont le compte est membre, telle que listée dans le profil. */
+/** An organisation the account belongs to, as listed in the profile. */
 export interface ProfileOrganizationResponse {
   readonly id?: string;
   /**
-   * Clé de l'organisation (64 octets), chiffrée en RSA vers la clé publique
-   * du membre — `EncString` de type 4 (ou 3).
+   * The organisation's key (64 bytes), RSA-encrypted to the member's public
+   * key — an `EncString` of type 4 (or 3).
    */
   readonly key?: string | null;
   readonly name?: string | null;
 }
 
-/** Réponse de `GET /api/sync`. */
+/** Response of `GET /api/sync`. */
 export interface SyncResponse {
   readonly profile?: {
     readonly id?: string;
@@ -160,9 +159,9 @@ export interface SyncResponse {
 }
 
 /**
- * Types d'items du coffre.
+ * Vault item types.
  *
- * Valeurs imposées par l'API, ne pas renuméroter.
+ * Values imposed by the API, do not renumber.
  */
 export const CipherType = {
   Login: 1,
@@ -175,10 +174,10 @@ export const CipherType = {
 export type CipherType = (typeof CipherType)[keyof typeof CipherType];
 
 /**
- * Identifiant de type d'appareil, transmis à l'authentification.
+ * Device type identifier, sent at authentication time.
  *
- * Vaultwarden s'en sert pour l'affichage des sessions actives et pour les
- * notifications de nouvel appareil.
+ * Vaultwarden uses it to display active sessions and for new-device
+ * notifications.
  */
 export const DeviceType = {
   ChromeExtension: 2,
@@ -188,14 +187,14 @@ export const DeviceType = {
 export type DeviceType = (typeof DeviceType)[keyof typeof DeviceType];
 
 /**
- * Lit un champ en tolérant les deux conventions de casse.
+ * Reads a field while tolerating both casing conventions.
  *
- * Essaie le nom tel quel, puis avec la première lettre inversée. Évite de
- * dupliquer chaque accès en `obj.Key ?? obj.key`.
+ * Tries the name as given, then with the first letter flipped. Saves writing
+ * every access as `obj.Key ?? obj.key`.
  *
- * @param source Objet de réponse brut.
- * @param name Nom du champ, dans l'une ou l'autre casse.
- * @returns La valeur trouvée, ou `undefined`.
+ * @param source Raw response object.
+ * @param name Field name, in either casing.
+ * @returns The value found, or `undefined`.
  */
 export function readField<T>(source: unknown, name: string): T | undefined {
   if (source === null || typeof source !== 'object') {
@@ -203,11 +202,10 @@ export function readField<T>(source: unknown, name: string): T | undefined {
   }
 
   const record = source as Record<string, unknown>;
-  // `Object.hasOwn` et non `in` : `in` remonte la chaîne de prototypes, où
-  // `constructor`, `toString` et `valueOf` répondent toujours présents. Aucun
-  // nom de champ de l'API n'entre en collision avec eux aujourd'hui — la
-  // garantie tenait donc à une coïncidence, alors qu'elle peut être
-  // structurelle pour le même prix.
+  // `Object.hasOwn` rather than `in`: `in` walks the prototype chain, where
+  // `constructor`, `toString` and `valueOf` always answer present. No API field
+  // name collides with them today — so the guarantee rested on a coincidence,
+  // when it can be structural for the same price.
   if (Object.hasOwn(record, name)) {
     return record[name] as T;
   }

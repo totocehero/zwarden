@@ -12,14 +12,14 @@ import {
   toUtf8Bytes,
 } from '../src/core/crypto/encoding.js';
 
-// La suite tourne sur les deux chemins — méthodes natives de la plateforme
-// quand elles existent, et repli btoa/atob — pour que la couverture ne dépende
-// pas de la version du moteur qui exécute les tests.
+// The suite runs on both paths — the platform's native methods where they
+// exist, and the btoa/atob fallback — so that coverage does not depend on the
+// engine version running the tests.
 describe.each([
-  ['implémentation publique', toBase64, fromBase64],
-  ['repli btoa/atob', toBase64Js, fromBase64Js],
+  ['public implementation', toBase64, fromBase64],
+  ['btoa/atob fallback', toBase64Js, fromBase64Js],
 ])('base64 (%s)', (_label, encode, decode) => {
-  // Vecteurs RFC 4648 §10.
+  // RFC 4648 §10 vectors.
   const vectors: ReadonlyArray<readonly [string, string]> = [
     ['', ''],
     ['f', 'Zg=='],
@@ -30,49 +30,49 @@ describe.each([
     ['foobar', 'Zm9vYmFy'],
   ];
 
-  it.each(vectors)('encode %j en %j', (plain, encoded) => {
+  it.each(vectors)('encodes %j as %j', (plain, encoded) => {
     expect(encode(toUtf8Bytes(plain))).toBe(encoded);
   });
 
-  it.each(vectors)('décode %j depuis %j', (plain, encoded) => {
+  it.each(vectors)('decodes %j from %j', (plain, encoded) => {
     expect(fromUtf8Bytes(decode(encoded))).toBe(plain);
   });
 
-  it('gère les 256 valeurs d’octet sans perte', () => {
+  it('handles all 256 byte values without loss', () => {
     const all = new Uint8Array(256);
     for (let i = 0; i < 256; i++) all[i] = i;
     expect(decode(encode(all))).toEqual(all);
   });
 
-  it('fait un aller-retour sur des longueurs aléatoires', () => {
+  it('round-trips across random lengths', () => {
     for (let len = 0; len < 200; len++) {
       const bytes = crypto.getRandomValues(new Uint8Array(len));
       expect(decode(encode(bytes))).toEqual(bytes);
     }
   });
 
-  it('préserve l’UTF-8 multi-octets', () => {
-    const text = 'mot de passe — 日本語 🔐 àéîõü';
+  it('preserves multi-byte UTF-8', () => {
+    const text = 'password — 日本語 🔐 àéîõü';
     expect(fromUtf8Bytes(decode(encode(toUtf8Bytes(text))))).toBe(text);
   });
 });
 
-describe('tolérance d’entrée de fromBase64', () => {
-  // La normalisation (espaces, URL-safe, padding) est faite par la fonction
-  // publique avant de déléguer au décodeur : elle n'est testée que sur elle.
-  it('accepte l’alphabet URL-safe en entrée', () => {
+describe('fromBase64 input tolerance', () => {
+  // Normalisation (whitespace, URL-safe, padding) is done by the public
+  // function before it delegates to the decoder: it is tested on that alone.
+  it('accepts the URL-safe alphabet as input', () => {
     const bytes = Uint8Array.of(0xfb, 0xff, 0xbf);
     expect(fromBase64(toBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_'))).toEqual(bytes);
   });
 
-  it('ignore les espaces parasites', () => {
+  it('ignores stray whitespace', () => {
     expect(fromUtf8Bytes(fromBase64('Zm9v YmFy\n'))).toBe('foobar');
   });
 });
 
 describe('toBase64Url', () => {
-  it('utilise l’alphabet URL-safe et retire le padding', () => {
-    // 0xfb 0xff 0xbf encode en `+/+/` : les deux caractères à remplacer.
+  it('uses the URL-safe alphabet and strips the padding', () => {
+    // 0xfb 0xff 0xbf encodes as `+/+/`: both characters that need replacing.
     expect(toBase64Url(Uint8Array.of(0xfb, 0xff, 0xbf))).toBe('-_-_');
     expect(toBase64Url(toUtf8Bytes('f'))).toBe('Zg');
     expect(toBase64Url(toUtf8Bytes('fo'))).toBe('Zm8');
@@ -81,29 +81,29 @@ describe('toBase64Url', () => {
 });
 
 describe('timingSafeEqual', () => {
-  it('reconnaît deux tampons identiques', () => {
+  it('recognises two identical buffers', () => {
     expect(timingSafeEqual(Uint8Array.of(1, 2, 3), Uint8Array.of(1, 2, 3))).toBe(true);
   });
 
-  it('rejette une divergence sur le dernier octet', () => {
+  it('rejects a difference in the last byte', () => {
     expect(timingSafeEqual(Uint8Array.of(1, 2, 3), Uint8Array.of(1, 2, 4))).toBe(false);
   });
 
-  it('rejette une divergence sur le premier octet', () => {
+  it('rejects a difference in the first byte', () => {
     expect(timingSafeEqual(Uint8Array.of(9, 2, 3), Uint8Array.of(1, 2, 3))).toBe(false);
   });
 
-  it('rejette des longueurs différentes', () => {
+  it('rejects differing lengths', () => {
     expect(timingSafeEqual(Uint8Array.of(1, 2), Uint8Array.of(1, 2, 3))).toBe(false);
   });
 
-  it('reconnaît deux tampons vides', () => {
+  it('recognises two empty buffers', () => {
     expect(timingSafeEqual(new Uint8Array(0), new Uint8Array(0))).toBe(true);
   });
 });
 
 describe('concatBytes', () => {
-  it('concatène dans l’ordre', () => {
+  it('concatenates in order', () => {
     expect(concatBytes(Uint8Array.of(1), Uint8Array.of(2, 3), new Uint8Array(0))).toEqual(
       Uint8Array.of(1, 2, 3),
     );

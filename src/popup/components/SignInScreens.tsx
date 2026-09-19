@@ -1,39 +1,38 @@
 /**
- * @file Les deux écrans d'avant-coffre : déverrouillage et second facteur.
+ * @file The two pre-vault screens: unlock and second factor.
  *
- * Réunis dans un fichier parce qu'ils forment une seule séquence — le second
- * facteur n'apparaît qu'après une première tentative — et partagent l'en-tête
- * et la restitution d'erreur.
+ * Kept in one file because they form a single sequence — the second factor only
+ * appears after a first attempt — and share the header and the error reporting.
  *
- * Aucun des deux ne détient de secret au-delà de la frappe en cours : ils
- * remontent la saisie, et c'est `App` qui appelle `unlock()`.
+ * Neither of them holds a secret beyond the keystrokes in progress: they raise
+ * the entry, and it is `App` that calls `unlock()`.
  */
 
-import { IconOeil } from './Icons.js';
+import { IconEye } from './Icons.js';
 
-/** En-tête commun : le nom, et l'accès aux paramètres. */
-function EnTete({ onOptions }: { onOptions: () => void }) {
+/** Shared header: the name, and the way to the settings. */
+function Header({ onOptions }: { onOptions: () => void }) {
   return (
     <header>
       <h1>Zwarden</h1>
-      <button class="discret" onClick={onOptions}>
-        Paramètres
+      <button class="quiet" onClick={onOptions}>
+        Settings
       </button>
     </header>
   );
 }
 
-/** Messages d'état et d'erreur, dans cet ordre, sous le formulaire. */
-function Statut({ busy, error }: { busy: string | null; error: string | null }) {
+/** Status and error messages, in that order, below the form. */
+function Status({ busy, error }: { busy: string | null; error: string | null }) {
   return (
     <>
-      {busy !== null && <p class="statut">{busy}</p>}
-      {error !== null && <p class="erreur">{error}</p>}
+      {busy !== null && <p class="status">{busy}</p>}
+      {error !== null && <p class="error">{error}</p>}
     </>
   );
 }
 
-export function EcranDeverrouillage({
+export function UnlockScreen({
   serverUrl,
   email,
   password,
@@ -62,7 +61,7 @@ export function EcranDeverrouillage({
 }) {
   return (
     <div>
-      <EnTete onOptions={onOptions} />
+      <Header onOptions={onOptions} />
       <main>
         <form
           onSubmit={(e) => {
@@ -71,17 +70,17 @@ export function EcranDeverrouillage({
           }}
         >
           <label>
-            Serveur
+            Server
             <input
               type="url"
-              placeholder="https://coffre.exemple.fr"
+              placeholder="https://vault.example.com"
               value={serverUrl}
               onInput={(e) => onServerUrl(e.currentTarget.value)}
               required
             />
           </label>
           <label>
-            E-mail
+            Email
             <input
               type="email"
               value={email}
@@ -90,8 +89,8 @@ export function EcranDeverrouillage({
             />
           </label>
           <label>
-            Mot de passe maître
-            <div class="champ-mdp">
+            Master password
+            <div class="password-field">
               <input
                 type={showPassword ? 'text' : 'password'}
                 value={password}
@@ -100,27 +99,27 @@ export function EcranDeverrouillage({
               />
               <button
                 type="button"
-                class="oeil"
-                title={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                class="eye"
+                title={showPassword ? 'Hide the password' : 'Show the password'}
                 onClick={onToggleShowPassword}
               >
-                <IconOeil barre={showPassword} />
+                <IconEye struck={showPassword} />
               </button>
             </div>
           </label>
           <button type="submit" disabled={busy !== null}>
-            Déverrouiller
+            Unlock
           </button>
         </form>
-        <Statut busy={busy} error={error} />
+        <Status busy={busy} error={error} />
       </main>
     </div>
   );
 }
 
-export function EcranSecondFacteur({
-  saisissables,
-  libelles,
+export function TwoFactorScreen({
+  available,
+  labels,
   choice,
   code,
   remember,
@@ -133,9 +132,9 @@ export function EcranSecondFacteur({
   onBack,
   onOptions,
 }: {
-  /** Fournisseurs dont la popup sait recueillir le code. */
-  saisissables: readonly string[];
-  libelles: Readonly<Record<string, string>>;
+  /** Providers whose code the popup knows how to collect. */
+  available: readonly string[];
+  labels: Readonly<Record<string, string>>;
   choice: string;
   code: string;
   remember: boolean;
@@ -150,13 +149,13 @@ export function EcranSecondFacteur({
 }) {
   return (
     <div>
-      <EnTete onOptions={onOptions} />
+      <Header onOptions={onOptions} />
       <main>
-        <p class="statut">Authentification à deux facteurs requise.</p>
-        {saisissables.length === 0 ? (
-          <p class="erreur">
-            Seul WebAuthn est proposé par ce compte, et il n’est pas encore pris en charge.
-            Activer le mode OTP de la YubiKey ou le TOTP sur le serveur.
+        <p class="status">Two-factor authentication required.</p>
+        {available.length === 0 ? (
+          <p class="error">
+            This account offers WebAuthn only, which is not supported yet. Enable the YubiKey's OTP
+            mode, or TOTP on the server.
           </p>
         ) : (
           <form
@@ -166,11 +165,11 @@ export function EcranSecondFacteur({
             }}
           >
             <label>
-              Méthode
+              Method
               <select value={choice} onInput={(e) => onChoice(e.currentTarget.value)}>
-                {saisissables.map((p) => (
+                {available.map((p) => (
                   <option key={p} value={p}>
-                    {libelles[p]}
+                    {labels[p]}
                   </option>
                 ))}
               </select>
@@ -186,23 +185,23 @@ export function EcranSecondFacteur({
                 required
               />
             </label>
-            <label class="ligne">
+            <label class="row">
               <input
                 type="checkbox"
                 checked={remember}
                 onInput={(e) => onRemember(e.currentTarget.checked)}
               />
-              Se souvenir de cet appareil
+              Remember this device
             </label>
             <button type="submit" disabled={busy !== null || code.trim() === ''}>
-              Valider
+              Submit
             </button>
           </form>
         )}
-        <button class="discret" onClick={onBack}>
-          ← Retour
+        <button class="quiet" onClick={onBack}>
+          ← Back
         </button>
-        <Statut busy={busy} error={error} />
+        <Status busy={busy} error={error} />
       </main>
     </div>
   );

@@ -1,302 +1,300 @@
 // @vitest-environment jsdom
 
 /**
- * @file Tests des heuristiques du détecteur d'identifiants.
+ * @file Tests for the credential detector's heuristics.
  *
- * Ces cas étaient jusqu'ici invérifiables autrement qu'à la main sur un vrai
- * site — et c'est exactement pour cette raison qu'un commentaire du détecteur
- * avait pu promettre une garde que le code n'appliquait pas. Ce fichier existe
- * pour que la promesse et le code ne puissent plus diverger discrètement.
+ * These cases used to be unverifiable other than by hand on a real site — and
+ * that is exactly why a comment in the detector had been able to promise a guard
+ * the code did not apply. This file exists so that the promise and the code can
+ * no longer drift apart quietly.
  *
- * `offsetParent` n'existe pas sous jsdom, qui n'implémente aucune mise en page :
- * le test de visibilité est donc injecté. Les cas de champ masqué sont couverts
- * en le pilotant explicitement.
+ * `offsetParent` does not exist under jsdom, which implements no layout: the
+ * visibility test is therefore injected. The hidden-field cases are covered by
+ * driving it explicitly.
  */
 
 import { describe, expect, it } from 'vitest';
 
 import {
   type VisibilityTest,
-  estBasculeAffichage,
   filledPasswords,
   findCapture,
   guessUsername,
+  isVisibilityToggle,
 } from '../src/content/heuristics.js';
 
-/** Tout est visible : le cas normal d'une page de connexion affichée. */
-const TOUT_VISIBLE: VisibilityTest = () => true;
+/** Everything is visible: the normal case of a displayed sign-in page. */
+const ALL_VISIBLE: VisibilityTest = () => true;
 
-/** Construit un sous-arbre détaché depuis du HTML, et rend son élément racine. */
+/** Builds a detached subtree from HTML, and returns its root element. */
 function fragment(html: string): HTMLElement {
-  const hote = document.createElement('div');
-  hote.innerHTML = html;
-  document.body.replaceChildren(hote);
-  return hote;
+  const host = document.createElement('div');
+  host.innerHTML = html;
+  document.body.replaceChildren(host);
+  return host;
 }
 
-/** Remplit les champs nommés, comme le ferait une saisie utilisateur. */
-function saisir(racine: ParentNode, valeurs: Record<string, string>): void {
-  for (const [nom, valeur] of Object.entries(valeurs)) {
-    const champ = racine.querySelector<HTMLInputElement>(`[name="${nom}"]`);
-    if (champ === null) {
-      throw new Error(`Champ absent du fragment : ${nom}`);
+/** Fills the named fields, as a user's typing would. */
+function type(root: ParentNode, values: Record<string, string>): void {
+  for (const [name, value] of Object.entries(values)) {
+    const field = root.querySelector<HTMLInputElement>(`[name="${name}"]`);
+    if (field === null) {
+      throw new Error(`Field missing from the fragment: ${name}`);
     }
-    champ.value = valeur;
+    field.value = value;
   }
 }
 
-describe('findCapture — formulaire de connexion ordinaire', () => {
-  it('capture l’identifiant et le mot de passe', () => {
+describe('findCapture — ordinary sign-in form', () => {
+  it('captures the username and the password', () => {
     const f = fragment(`
       <form>
         <input name="u" type="text">
         <input name="p" type="password">
-        <button type="submit">Se connecter</button>
+        <button type="submit">Sign in</button>
       </form>`);
-    saisir(f, { u: 'alice@exemple.fr', p: 'secret-1' });
+    type(f, { u: 'alice@example.com', p: 'secret-1' });
 
-    expect(findCapture(f, null, TOUT_VISIBLE)).toEqual({
-      username: 'alice@exemple.fr',
+    expect(findCapture(f, null, ALL_VISIBLE)).toEqual({
+      username: 'alice@example.com',
       password: 'secret-1',
     });
   });
 
-  it('ne capture rien sans mot de passe saisi', () => {
+  it('captures nothing when no password was entered', () => {
     const f = fragment('<form><input name="u" type="text"><input name="p" type="password"></form>');
-    saisir(f, { u: 'alice', p: '' });
+    type(f, { u: 'alice', p: '' });
 
-    expect(findCapture(f, null, TOUT_VISIBLE)).toBeNull();
+    expect(findCapture(f, null, ALL_VISIBLE)).toBeNull();
   });
 
-  it('ignore un champ mot de passe masqué', () => {
+  it('ignores a hidden password field', () => {
     const f = fragment(`
       <form>
         <input name="visible" type="password">
-        <input name="cache" type="password">
+        <input name="hidden" type="password">
       </form>`);
-    saisir(f, { visible: '', cache: 'piège' });
-    const masque: VisibilityTest = (el) => el.getAttribute('name') !== 'cache';
+    type(f, { visible: '', hidden: 'trap' });
+    const masked: VisibilityTest = (el) => el.getAttribute('name') !== 'hidden';
 
-    expect(findCapture(f, null, masque)).toBeNull();
+    expect(findCapture(f, null, masked)).toBeNull();
   });
 });
 
-describe('findCapture — création de compte', () => {
-  it('capture quand les deux mots de passe concordent', () => {
+describe('findCapture — account creation', () => {
+  it('captures when both passwords agree', () => {
     const f = fragment(`
       <form>
         <input name="u" type="email">
         <input name="p1" type="password">
         <input name="p2" type="password">
       </form>`);
-    saisir(f, { u: 'a@b.fr', p1: 'identique', p2: 'identique' });
+    type(f, { u: 'a@b.com', p1: 'identical', p2: 'identical' });
 
-    expect(findCapture(f, null, TOUT_VISIBLE)?.password).toBe('identique');
+    expect(findCapture(f, null, ALL_VISIBLE)?.password).toBe('identical');
   });
 
   /**
-   * Saisie encore incomplète : le site va la refuser. Proposer un enregistrement
-   * reviendrait à retenir un mot de passe qui n'a jamais été accepté.
+   * The entry is still incomplete: the site is going to refuse it. Offering to
+   * save would amount to keeping a password that was never accepted.
    */
-  it('ne capture rien quand la confirmation diffère', () => {
+  it('captures nothing when the confirmation differs', () => {
     const f = fragment(`
       <form>
         <input name="p1" type="password">
         <input name="p2" type="password">
       </form>`);
-    saisir(f, { p1: 'secret-1', p2: 'secret-2' });
+    type(f, { p1: 'secret-1', p2: 'secret-2' });
 
-    expect(findCapture(f, null, TOUT_VISIBLE)).toBeNull();
+    expect(findCapture(f, null, ALL_VISIBLE)).toBeNull();
   });
 });
 
-describe('estBasculeAffichage — le faux positif du repli sur le clic', () => {
+describe('isVisibilityToggle — the click fallback’s false positive', () => {
   /**
-   * Le cas qui motive toute cette garde : cliquer sur l'œil « afficher le mot de
-   * passe » déclenchait une capture et allumait la pastille, alors que
-   * l'utilisateur n'avait rien soumis.
+   * The case that motivates this whole guard: clicking the "show password" eye
+   * triggered a capture and lit the badge, while the user had submitted nothing.
    */
-  it('écarte un œil « afficher » logé dans le bloc du champ', () => {
+  it('rules out a "show" eye lodged in the field’s block', () => {
     const f = fragment(`
       <form>
         <input name="u" type="text">
-        <div class="champ">
+        <div class="field">
           <input name="p" type="password">
-          <button type="button" class="oeil">afficher</button>
+          <button type="button" class="eye">show</button>
         </div>
-        <button type="submit">Entrer</button>
+        <button type="submit">Enter</button>
       </form>`);
-    saisir(f, { u: 'alice', p: 'secret-1' });
-    const oeil = f.querySelector('.oeil')!;
+    type(f, { u: 'alice', p: 'secret-1' });
+    const eye = f.querySelector('.eye')!;
 
-    expect(findCapture(f, oeil, TOUT_VISIBLE)).toBeNull();
+    expect(findCapture(f, eye, ALL_VISIBLE)).toBeNull();
   });
 
-  it('écarte tout bouton à deux états', () => {
+  it('rules out any two-state button', () => {
     const f = fragment(`
       <form>
         <input name="p" type="password">
-        <button type="button" aria-pressed="false" class="bascule">voir</button>
+        <button type="button" aria-pressed="false" class="toggle">view</button>
       </form>`);
-    saisir(f, { p: 'secret-1' });
-    const bascule = f.querySelector('.bascule')!;
+    type(f, { p: 'secret-1' });
+    const toggle = f.querySelector('.toggle')!;
 
-    expect(findCapture(f, bascule, TOUT_VISIBLE)).toBeNull();
+    expect(findCapture(f, toggle, ALL_VISIBLE)).toBeNull();
   });
 
-  it('laisse passer le bouton de soumission', () => {
+  it('lets the submit button through', () => {
     const f = fragment(`
       <form>
         <input name="u" type="text">
         <input name="p" type="password">
-        <button type="submit" class="envoi">Se connecter</button>
+        <button type="submit" class="send">Sign in</button>
       </form>`);
-    saisir(f, { u: 'alice', p: 'secret-1' });
-    const envoi = f.querySelector('.envoi')!;
+    type(f, { u: 'alice', p: 'secret-1' });
+    const send = f.querySelector('.send')!;
 
-    expect(findCapture(f, envoi, TOUT_VISIBLE)?.password).toBe('secret-1');
+    expect(findCapture(f, send, ALL_VISIBLE)?.password).toBe('secret-1');
   });
 
-  /** Un bouton hors du bloc du champ reste une soumission plausible. */
-  it('laisse passer un bouton sans type, hors du bloc du champ', () => {
+  /** A button outside the field's block remains a plausible submission. */
+  it('lets a type-less button outside the field’s block through', () => {
     const f = fragment(`
       <form>
         <div><input name="p" type="password"></div>
-        <button class="action">Continuer</button>
+        <button class="action">Continue</button>
       </form>`);
-    saisir(f, { p: 'secret-1' });
+    type(f, { p: 'secret-1' });
     const action = f.querySelector('.action')!;
 
-    expect(estBasculeAffichage(action, f.querySelector('[name="p"]')!)).toBe(false);
+    expect(isVisibilityToggle(action, f.querySelector('[name="p"]')!)).toBe(false);
   });
 });
 
 describe('guessUsername', () => {
-  it('préfère l’annotation explicite du site', () => {
+  it('prefers the site’s explicit annotation', () => {
     const f = fragment(`
       <form>
-        <input name="parasite" type="text">
-        <input name="vrai" type="text" autocomplete="username">
+        <input name="noise" type="text">
+        <input name="real" type="text" autocomplete="username">
         <input name="p" type="password">
       </form>`);
-    saisir(f, { parasite: 'à-ignorer', vrai: 'alice', p: 'x' });
+    type(f, { noise: 'to-ignore', real: 'alice', p: 'x' });
 
-    expect(guessUsername(f, f.querySelector('[name="p"]')!, TOUT_VISIBLE)).toBe('alice');
+    expect(guessUsername(f, f.querySelector('[name="p"]')!, ALL_VISIBLE)).toBe('alice');
   });
 
-  it('retient à défaut le dernier champ rempli avant le mot de passe', () => {
+  it('otherwise takes the last field filled before the password', () => {
     const f = fragment(`
       <form>
         <input name="a" type="text">
         <input name="b" type="email">
         <input name="p" type="password">
-        <input name="apres" type="text">
+        <input name="after" type="text">
       </form>`);
-    saisir(f, { a: 'premier', b: 'second@exemple.fr', p: 'x', apres: 'après' });
+    type(f, { a: 'first', b: 'second@example.com', p: 'x', after: 'after' });
 
-    expect(guessUsername(f, f.querySelector('[name="p"]')!, TOUT_VISIBLE)).toBe(
-      'second@exemple.fr',
+    expect(guessUsername(f, f.querySelector('[name="p"]')!, ALL_VISIBLE)).toBe(
+      'second@example.com',
     );
   });
 
   /**
-   * Certains sites placent le champ identifiant après le mot de passe dans le
-   * document tout en l'affichant avant. À défaut de candidat précédent, le
-   * premier champ rempli vaut mieux qu'une chaîne vide.
+   * Some sites place the username field after the password in the document while
+   * displaying it before. Failing a preceding candidate, the first filled field
+   * beats an empty string.
    */
-  it('se rabat sur le premier champ rempli si aucun ne précède', () => {
+  it('falls back to the first filled field when none precedes', () => {
     const f = fragment(`
       <form>
         <input name="p" type="password">
         <input name="u" type="text">
       </form>`);
-    saisir(f, { p: 'x', u: 'alice' });
+    type(f, { p: 'x', u: 'alice' });
 
-    expect(guessUsername(f, f.querySelector('[name="p"]')!, TOUT_VISIBLE)).toBe('alice');
+    expect(guessUsername(f, f.querySelector('[name="p"]')!, ALL_VISIBLE)).toBe('alice');
   });
 
   /**
-   * Le bogue constaté à l'usage : « il m'a mis le mot de passe dans le login ».
+   * The bug found in use: "it put the password in the login".
    *
-   * Motif « afficher le mot de passe » à deux champs — un `password` et un `text`
-   * miroir dont le site bascule la visibilité. Le miroir est rempli, visible, et
-   * placé avant le champ mot de passe : c'était donc le candidat parfait pour la
-   * règle de proximité, qui livrait le mot de passe comme identifiant. L'item
-   * créé portait alors le mot de passe en clair dans son champ identifiant.
+   * The two-field "show password" pattern — a `password` and a `text` mirror
+   * whose visibility the site toggles. The mirror is filled, visible, and placed
+   * before the password field: it was therefore the perfect candidate for the
+   * proximity rule, which handed the password over as the username. The item
+   * created then carried the password in the clear in its username field.
    */
-  it('n’accepte jamais un champ qui contient le mot de passe', () => {
+  it('never accepts a field holding the password', () => {
     const f = fragment(`
       <form>
         <input name="u" type="text">
-        <input name="miroir" type="text">
+        <input name="mirror" type="text">
         <input name="p" type="password">
       </form>`);
-    saisir(f, { u: 'alice@exemple.fr', miroir: 'S3cret!', p: 'S3cret!' });
+    type(f, { u: 'alice@example.com', mirror: 'S3cret!', p: 'S3cret!' });
 
-    expect(findCapture(f, null, TOUT_VISIBLE)).toEqual({
-      username: 'alice@exemple.fr',
+    expect(findCapture(f, null, ALL_VISIBLE)).toEqual({
+      username: 'alice@example.com',
       password: 'S3cret!',
     });
   });
 
-  /** Même piège, sans identifiant à récupérer : mieux vaut vide que faux. */
-  it('rend vide plutôt que le mot de passe quand le miroir est seul', () => {
+  /** Same trap, with no username to recover: empty beats wrong. */
+  it('returns empty rather than the password when the mirror stands alone', () => {
     const f = fragment(`
       <form>
-        <input name="miroir" type="text">
+        <input name="mirror" type="text">
         <input name="p" type="password">
       </form>`);
-    saisir(f, { miroir: 'S3cret!', p: 'S3cret!' });
+    type(f, { mirror: 'S3cret!', p: 'S3cret!' });
 
-    expect(findCapture(f, null, TOUT_VISIBLE)?.username).toBe('');
+    expect(findCapture(f, null, ALL_VISIBLE)?.username).toBe('');
   });
 
-  /** Le site annonce lui-même le champ comme un mot de passe : on le croit. */
-  it('écarte un champ annoté comme mot de passe', () => {
+  /** The site itself announces the field as a password: we believe it. */
+  it('rules out a field annotated as a password', () => {
     const f = fragment(`
       <form>
-        <input name="nouveau" type="text" autocomplete="new-password">
+        <input name="new" type="text" autocomplete="new-password">
         <input name="p" type="password">
       </form>`);
-    saisir(f, { nouveau: 'autre-chose', p: 'S3cret!' });
+    type(f, { new: 'something-else', p: 'S3cret!' });
 
-    expect(findCapture(f, null, TOUT_VISIBLE)?.username).toBe('');
+    expect(findCapture(f, null, ALL_VISIBLE)?.username).toBe('');
   });
 
   /**
-   * Hors formulaire, le balayage porte sur tout le document : un champ de
-   * recherche où l'utilisateur aurait collé son mot de passe ne doit pas
-   * ressortir comme identifiant.
+   * Outside a form, the sweep covers the whole document: a search box where the
+   * user happened to paste their password must not come back as the username.
    */
-  it('ne reprend pas le mot de passe trouvé ailleurs dans la page', () => {
+  it('does not pick up the password found elsewhere in the page', () => {
     fragment(`
       <div>
-        <input name="recherche" type="text">
+        <input name="search" type="text">
         <div><input name="p" type="password"></div>
       </div>`);
-    saisir(document, { recherche: 'S3cret!', p: 'S3cret!' });
+    type(document, { search: 'S3cret!', p: 'S3cret!' });
 
-    expect(findCapture(document, null, TOUT_VISIBLE)?.username).toBe('');
+    expect(findCapture(document, null, ALL_VISIBLE)?.username).toBe('');
   });
 
-  it('rend une chaîne vide quand rien ne ressemble à un identifiant', () => {
+  it('returns an empty string when nothing looks like a username', () => {
     const f = fragment('<form><input name="p" type="password"></form>');
-    saisir(f, { p: 'x' });
+    type(f, { p: 'x' });
 
-    expect(guessUsername(f, f.querySelector('[name="p"]')!, TOUT_VISIBLE)).toBe('');
+    expect(guessUsername(f, f.querySelector('[name="p"]')!, ALL_VISIBLE)).toBe('');
   });
 });
 
 describe('filledPasswords', () => {
-  it('rend les champs remplis dans l’ordre du document', () => {
+  it('returns the filled fields in document order', () => {
     const f = fragment(`
       <form>
         <input name="p1" type="password">
-        <input name="vide" type="password">
+        <input name="empty" type="password">
         <input name="p2" type="password">
       </form>`);
-    saisir(f, { p1: 'un', vide: '', p2: 'deux' });
+    type(f, { p1: 'one', empty: '', p2: 'two' });
 
-    expect(filledPasswords(f, TOUT_VISIBLE).map((i) => i.value)).toEqual(['un', 'deux']);
+    expect(filledPasswords(f, ALL_VISIBLE).map((i) => i.value)).toEqual(['one', 'two']);
   });
 });

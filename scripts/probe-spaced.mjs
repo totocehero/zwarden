@@ -1,11 +1,10 @@
 /**
- * Re-sonde les paramètres douteux en espaçant les requêtes.
+ * Re-probes the doubtful parameters, spacing the requests out.
  *
- * La première sonde a saturé le limiteur de débit de Vaultwarden
- * (LOGIN_RATELIMIT_MAX_BURST, 10 par défaut), rendant ses conclusions
- * inexploitables au-delà de la dixième requête. On espace donc, et on
- * ré-éprouve une valeur de contrôle connue pour bonne à chaque tour afin de
- * distinguer un vrai refus d'un throttling.
+ * The first probe saturated Vaultwarden's rate limiter
+ * (LOGIN_RATELIMIT_MAX_BURST, 10 by default), making its conclusions unusable
+ * past the tenth request. So we space them out, and re-test a control value
+ * known to be good on every round, to tell a genuine refusal from throttling.
  */
 
 import { webcrypto as crypto } from 'node:crypto';
@@ -47,7 +46,7 @@ const authEmail = Buffer.from(EMAIL, 'utf8')
   .replace(/\//g, '_')
   .replace(/=+$/, '');
 
-async function essai(overrides) {
+async function attempt(overrides) {
   const form = new URLSearchParams({
     grant_type: 'password',
     username: EMAIL,
@@ -73,8 +72,8 @@ async function essai(overrides) {
   return { ok: response.ok, status: response.status, body: body.slice(0, 200) };
 }
 
-// Chaque cas est précédé d'un contrôle connu bon. Si le contrôle échoue,
-// le résultat du cas testé n'est pas interprétable.
+// Every case is preceded by a known-good control. If the control fails, the
+// tested case's result cannot be interpreted.
 const cas = [
   ['client_id="zwarden", deviceType=2', {}],
   ['deviceType="99"', { deviceType: '99' }],
@@ -85,17 +84,17 @@ console.log(`Serveur : ${SERVER}\n`);
 
 for (const [label, overrides] of cas) {
   await pause(12_000);
-  const contrôle = await essai({});
+  const control = await attempt({});
   await pause(12_000);
-  const résultat = await essai(overrides);
+  const result = await attempt(overrides);
 
-  if (!contrôle.ok) {
-    console.log(`  INDÉTERMINÉ  ${label} — contrôle en échec (${contrôle.status}), throttling`);
+  if (!control.ok) {
+    console.log(`  INCONCLUSIVE  ${label} — control failed (${control.status}), throttling`);
     continue;
   }
 
   console.log(
-    `  ${résultat.ok ? 'ACCEPTÉ' : 'REFUSÉ '}  ${label}` +
-      (résultat.ok ? '' : ` — HTTP ${résultat.status} ${résultat.body}`),
+    `  ${result.ok ? 'ACCEPTED' : 'REFUSED '}  ${label}` +
+      (result.ok ? '' : ` — HTTP ${result.status} ${result.body}`),
   );
 }

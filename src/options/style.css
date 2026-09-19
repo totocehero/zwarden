@@ -1,14 +1,14 @@
-/* Page de paramètres Zwarden. Mêmes jetons de couleur que la popup. */
+/* Zwarden settings page. Same colour tokens as the popup. */
 
 :root {
-  --fond: #1c1f26;
-  --panneau: #262a33;
-  --texte: #e6e8ee;
-  --texte-2: #9aa1af;
+  --background: #1c1f26;
+  --panel: #262a33;
+  --text: #e6e8ee;
+  --text-2: #9aa1af;
   --accent: #4f8cff;
-  --erreur: #ff6b6b;
+  --error: #ff6b6b;
   --ok: #5dd39e;
-  --bord: #3a3f4b;
+  --border: #3a3f4b;
 }
 
 * {
@@ -18,8 +18,8 @@
 body {
   margin: 0;
   font: 14px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif;
-  background: var(--fond);
-  color: var(--texte);
+  background: var(--background);
+  color: var(--text);
 }
 
 .page {
@@ -34,14 +34,14 @@ h1 {
 }
 
 .version {
-  color: var(--texte-2);
+  color: var(--text-2);
   font-size: 12px;
   margin: 0 0 20px;
 }
 
 section {
-  background: var(--panneau);
-  border: 1px solid var(--bord);
+  background: var(--panel);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 16px;
   margin-bottom: 16px;
@@ -53,7 +53,7 @@ h2 {
 }
 
 form,
-.champs {
+.fields {
   display: grid;
   gap: 10px;
 }
@@ -61,29 +61,29 @@ form,
 label {
   display: grid;
   gap: 3px;
-  color: var(--texte-2);
+  color: var(--text-2);
   font-size: 12px;
 }
 
-label.ligne {
+label.row {
   display: flex;
   flex-direction: row;
   align-items: center;
   gap: 6px;
-  color: var(--texte);
+  color: var(--text);
 }
 
-label.ligne input {
+label.row input {
   width: auto;
 }
 
 input,
 select {
   padding: 7px 9px;
-  border: 1px solid var(--bord);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--fond);
-  color: var(--texte);
+  background: var(--background);
+  color: var(--text);
   font-size: 13px;
 }
 
@@ -105,27 +105,27 @@ button {
   justify-self: start;
 }
 
-button.secondaire {
+button.secondary {
   background: transparent;
-  border: 1px solid var(--bord);
-  color: var(--texte);
+  border: 1px solid var(--border);
+  color: var(--text);
   font-weight: 400;
 }
 
 button.danger {
   background: transparent;
-  border: 1px solid var(--erreur);
-  color: var(--erreur);
+  border: 1px solid var(--error);
+  color: var(--error);
   font-weight: 400;
 }
 
-.aide {
-  color: var(--texte-2);
+.hint {
+  color: var(--text-2);
   font-size: 12px;
   margin: 2px 0 0;
 }
 
-.statut {
+.status {
   color: var(--ok);
   font-size: 13px;
   min-height: 20px;
@@ -135,7 +135,7 @@ button.danger {
 .device-id {
   font-family: ui-monospace, 'Cascadia Mono', monospace;
   font-size: 12px;
-  color: var(--texte-2);
+  color: var(--text-2);
   user-select: all;
 }
 

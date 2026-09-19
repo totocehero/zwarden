@@ -1,19 +1,18 @@
 /**
- * @file Build de l'extension.
+ * @file The extension's build.
  *
- * Cinq entrées : les deux pages HTML (popup, options), le service worker
- * (module ES, nommé `background.js` à la racine de `dist/` pour correspondre
- * au manifest) et le détecteur d'identifiants (`content.js`, injecté à la
- * demande par le worker) et le document hors écran (`offscreen.js`, qui donne
- * au worker l'accès au presse-papiers). `public/` — manifest et
- * `offscreen.html` inclus — est copié tel quel à la racine de `dist/`.
+ * Five entry points: the two HTML pages (popup, options), the service worker
+ * (an ES module, named `background.js` at the root of `dist/` to match the
+ * manifest), the credential detector (`content.js`, injected on demand by the
+ * worker) and the offscreen document (`offscreen.js`, which gives the worker
+ * access to the clipboard). `public/` — manifest and `offscreen.html`
+ * included — is copied as-is to the root of `dist/`.
  *
- * Le détecteur ne doit **importer personne** : un script de contenu n'est pas
- * un module ES, un `import` dans le fichier émis le casserait silencieusement
- * en production.
+ * The detector must **import nobody**: a content script is not an ES module, and
+ * an `import` in the emitted file would break it silently in production.
  *
- * Charger dans Chrome : `chrome://extensions` → mode développeur → « Charger
- * l'extension non empaquetée » → sélectionner `dist/`.
+ * Loading it in Chrome: `chrome://extensions` → developer mode → "Load unpacked"
+ * → select `dist/`.
  */
 
 import { fileURLToPath } from 'node:url';
@@ -30,8 +29,8 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     target: 'es2022',
-    // Pas de polyfill de préchargement : les pages d'extension chargent en
-    // local, le préchargement n'apporte rien et pèse.
+    // No preload polyfill: extension pages load locally, so preloading brings
+    // nothing and weighs something.
     modulePreload: false,
     rollupOptions: {
       input: {
@@ -49,8 +48,8 @@ export default defineConfig({
           if (chunk.name === 'content') {
             return 'content.js';
           }
-          // Nommé à la racine : `offscreen.html`, copié depuis `public/`, le
-          // référence par un chemin relatif.
+          // Named at the root: `offscreen.html`, copied from `public/`,
+          // references it by a relative path.
           return chunk.name === 'offscreen' ? 'offscreen.js' : 'assets/[name]-[hash].js';
         },
       },

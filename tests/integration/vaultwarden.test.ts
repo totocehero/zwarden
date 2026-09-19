@@ -1,32 +1,30 @@
 /**
- * @file Validation d'interopérabilité contre une vraie instance Vaultwarden.
+ * @file Interoperability validation against a real Vaultwarden instance.
  *
- * ## Pourquoi ce test existe
+ * ## Why this test exists
  *
- * Les tests unitaires prouvent la conformité aux RFC et la cohérence interne.
- * Ils ne prouvent **pas** qu'un coffre réel s'ouvre : la chaîne complète
- * (paramètres KDF du serveur → clé maître → clé étirée → clé du coffre →
- * champs des items) ne peut être validée que de bout en bout. C'est le seul
- * test capable de détecter une divergence de normalisation, de sel ou d'ordre
- * de dérivation.
+ * The unit tests prove RFC conformance and internal coherence. They do **not**
+ * prove that a real vault opens: the complete chain (the server's KDF parameters
+ * → master key → stretched key → vault key → item fields) can only be validated
+ * end to end. This is the only test able to detect a divergence in
+ * normalisation, in salt, or in derivation order.
  *
- * ## Exécution
+ * ## Running it
  *
- * Ignoré par défaut. Nécessite un compte **jetable**, jamais un compte réel :
+ * Skipped by default. Requires a **throwaway** account, never a real one:
  *
  * ```bash
- * export ZWARDEN_TEST_SERVER=https://vault.exemple.fr
- * export ZWARDEN_TEST_EMAIL=compte+test@exemple.fr
+ * export ZWARDEN_TEST_SERVER=https://vault.example.com
+ * export ZWARDEN_TEST_EMAIL=account+test@example.com
  * export ZWARDEN_TEST_PASSWORD='...'
  * npx vitest run tests/integration
  * ```
  *
- * ## Discipline sur les secrets
+ * ## Discipline about secrets
  *
- * Aucun secret n'est écrit sur disque ni journalisé. Les assertions portent sur
- * des propriétés structurelles (longueurs, préfixes de type, nombre d'items) et
- * jamais sur des valeurs déchiffrées. Le rapport affiché est volontairement
- * expurgé.
+ * No secret is written to disk nor logged. The assertions are on structural
+ * properties (lengths, type prefixes, item counts) and never on decrypted
+ * values. The report printed is deliberately redacted.
  */
 
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -57,14 +55,14 @@ const PASSWORD = process.env['ZWARDEN_TEST_PASSWORD'];
 
 const configured = Boolean(SERVER && EMAIL && PASSWORD);
 
-/** Décrit un KDF sans révéler d'information sensible. */
+/** Describes a KDF without revealing anything sensitive. */
 function describeKdf(config: KdfConfig): string {
   return config.type === KdfType.PBKDF2_SHA256
-    ? `PBKDF2-SHA256, ${config.iterations.toLocaleString('fr-FR')} itérations`
+    ? `PBKDF2-SHA256, ${config.iterations.toLocaleString('en-GB')} iterations`
     : `Argon2id, t=${config.iterations} m=${config.memoryMiB}MiB p=${config.parallelism}`;
 }
 
-describe.skipIf(!configured)('interopérabilité Vaultwarden', () => {
+describe.skipIf(!configured)('Vaultwarden interoperability', () => {
   let client: ApiClient;
   let kdfConfig: KdfConfig;
   let masterKey: SymmetricCryptoKey;
@@ -79,21 +77,21 @@ describe.skipIf(!configured)('interopérabilité Vaultwarden', () => {
     });
   });
 
-  it('récupère les paramètres KDF via prelogin', async () => {
+  it('fetches the KDF parameters through prelogin', async () => {
     kdfConfig = await client.prelogin(EMAIL!);
 
     expect(kdfConfig.iterations).toBeGreaterThan(0);
-    console.log(`  KDF annoncé : ${describeKdf(kdfConfig)}`);
+    console.log(`  KDF announced: ${describeKdf(kdfConfig)}`);
   });
 
-  it('dérive une clé maître de 32 octets', async () => {
+  it('derives a 32-byte master key', async () => {
     masterKey = await deriveMasterKey(PASSWORD!, EMAIL!, kdfConfig);
 
     expect(masterKey.key).toHaveLength(32);
     expect(masterKey.isAuthenticated).toBe(false);
   });
 
-  it("s'authentifie et reçoit la clé de coffre enveloppée", async () => {
+  it('authenticates and receives the wrapped vault key', async () => {
     const serverHash = await derivePasswordHash(
       masterKey,
       PASSWORD!,
@@ -104,60 +102,60 @@ describe.skipIf(!configured)('interopérabilité Vaultwarden', () => {
     expect(session.accessToken.length).toBeGreaterThan(0);
     expect(session.protectedUserKey).toBeDefined();
 
-    // Le serveur a validé notre hash : la dérivation de la clé maître est
-    // donc identique à celle du client officiel. C'est la première preuve
-    // d'interopérabilité.
-    console.log('  Authentification acceptée par le serveur');
+    // The server validated our hash: the master key derivation is therefore
+    // identical to the official client's. That is the first proof of
+    // interoperability.
+    console.log('  Authentication accepted by the server');
   });
 
-  it('déchiffre la clé du coffre avec la clé maître étirée', async () => {
+  it('decrypts the vault key with the stretched master key', async () => {
     const stretched = await stretchMasterKey(masterKey);
     expect(stretched.key).toHaveLength(64);
 
     const wrapped = EncString.parse(session.protectedUserKey!);
-    console.log(`  Clé de coffre enveloppée en type ${wrapped.encryptionType}`);
+    console.log(`  Vault key wrapped as type ${wrapped.encryptionType}`);
 
-    // Preuve décisive : si HKDF-Expand, l'ordre enc/mac ou le format
-    // divergeaient, la vérification du MAC échouerait ici.
+    // The decisive proof: if HKDF-Expand, the enc/mac order or the format
+    // diverged, MAC verification would fail right here.
     const raw = await decryptBytes(wrapped, stretched);
     userKey = new SymmetricCryptoKey(raw);
 
     expect(userKey.key).toHaveLength(64);
     expect(userKey.isAuthenticated).toBe(true);
-    console.log('  Clé de coffre déchiffrée : 64 octets, authentifiée');
+    console.log('  Vault key decrypted: 64 bytes, authenticated');
   });
 
-  it("l'orchestrateur unlock() reproduit le chemin manuel", async () => {
-    // Le chemin pas-à-pas ci-dessus valide chaque maillon ; celui-ci valide
-    // l'enchaînement packagé que l'extension utilisera réellement.
-    const résultat = await unlock(client, EMAIL!, PASSWORD!);
+  it('the unlock() orchestrator reproduces the manual path', async () => {
+    // The step-by-step path above validates every link; this one validates the
+    // packaged sequence the extension will actually use.
+    const result = await unlock(client, EMAIL!, PASSWORD!);
 
-    expect(résultat.userKey.toBase64()).toBe(userKey.toBase64());
-    expect(résultat.session.accessToken.length).toBeGreaterThan(0);
-    expect(résultat.localPasswordHash.length).toBeGreaterThan(0);
+    expect(result.userKey.toBase64()).toBe(userKey.toBase64());
+    expect(result.session.accessToken.length).toBeGreaterThan(0);
+    expect(result.localPasswordHash.length).toBeGreaterThan(0);
 
-    résultat.userKey.destroy();
-    console.log('  unlock() : clé de coffre identique au chemin manuel');
+    result.userKey.destroy();
+    console.log('  unlock(): vault key identical to the manual path');
   });
 
-  it('effectue un aller-retour complet en écriture puis lecture', async () => {
-    // Preuve la plus forte d'interopérabilité : on chiffre localement, on
-    // pousse au serveur, on resynchronise, et on redéchiffre. Si le format
-    // divergeait sur un seul point, l'un des deux bouts échouerait.
+  it('performs a complete write-then-read round trip', async () => {
+    // The strongest proof of interoperability: we encrypt locally, push to the
+    // server, resync, and decrypt again. If the format diverged on a single
+    // point, one of the two ends would fail.
     //
-    // Les valeurs sont générées aléatoirement pour éviter toute collision avec
-    // un contenu réel, et l'item est supprimé en fin de test.
-    const marqueur = `zwarden-interop-${crypto.randomUUID()}`;
-    const motDePasse = crypto.randomUUID();
+    // The values are randomly generated to avoid any collision with real
+    // content, and the item is deleted at the end of the test.
+    const marker = `zwarden-interop-${crypto.randomUUID()}`;
+    const password = crypto.randomUUID();
 
-    const corps = {
+    const body = {
       type: 1,
-      name: (await encryptString(marqueur, userKey)).toString(),
-      notes: (await encryptString('Item de test Zwarden, supprimé automatiquement.', userKey))
+      name: (await encryptString(marker, userKey)).toString(),
+      notes: (await encryptString('Zwarden test item, deleted automatically.', userKey))
         .toString(),
       login: {
-        username: (await encryptString('utilisateur@test.local', userKey)).toString(),
-        password: (await encryptString(motDePasse, userKey)).toString(),
+        username: (await encryptString('user@test.local', userKey)).toString(),
+        password: (await encryptString(password, userKey)).toString(),
         uris: [{ uri: (await encryptString('https://test.local', userKey)).toString(), match: null }],
       },
       favorite: false,
@@ -168,108 +166,107 @@ describe.skipIf(!configured)('interopérabilité Vaultwarden', () => {
       passwordHistory: [],
     };
 
-    const créé = await client.createCipher(session.accessToken, corps);
-    expect(créé.id).toBeTruthy();
-    console.log(`  Item créé côté serveur : ${créé.id}`);
+    const created = await client.createCipher(session.accessToken, body);
+    expect(created.id).toBeTruthy();
+    console.log(`  Item created server-side: ${created.id}`);
 
     try {
-      // Relecture par une synchronisation complète, pas depuis la réponse de
-      // création : on veut valider le trajet aller-retour réel.
+      // Read back through a full sync, not from the creation response: we want
+      // to validate the real round trip.
       const sync = await client.sync(session.accessToken);
-      const relu = (sync.ciphers ?? []).find((c) => c.id === créé.id);
-      expect(relu).toBeDefined();
+      const reread = (sync.ciphers ?? []).find((c) => c.id === created.id);
+      expect(reread).toBeDefined();
 
-      const erreurs: unknown[] = [];
-      const surErreur = (e: unknown) => erreurs.push(e);
-      const vue = await decryptCipherOverview(relu!, userKey, surErreur);
-      const détails = await decryptCipherDetails(relu!, userKey, surErreur);
+      const errors: unknown[] = [];
+      const onError = (e: unknown) => errors.push(e);
+      const view = await decryptCipherOverview(reread!, userKey, onError);
+      const details = await decryptCipherDetails(reread!, userKey, onError);
 
-      expect(erreurs).toHaveLength(0);
-      expect(vue.name).toBe(marqueur);
-      expect(détails.username).toBe('utilisateur@test.local');
-      expect(détails.password).toBe(motDePasse);
+      expect(errors).toHaveLength(0);
+      expect(view.name).toBe(marker);
+      expect(details.username).toBe('user@test.local');
+      expect(details.password).toBe(password);
 
-      console.log('  Aller-retour validé : nom, utilisateur et mot de passe identiques');
+      console.log('  Round trip validated: name, username and password identical');
 
-      // Mise à jour : nouveau nom et nouveau mot de passe, poussés puis relus
-      // par une synchronisation complète — le chemin exact de l'édition dans
-      // la popup.
-      const marqueurModifié = `${marqueur}-modifié`;
-      const nouveauMotDePasse = crypto.randomUUID();
+      // Update: a new name and a new password, pushed and then read back through
+      // a full sync — the exact path an edit takes in the popup.
+      const modifiedMarker = `${marker}-modified`;
+      const newPassword = crypto.randomUUID();
       const payload = await buildCipherUpdatePayload(
-        relu!,
+        reread!,
         {
-          name: marqueurModifié,
-          username: 'utilisateur@test.local',
-          password: nouveauMotDePasse,
+          name: modifiedMarker,
+          username: 'user@test.local',
+          password: newPassword,
           totp: '',
-          notes: 'Item de test Zwarden, supprimé automatiquement.',
+          notes: 'Zwarden test item, deleted automatically.',
           uris: ['https://test.local'],
         },
         userKey,
         true,
       );
-      await client.updateCipher(session.accessToken, créé.id, payload);
+      await client.updateCipher(session.accessToken, created.id, payload);
 
       const sync2 = await client.sync(session.accessToken);
-      const relu2 = (sync2.ciphers ?? []).find((c) => c.id === créé.id);
-      expect(relu2).toBeDefined();
+      const reread2 = (sync2.ciphers ?? []).find((c) => c.id === created.id);
+      expect(reread2).toBeDefined();
 
-      const vue2 = await decryptCipherOverview(relu2!, userKey, surErreur);
-      const détails2 = await decryptCipherDetails(relu2!, userKey, surErreur);
-      expect(erreurs).toHaveLength(0);
-      expect(vue2.name).toBe(marqueurModifié);
-      expect(détails2.password).toBe(nouveauMotDePasse);
+      const vue2 = await decryptCipherOverview(reread2!, userKey, onError);
+      const details2 = await decryptCipherDetails(reread2!, userKey, onError);
+      expect(errors).toHaveLength(0);
+      expect(vue2.name).toBe(modifiedMarker);
+      expect(details2.password).toBe(newPassword);
 
-      console.log('  Mise à jour poussée, relue et revalidée');
+      console.log('  Update pushed, read back and revalidated');
     } finally {
-      // Nettoyage systématique, y compris si une assertion a échoué.
-      await client.deleteCipher(session.accessToken, créé.id);
-      console.log('  Item de test supprimé');
+      // Systematic cleanup, including when an assertion has failed.
+      await client.deleteCipher(session.accessToken, created.id);
+      console.log('  Test item deleted');
     }
   });
 
-  it('déchiffre les items existants du coffre', async () => {
+  it('decrypts the vault existing items', async () => {
     const sync = await client.sync(session.accessToken);
     const ciphers = sync.ciphers ?? [];
 
-    console.log(`  ${ciphers.length} item(s) préexistant(s)`);
+    console.log(`  ${ciphers.length} pre-existing item(s)`);
 
-    // Un coffre vide est une condition d'environnement, pas un défaut du code.
-    // L'aller-retour ci-dessus couvre déjà le chemin complet.
+    // An empty vault is an environment condition, not a code defect. The round
+    // trip above already covers the complete path.
     if (ciphers.length === 0) {
-      console.log('  Coffre vide : rien à déchiffrer, test non concluant mais non bloquant');
+      console.log('  Empty vault: nothing to decrypt, inconclusive but not blocking');
       return;
     }
 
-    // Le service de la couche coffre gère la clé par item et la tolérance de
-    // casse ; c'est le chemin que l'extension utilisera réellement.
-    let échecs = 0;
+    // The vault layer's service handles the per-item key and the case
+    // tolerance; that is the path the extension will actually use.
+    let failures = 0;
     const vues = await decryptCipherList(ciphers, userKey, () => {
-      échecs++;
+      failures++;
     });
 
-    for (const vue of vues) {
-      if (vue.name !== null) {
-        // Seule la longueur est journalisée : le contenu reste secret.
+    for (const view of vues) {
+      if (view.name !== null) {
+        // Only the length is logged: the content stays secret.
         console.log(
-          `    item de type ${vue.type} — nom déchiffré, ${vue.name.length} caractère(s)`,
+          `    type ${view.type} item — name decrypted, ${view.name.length} character(s)`,
         );
       }
     }
 
-    const déchiffrés = vues.filter((v) => v.name !== null).length;
-    console.log(`  ${déchiffrés} déchiffré(s), ${échecs} échec(s)`);
-    expect(échecs).toBe(0);
-    expect(déchiffrés).toBe(ciphers.length);
+    const decryptedCount = vues.filter((v) => v.name !== null).length;
+    console.log(`  ${decryptedCount} decrypted, ${failures} failure(s)`);
+    expect(failures).toBe(0);
+    expect(decryptedCount).toBe(ciphers.length);
   });
 });
 
-describe.skipIf(configured)('interopérabilité Vaultwarden', () => {
-  it('est ignorée faute de configuration', () => {
+describe.skipIf(configured)('Vaultwarden interoperability', () => {
+  it('is skipped for want of configuration', () => {
     console.log(
-      '  Test d’interopérabilité ignoré. Définir ZWARDEN_TEST_SERVER, ' +
-        'ZWARDEN_TEST_EMAIL et ZWARDEN_TEST_PASSWORD pour l’activer.',
+      '  Interoperability test skipped. Set ZWARDEN_TEST_SERVER, ' +
+        'ZWARDEN_TEST_EMAIL and ZWARDEN_TEST_PASSWORD to enable it.',
     );
     expect(configured).toBe(false);
   });

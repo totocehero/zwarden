@@ -1,61 +1,60 @@
 /**
- * @file Clé symétrique du coffre.
+ * @file The vault's symmetric key.
  *
- * Deux formes coexistent dans l'écosystème Bitwarden, et la longueur du tampon
- * suffit à les distinguer — il n'y a pas de champ de type sur le fil :
+ * Two shapes coexist in the Bitwarden ecosystem, and the buffer length is enough
+ * to tell them apart — there is no type field on the wire:
  *
- * - **32 octets** : `encKey` seule. Chiffrement sans authentification (type 0).
- *   Forme legacy, conservée en lecture pour les coffres anciens. C'est aussi la
- *   forme de la clé maître brute issue du KDF, avant étirement.
- * - **64 octets** : `encKey` (32) ‖ `macKey` (32). Chiffrement authentifié
- *   (type 2). Forme utilisée pour tout ce que Zwarden écrit.
+ * - **32 bytes**: `encKey` alone. Unauthenticated encryption (type 0). A legacy
+ *   shape, kept read-only for old vaults. It is also the shape of the raw master
+ *   key out of the KDF, before stretching.
+ * - **64 bytes**: `encKey` (32) ‖ `macKey` (32). Authenticated encryption
+ *   (type 2). The shape used for everything Zwarden writes.
  *
- * ## Pourquoi deux clés distinctes
+ * ## Why two distinct keys
  *
- * Réutiliser la même clé pour AES et pour HMAC est une faute de conception
- * classique : les deux primitives n'ont pas les mêmes exigences, et leur
- * composition n'offre plus de garantie prouvée. Les deux moitiés sont donc
- * dérivées indépendamment (HKDF-Expand avec les étiquettes `enc` et `mac`,
- * voir `kdf.ts`).
+ * Reusing the same key for AES and for HMAC is a classic design fault: the two
+ * primitives do not share the same requirements, and their composition no longer
+ * carries any proven guarantee. The two halves are therefore derived
+ * independently (HKDF-Expand with the `enc` and `mac` labels, see `kdf.ts`).
  */
 
 import { EncryptionType } from './encString.js';
 import { fromBase64, toBase64, wipe } from './encoding.js';
 import { importAesCbcKey, importHmacSha256Key, randomBytes } from './primitives.js';
 
-/** Longueur d'une clé sans authentification, en octets. */
+/** Length of an unauthenticated key, in bytes. */
 const UNAUTHENTICATED_LENGTH = 32;
 
-/** Longueur d'une clé authentifiée (`encKey` ‖ `macKey`), en octets. */
+/** Length of an authenticated key (`encKey` ‖ `macKey`), in bytes. */
 const AUTHENTICATED_LENGTH = 64;
 
 export class SymmetricCryptoKey {
-  /** Clé de chiffrement AES-256. Toujours 32 octets. */
+  /** AES-256 encryption key. Always 32 bytes. */
   readonly encKey: Uint8Array;
 
-  /** Clé d'authentification HMAC-SHA256, ou `undefined` pour une clé de 32 octets. */
+  /** HMAC-SHA256 authentication key, or `undefined` for a 32-byte key. */
   readonly macKey: Uint8Array | undefined;
 
-  /** Type de chiffrement que cette clé permet de produire. */
+  /** The encryption type this key can produce. */
   readonly encryptionType: EncryptionType;
 
   /**
-   * Handles WebCrypto importés paresseusement, puis réutilisés.
+   * WebCrypto handles imported lazily, then reused.
    *
-   * `subtle.importKey` coûte un aller-retour asynchrone : sans cache, chaque
-   * chiffrement ou déchiffrement le paierait deux fois (AES + HMAC). Lors de la
-   * synchronisation d'un coffre de N items avec la même clé, le cache économise
-   * 2 N imports. Les handles sont non extractibles.
+   * `subtle.importKey` costs an async round trip: without a cache, every
+   * encryption or decryption would pay it twice (AES + HMAC). Syncing a vault of
+   * N items under the same key, the cache saves 2 N imports. The handles are
+   * non-extractable.
    */
   #encCryptoKey: Promise<CryptoKey> | undefined;
   #macCryptoKey: Promise<CryptoKey> | undefined;
 
   /**
-   * @param key Matériel de clé brut, de 32 ou 64 octets. **Le tampon devient
-   *   la propriété de la clé** : `encKey` et `macKey` sont des vues dessus,
-   *   pas des copies. L'appelant ne doit plus ni le réutiliser ni l'effacer —
-   *   c'est `destroy()` qui s'en charge au verrouillage.
-   * @throws {RangeError} Pour toute autre longueur.
+   * @param key Raw key material, 32 or 64 bytes. **The buffer becomes the key's
+   *   property**: `encKey` and `macKey` are views onto it, not copies. The caller
+   *   must neither reuse nor erase it any more — `destroy()` handles that at
+   *   lock time.
+   * @throws {RangeError} For any other length.
    */
   constructor(readonly key: Uint8Array) {
     switch (key.length) {
@@ -66,8 +65,8 @@ export class SymmetricCryptoKey {
         break;
 
       case AUTHENTICATED_LENGTH:
-        // `subarray` et non `slice` : vues sur le même tampon, pour que
-        // `destroy()` efface effectivement encKey et macKey en une passe.
+        // `subarray`, not `slice`: views onto the same buffer, so that
+        // `destroy()` actually erases encKey and macKey in one pass.
         this.encKey = key.subarray(0, 32);
         this.macKey = key.subarray(32, 64);
         this.encryptionType = EncryptionType.AesCbc256_HmacSha256_B64;
@@ -75,79 +74,79 @@ export class SymmetricCryptoKey {
 
       default:
         throw new RangeError(
-          `Longueur de clé non supportée : ${key.length} octets ` +
-            `(${UNAUTHENTICATED_LENGTH} ou ${AUTHENTICATED_LENGTH} attendus)`,
+          `Unsupported key length: ${key.length} bytes ` +
+            `(${UNAUTHENTICATED_LENGTH} or ${AUTHENTICATED_LENGTH} expected)`,
         );
     }
   }
 
   /**
-   * Reconstruit une clé depuis sa forme base64, telle que stockée ou reçue.
+   * Rebuilds a key from its base64 form, as stored or received.
    *
-   * @param value Clé encodée en base64.
-   * @throws {RangeError} Si la longueur décodée est invalide.
+   * @param value Base64-encoded key.
+   * @throws {RangeError} If the decoded length is invalid.
    */
   static fromBase64(value: string): SymmetricCryptoKey {
     return new SymmetricCryptoKey(fromBase64(value));
   }
 
   /**
-   * Génère une clé de coffre authentifiée.
+   * Generates an authenticated vault key.
    *
-   * Utilisée à la création d'un compte et à la rotation de clé. Les 64 octets
-   * proviennent directement du CSPRNG : aucune dérivation, la clé du coffre est
-   * indépendante du mot de passe maître. C'est ce qui rend le changement de mot
-   * de passe possible sans re-chiffrer le coffre.
+   * Used at account creation and at key rotation. The 64 bytes come straight
+   * from the CSPRNG: no derivation, the vault key is independent of the master
+   * password. That is what makes changing the master password possible without
+   * re-encrypting the vault.
    */
   static generate(): SymmetricCryptoKey {
     return new SymmetricCryptoKey(randomBytes(AUTHENTICATED_LENGTH));
   }
 
-  /** `true` si la clé permet le chiffrement authentifié. */
+  /** `true` if the key allows authenticated encryption. */
   get isAuthenticated(): boolean {
     return this.macKey !== undefined;
   }
 
   /**
-   * Handle AES-CBC importé, mis en cache au premier appel.
+   * Imported AES-CBC handle, cached on first call.
    *
-   * @returns `CryptoKey` non extractible pour `encKey`.
+   * @returns Non-extractable `CryptoKey` for `encKey`.
    */
   getEncCryptoKey(): Promise<CryptoKey> {
     return (this.#encCryptoKey ??= importAesCbcKey(this.encKey));
   }
 
   /**
-   * Handle HMAC-SHA256 importé, mis en cache au premier appel.
+   * Imported HMAC-SHA256 handle, cached on first call.
    *
-   * @returns `CryptoKey` non extractible pour `macKey`.
-   * @throws {RangeError} Si la clé fait 32 octets, donc sans `macKey`. Les
-   *   appelants doivent tester `isAuthenticated` ou `macKey` avant.
+   * @returns Non-extractable `CryptoKey` for `macKey`.
+   * @throws {RangeError} If the key is 32 bytes, hence without a `macKey`.
+   *   Callers must test `isAuthenticated` or `macKey` first.
    */
   getMacCryptoKey(): Promise<CryptoKey> {
     if (this.macKey === undefined) {
-      throw new RangeError('Clé de 32 octets : aucune macKey à importer');
+      throw new RangeError('32-byte key: no macKey to import');
     }
     return (this.#macCryptoKey ??= importHmacSha256Key(this.macKey));
   }
 
-  /** Encode la clé en base64, pour stockage ou transmission. */
+  /** Encodes the key as base64, for storage or transmission. */
   toBase64(): string {
     return toBase64(this.key);
   }
 
   /**
-   * Efface le matériel de clé en place.
+   * Erases the key material in place.
    *
-   * À appeler au verrouillage du coffre. Best-effort assumé : un moteur JS à
-   * GC générationnel a pu recopier le tampon lors d'une promotion mémoire, et
-   * ces copies sont hors d'atteinte depuis JavaScript. Réduit la fenêtre
-   * d'exposition sans l'éliminer.
+   * To be called when the vault locks. Best-effort, and known to be: a JS engine
+   * with a generational GC may have copied the buffer during a memory promotion,
+   * and those copies are out of JavaScript's reach. It narrows the exposure
+   * window without closing it.
    *
-   * L'instance devient inutilisable : `encKey` et `macKey` sont des vues sur
-   * le tampon effacé. Les handles WebCrypto en cache sont abandonnés ; non
-   * extractibles, ils ne redonnent de toute façon jamais le matériel de clé,
-   * et le GC les libérera.
+   * The instance becomes unusable: `encKey` and `macKey` are views onto the
+   * erased buffer. The cached WebCrypto handles are dropped; being
+   * non-extractable, they never hand back key material anyway, and the GC will
+   * reclaim them.
    */
   destroy(): void {
     wipe(this.key);

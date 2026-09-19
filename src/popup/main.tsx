@@ -1,48 +1,48 @@
 /**
- * @file Popup — version de preuve de vie.
+ * @file The popup.
  *
- * Chaîne complète dans le vrai contexte d'extension : `unlock()` → second
- * facteur éventuel → `sync` → `decryptCipherList` → liste filtrable → copie
- * ou révélation d'un mot de passe déchiffré à la demande.
+ * The complete chain in a real extension context: `unlock()` → an optional
+ * second factor → `sync` → `decryptCipherList` → a filterable list → copying or
+ * revealing a password decrypted on demand.
  *
- * ## Filtre par onglet actif
+ * ## Filtering by active tab
  *
- * À l'ouverture du coffre, si le domaine de l'onglet actif correspond à au
- * moins un item, le filtre est prérempli avec ce domaine — l'esquisse de la
- * « vue Zwarden » de `docs/EXTENSION.md`. Effacer le champ montre tout.
+ * When the vault opens, if the active tab's domain matches at least one item,
+ * the filter is pre-filled with that domain — the sketch of the "Zwarden view"
+ * from `docs/EXTENSION.md`. Clearing the field shows everything.
  *
- * ## Second facteur
+ * ## Second factor
  *
- * Fournisseurs saisissables : TOTP (0), code e-mail (1), YubiKey OTP (3).
- * WebAuthn (7) exige une page de rebond servie par le serveur (l'origine
- * d'une extension ne peut pas répondre au RP ID du coffre) : hors périmètre
- * de cette version — une YubiKey s'utilise en mode OTP. « Se souvenir de cet
- * appareil » conserve le jeton de dispense (fournisseur 5), rejoué
- * automatiquement ; s'il expire, l'écran de saisie revient.
+ * Providers whose code can be entered: TOTP (0), email code (1), YubiKey OTP
+ * (3). WebAuthn (7) requires a bounce page served by the server (an extension's
+ * origin cannot answer the vault's RP ID): out of scope for this version — a
+ * YubiKey is used in OTP mode. "Remember this device" keeps the remember token
+ * (provider 5) and replays it automatically; when it expires, the entry screen
+ * comes back.
  *
- * ## Persistance de session et verrouillage
+ * ## Session persistence and locking
  *
- * Le coffre déverrouillé survit à la fermeture de la popup : clé et jetons
- * dans `chrome.storage.session` (mémoire pure, purgée à la fermeture du
- * navigateur). Par défaut, il ne se verrouille qu'à cette fermeture. Si un
- * délai d'inactivité est configuré, c'est le service worker qui le tient : la
- * popup se contente de signaler son activité (`recordActivity`), au même
- * titre qu'un changement d'onglet. Le mot de passe n'est jamais persisté.
+ * The unlocked vault survives the popup closing: key and tokens sit in
+ * `chrome.storage.session` (pure memory, purged when the browser closes). By
+ * default it only locks on that close. If an inactivity delay is configured, the
+ * service worker is what carries it: the popup merely signals its activity
+ * (`recordActivity`), just as a tab switch would. The password is never
+ * persisted.
  *
- * Limite assumée restante (`docs/EXTENSION.md`) : la dérivation tourne ici,
- * pas encore dans le service worker.
+ * Remaining acknowledged limit (`docs/EXTENSION.md`): derivation runs here, not
+ * yet in the service worker.
  */
 
 import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
-import { EcranDeverrouillage, EcranSecondFacteur } from './components/EcransConnexion.js';
-import { type EditForm, EMPTY_EDIT, FormulaireEdition } from './components/FormulaireEdition.js';
-import { chipsFor, LigneItem } from './components/LigneItem.js';
-import { useGenerateur } from './hooks/useGenerateur.js';
+import { type EditForm, EMPTY_EDIT, EditItemForm } from './components/EditItemForm.js';
+import { chipsFor, ItemRow } from './components/ItemRow.js';
+import { RepromptGuard } from './components/RepromptGuard.js';
+import { SaveProposalBanner, type SaveProposal } from './components/SaveProposal.js';
+import { TwoFactorScreen, UnlockScreen } from './components/SignInScreens.js';
+import { useGenerator } from './hooks/useGenerator.js';
 import { useReprompt } from './hooks/useReprompt.js';
-import { GardeReprompt } from './components/GardeReprompt.js';
-import { Proposition, type SaveProposal } from './components/Proposition.js';
 
 import {
   ApiClient,
@@ -96,33 +96,32 @@ import {
   startAutoLockWatch,
 } from '@shared/storage.js';
 
-/** État d'un coffre déverrouillé, vivant uniquement tant que la popup l'est. */
+/** An unlocked vault's state, alive only for as long as the popup is. */
 interface OpenVault {
   readonly userKey: SymmetricCryptoKey;
-  /** Trousseau complet : clé du coffre + clés d'organisation déballées. */
+  /** The full keyring: vault key + unwrapped organisation keys. */
   readonly keys: CipherKeys;
   readonly items: readonly CipherOverview[];
   readonly raw: ReadonlyMap<string, CipherResponse>;
-  /** Dossiers, collections et organisations, noms déchiffrés. */
+  /** Folders, collections and organisations, names decrypted. */
   readonly labels: VaultLabels;
-  /** Échecs de déchiffrement rencontrés, pour le diagnostic à l'écran. */
+  /** Decryption failures encountered, for on-screen diagnosis. */
   readonly errors: readonly unknown[];
 }
 
 /**
- * Code à usage unique ouvert sur une ligne de la liste.
+ * The one-time code open on a row of the list.
  *
- * `App` ne retient que l'item concerné et les paramètres résolus — le code et
- * son décompte appartiennent à {@link CodeOtp}, qui les recalcule chaque
- * seconde. Les garder ici faisait réafficher la popup entière à chaque
- * battement.
+ * `App` keeps only the item concerned and the resolved parameters — the code and
+ * its countdown belong to {@link OtpCode}, which recomputes them every second.
+ * Keeping them here re-rendered the whole popup on every beat.
  */
 interface OtpView {
   readonly id: string;
   readonly config: TotpConfig;
 }
 
-/** Session prête à écrire : client API et jetons valides. */
+/** A session ready to write: API client and valid tokens. */
 interface AuthorizedSession {
   readonly client: ApiClient;
   readonly stored: StoredSession;
@@ -131,24 +130,24 @@ interface AuthorizedSession {
   readonly expiresAt: number;
 }
 
-/** Regroupe les erreurs par nom, pour un diagnostic lisible. */
+/** Groups errors by name, for a readable diagnosis. */
 function groupErrors(errors: readonly unknown[]): ReadonlyArray<readonly [string, number]> {
   const grouped = new Map<string, number>();
   for (const error of errors) {
-    const name = error instanceof Error ? error.name : 'Erreur inconnue';
+    const name = error instanceof Error ? error.name : 'Unknown error';
     grouped.set(name, (grouped.get(name) ?? 0) + 1);
   }
   return [...grouped.entries()].sort((a, b) => b[1] - a[1]);
 }
 
-/** Fournisseurs dont la popup sait recueillir le code. */
+/** Providers whose code the popup knows how to collect. */
 const PROVIDER_LABELS: Readonly<Record<string, string>> = {
-  [String(TwoFactorProvider.Authenticator)]: 'Application d’authentification (TOTP)',
-  [String(TwoFactorProvider.Email)]: 'Code reçu par e-mail',
-  [String(TwoFactorProvider.YubiKey)]: 'YubiKey (mode OTP — toucher la clé)',
+  [String(TwoFactorProvider.Authenticator)]: 'Authenticator app (TOTP)',
+  [String(TwoFactorProvider.Email)]: 'Code received by email',
+  [String(TwoFactorProvider.YubiKey)]: 'YubiKey (OTP mode — touch the key)',
 };
 
-/** Onglet actif, s'il pointe une page web. */
+/** The active tab, if it points at a web page. */
 async function activeWebTab(): Promise<{ tabId: number; url: URL } | null> {
   if (typeof chrome === 'undefined' || typeof chrome.tabs?.query === 'undefined') {
     return null;
@@ -169,17 +168,17 @@ async function activeWebTab(): Promise<{ tabId: number; url: URL } | null> {
 }
 
 /**
- * Remplit le premier formulaire d'identification visible de la page.
+ * Fills the page's first visible sign-in form.
  *
- * Cette fonction est **sérialisée** puis exécutée dans la page via
- * `chrome.scripting` : elle ne doit référencer aucune variable extérieure.
- * Uniquement le cadre principal, jamais de soumission automatique.
+ * This function is **serialised** and then executed inside the page through
+ * `chrome.scripting`: it must reference no outside variable. Main frame only,
+ * never an automatic submission.
  */
 function fillCredentials(username: string, password: string): void {
   const visible = (el: HTMLElement): boolean => el.getClientRects().length > 0;
   const setValue = (input: HTMLInputElement, value: string): void => {
-    // Passer par le setter natif du prototype, pour que les frameworks qui
-    // interceptent `value` (React, etc.) voient bien le changement.
+    // Go through the prototype's native setter, so that frameworks intercepting
+    // `value` (React and friends) actually see the change.
     const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
     setter?.call(input, value);
     input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -212,22 +211,20 @@ function openOptions(): void {
   }
 }
 
-/** Formulaire d'édition d'un item. Chaîne vide = champ effacé. */
-/** Durée d'affichage d'un mot de passe révélé avant masquage automatique. */
+/** How long a revealed password stays on screen before being hidden again. */
 const REVEAL_HIDE_MS = 20_000;
 
 /**
- * Période du battement d'activité émis tant que la popup est ouverte sur un
- * coffre déverrouillé. Sous le seuil d'écriture de `recordActivity` (20 s)
- * il n'y aurait pas d'écriture supplémentaire ; au-dessus, l'horodatage
- * pourrait vieillir inutilement.
+ * Period of the activity heartbeat emitted while the popup is open on an
+ * unlocked vault. Below `recordActivity`'s write threshold (20 s) there would be
+ * no extra write; above it, the timestamp could grow stale for nothing.
  */
 const ACTIVITY_PING_MS = 30_000;
 
-/** Message d'erreur à afficher. Les codes stables priment sur les messages. */
+/** The error message to display. Stable codes take precedence over messages. */
 function messageFor(err: unknown): string {
   if (err instanceof DOMException && err.name === 'TimeoutError') {
-    return 'Serveur injoignable : délai dépassé.';
+    return 'Server unreachable: timed out.';
   }
   if (err instanceof Error) {
     return err.message;
@@ -237,7 +234,7 @@ function messageFor(err: unknown): string {
 
 function App() {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
-  /** Vrai tant que la tentative de restauration initiale n'a pas conclu. */
+  /** True until the initial restore attempt has concluded. */
   const [initializing, setInitializing] = useState(true);
   const [serverUrl, setServerUrl] = useState('');
   const [email, setEmail] = useState('');
@@ -254,31 +251,31 @@ function App() {
   const [proposal, setProposal] = useState<SaveProposal | null>(null);
   const reprompt = useReprompt(messageFor);
 
-  // Code à usage unique ouvert : `App` ne retient que l'item et les paramètres
-  // résolus, le battement appartient à `CodeOtp`.
+  // The open one-time code: `App` keeps only the item and the resolved
+  // parameters, the heartbeat belongs to `OtpCode`.
   const [otp, setOtp] = useState<OtpView | null>(null);
   const [copiedOtp, setCopiedOtp] = useState(false);
 
-  const generateur = useGenerateur({
+  const generator = useGenerator({
     onError: setError,
-    onUse: (password) => {
-      setEditForm((courant) => ({ ...courant, password }));
-      // Affiché : on vient de le fabriquer, le masquer n'a plus de sens et
-      // laisserait un doute sur ce qui sera enregistré.
+    onUse: (generated: string) => {
+      setEditForm((current) => ({ ...current, password: generated }));
+      // Shown: we have just made it, hiding it no longer makes sense and would
+      // leave doubt about what is going to be saved.
       setEditShowPassword(true);
     },
     onCopied: scheduleClipboardClear,
   });
 
-  // Édition : item en cours, valeurs du formulaire, mot de passe d'origine
-  // (pour l'historique), visibilité du champ.
+  // Editing: the item in progress, the form's values, the original password
+  // (for the history), and the field's visibility.
   const [editing, setEditing] = useState<CipherOverview | null>(null);
   const [editForm, setEditForm] = useState<EditForm>(EMPTY_EDIT);
   const [editOriginalPassword, setEditOriginalPassword] = useState('');
   const [editShowPassword, setEditShowPassword] = useState(false);
   const [editPasskeys, setEditPasskeys] = useState<readonly PasskeyView[]>([]);
 
-  // Second facteur : fournisseurs annoncés par le serveur, choix et code.
+  // Second factor: the providers the server announced, the choice and the code.
   const [twoFaProviders, setTwoFaProviders] = useState<readonly string[] | null>(null);
   const [twoFaChoice, setTwoFaChoice] = useState('');
   const [twoFaCode, setTwoFaCode] = useState('');
@@ -295,11 +292,10 @@ function App() {
   }, []);
 
   /**
-   * Battement d'activité tant que la popup est ouverte sur un coffre
-   * déverrouillé. Sans lui, une popup laissée ouverte le temps de composer un
-   * mot de passe pourrait se faire verrouiller sous le nez par le service
-   * worker : lire l'écran est une activité, elle n'émet simplement aucun
-   * événement de navigateur.
+   * Activity heartbeat while the popup is open on an unlocked vault. Without it,
+   * a popup left open long enough to compose a password could be locked out from
+   * under the user by the service worker: reading the screen is activity, it
+   * simply emits no browser event.
    */
   useEffect(() => {
     if (vault === null) {
@@ -320,16 +316,16 @@ function App() {
   }
 
   /**
-   * Restaure une session encore vivante dans `chrome.storage.session`.
+   * Restores a session still alive in `chrome.storage.session`.
    *
-   * Deux temps, pour ne jamais montrer la mire inutilement :
+   * In two stages, so the sign-in screen is never shown needlessly:
    *
-   * 1. **Affichage immédiat** depuis la dernière synchronisation en cache —
-   *    aucun réseau, la liste apparaît en quelques dizaines de millisecondes.
-   * 2. **Rafraîchissement réseau** en arrière-plan, qui met la liste à jour.
+   * 1. **Immediate display** from the last cached sync — no network, the list
+   *    appears within tens of milliseconds.
+   * 2. **Network refresh** in the background, which brings the list up to date.
    *
-   * Un échec réseau conserve le cache affiché — être hors ligne ne verrouille
-   * pas le coffre. Seul un refus d'authentification (jeton révoqué) verrouille.
+   * A network failure keeps the cache on screen — being offline does not lock
+   * the vault. Only an authentication refusal (a revoked token) locks.
    */
   async function restoreSession(s: AppSettings): Promise<void> {
     const stored = await loadStoredSession();
@@ -343,8 +339,8 @@ function App() {
     const userKey = SymmetricCryptoKey.fromBase64(stored.userKeyB64);
     void startAutoLockWatch(s.autoLockMinutes);
 
-    // Le cache d'abord : il s'affiche sans réseau, donc immédiatement. Le
-    // rafraîchissement qui suit corrigera ce qui a changé.
+    // The cache first: it displays without a network, hence immediately. The
+    // refresh that follows will correct whatever changed.
     const displayed = await showCachedVault(stored, userKey);
 
     try {
@@ -358,10 +354,11 @@ function App() {
   }
 
   /**
-   * Affiche le dernier état synchronisé, s'il y en a un d'exploitable.
+   * Displays the last synced state, if there is a usable one.
    *
-   * @returns Vrai si le coffre est à l'écran — ce qui change la suite : sans
-   *   affichage, une panne réseau doit se dire ; avec, elle peut se taire.
+   * @returns True if the vault is on screen — which changes what follows: with
+   *   nothing displayed a network failure must be said; with the vault up, it
+   *   can stay quiet.
    */
   async function showCachedVault(
     stored: StoredSession,
@@ -375,12 +372,12 @@ function App() {
       setInitializing(false);
       return true;
     } catch {
-      // Cache inexploitable : le chemin réseau tranchera.
+      // Cache unusable: the network path will settle it.
       return false;
     }
   }
 
-  /** Renouvelle les jetons au besoin, resynchronise, et réaffiche. */
+  /** Renews the tokens if needed, resyncs, and redisplays. */
   async function refreshFromServer(
     s: AppSettings,
     stored: StoredSession,
@@ -394,7 +391,7 @@ function App() {
     let expiresAt = stored.expiresAt;
     if (Date.now() > expiresAt - 60_000) {
       if (refreshToken === null) {
-        throw new ApiError('Session expirée sans jeton de rafraîchissement', 401, '');
+        throw new ApiError('Session expired without a refresh token', 401, '');
       }
       const renewed = await client.refreshToken(refreshToken);
       accessToken = renewed.accessToken;
@@ -403,7 +400,7 @@ function App() {
     }
 
     if (!displayed) {
-      setBusy('Ouverture du coffre…');
+      setBusy('Opening the vault…');
     }
     const sync = await client.sync(accessToken);
     await saveStoredSession({
@@ -417,13 +414,14 @@ function App() {
   }
 
   /**
-   * Décide quoi faire d'un échec de restauration. Trois cas, trois conduites :
+   * Decides what to do with a restore failure. Three cases, three conducts:
    *
-   * - jeton refusé (400/401) : la session est morte côté serveur, verrouillage
-   *   net — la garder donnerait un coffre qui paraît ouvert et ne peut rien ;
-   * - panne réseau sans rien à l'écran : il faut le dire, la session est gardée
-   *   pour un essai ultérieur ;
-   * - panne réseau avec le cache affiché : se taire. L'utilisateur a son coffre.
+   * - token refused (400/401): the session is dead server-side, so lock outright
+   *   — keeping it would give a vault that looks open and can do nothing;
+   * - network failure with nothing on screen: it must be said, and the session
+   *   is kept for a later attempt;
+   * - network failure with the cache displayed: stay quiet. The user has their
+   *   vault.
    */
   async function onRestoreFailure(
     err: unknown,
@@ -437,11 +435,11 @@ function App() {
       return;
     }
     if (!displayed) {
-      setError('Serveur injoignable — réessayer, ou déverrouiller à nouveau.');
+      setError('Server unreachable — retry, or unlock again.');
     }
   }
 
-  /** Déchiffre une réponse de synchronisation et affiche le coffre. */
+  /** Decrypts a sync response and displays the vault. */
   async function showVault(
     sync: SyncResponse,
     userKey: SymmetricCryptoKey,
@@ -449,22 +447,21 @@ function App() {
   ): Promise<void> {
     const ciphers = sync.ciphers ?? [];
 
-    // Les échecs sont journalisés dans la console DE LA POPUP (clic droit sur
-    // la popup → Inspecter) ET résumés à l'écran — la console de la page ne
-    // les voit jamais.
+    // Failures are logged to THE POPUP's console (right-click the popup →
+    // Inspect) AND summarised on screen — the page's console never sees them.
     const errors: unknown[] = [];
     const onDecryptError = (error: unknown): void => {
       errors.push(error);
-      console.warn('[zwarden] champ illisible :', error);
+      console.warn('[zwarden] unreadable field:', error);
     };
 
     if (announce) {
-      setBusy(`Déchiffrement de ${ciphers.length} item(s)…`);
+      setBusy(`Decrypting ${ciphers.length} item(s)…`);
     }
     const keys = await buildVaultKeys(sync.profile, userKey, onDecryptError);
-    // Les items dont la date de révision n'a pas bougé depuis l'affichage
-    // précédent sont réutilisés tels quels : après une écriture, seul l'item
-    // écrit est redéchiffré au lieu du coffre entier.
+    // Items whose revision date has not moved since the previous display are
+    // reused as-is: after a write, only the written item is re-decrypted rather
+    // than the whole vault.
     const reuse = vault === null ? undefined : reuseByRevision(vault.items, vault.raw);
     const [items, labels] = await Promise.all([
       decryptCipherList(ciphers, keys, onDecryptError, undefined, reuse),
@@ -476,17 +473,17 @@ function App() {
       raw.set(cipher.id, cipher);
     }
 
-    // Le classement est figé à l'ouverture, jamais réappliqué pendant que la
-    // popup est ouverte : un item qui remonterait sous le curseur au moment
-    // où on le copie ferait cliquer à côté la fois suivante.
+    // The ordering is frozen at opening, never reapplied while the popup is
+    // open: an item floating up under the cursor at the moment it is copied
+    // would make the next click land on the wrong row.
     const ordered = sortByLastUsed(items, await loadLastUsed());
 
     setVault({ userKey, keys, items: ordered, raw, labels, errors });
     await evaluatePending(ordered, raw, keys, onDecryptError);
 
-    // Onglet actif : origine stricte pour « Remplir », domaine pour le filtre
-    // prérempli — sans écraser une recherche déjà saisie, et seulement s'il
-    // correspond à quelque chose, une liste vide serait déroutante.
+    // Active tab: strict origin for "Fill", domain for the pre-filled filter —
+    // without overwriting a search already typed, and only if it matches
+    // something, since an empty list would be baffling.
     const tab = await activeWebTab();
     setTabOrigin(tab === null ? null : tab.url.origin);
     const host = tab?.url.hostname.replace(/^www\./, '');
@@ -496,16 +493,16 @@ function App() {
   }
 
   /**
-   * Tentative de déverrouillage complète. Sans `twoFactor`, rejoue d'abord un
-   * éventuel jeton de dispense conservé pour cet appareil.
+   * A full unlock attempt. Without `twoFactor`, it first replays any remember
+   * token kept for this device.
    */
   async function attemptUnlock(twoFactor?: TwoFactorSubmission): Promise<void> {
     setError(null);
-    setBusy('Dérivation de la clé…');
+    setBusy('Deriving the key…');
 
-    // Persistés dès la tentative, pas seulement au succès : un échec de mot de
-    // passe ou de second facteur ne doit pas faire retaper le serveur et
-    // l'e-mail à la prochaine ouverture. Jamais le mot de passe.
+    // Persisted from the attempt, not only on success: a password or
+    // second-factor failure must not force the server and the email to be typed
+    // again next time. Never the password.
     await saveSettings({ serverUrl, email });
 
     const submission = twoFactor ?? (await rememberedSubmission());
@@ -521,7 +518,7 @@ function App() {
     }
   }
 
-  /** Jeton de dispense 2FA conservé pour cet appareil, s'il en existe un. */
+  /** The 2FA remember token kept for this device, if there is one. */
   async function rememberedSubmission(): Promise<TwoFactorSubmission | undefined> {
     const remembered = await loadRememberToken(serverUrl, email);
     return remembered === null
@@ -529,7 +526,7 @@ function App() {
       : { provider: TwoFactorProvider.Remember, token: remembered };
   }
 
-  /** Range la session ouverte et affiche le coffre. */
+  /** Files the opened session away and displays the vault. */
   async function onUnlocked(client: ApiClient, result: UnlockResult): Promise<void> {
     setPassword('');
     setShowPassword(false);
@@ -540,13 +537,12 @@ function App() {
       await saveRememberToken(serverUrl, email, result.twoFactorRememberToken);
     }
 
-    setBusy('Synchronisation…');
+    setBusy('Syncing…');
     const sync = await client.sync(result.session.accessToken);
 
-    // La session survit à la fermeture de la popup, jusqu'à la fermeture du
-    // navigateur, l'échéance d'inactivité ou le verrouillage manuel. La
-    // synchronisation est mise en cache pour un affichage immédiat à la
-    // prochaine ouverture.
+    // The session survives the popup closing, until the browser closes, the
+    // inactivity deadline passes, or a manual lock. The sync is cached for an
+    // immediate display the next time it opens.
     await saveStoredSession({
       userKeyB64: result.userKey.toBase64(),
       accessToken: result.session.accessToken,
@@ -555,8 +551,8 @@ function App() {
       serverUrl,
       email,
       cachedSync: sync,
-      // Conservés pour vérifier le mot de passe maître sans réseau quand un item
-      // exige de le redemander.
+      // Kept to verify the master password without a network when an item
+      // demands it again.
       localPasswordHash: result.localPasswordHash,
       kdfConfig: result.kdfConfig,
     });
@@ -566,15 +562,15 @@ function App() {
   }
 
   /**
-   * Route un échec de déverrouillage.
+   * Routes an unlock failure.
    *
-   * Une demande de second facteur n'est pas une erreur : c'est une étape, et
-   * l'afficher comme un échec ferait croire à un mauvais mot de passe. Tout le
-   * reste passe par `messageFor`, qui distingue les cas sur le champ `code`.
+   * A second-factor demand is not an error: it is a step, and showing it as a
+   * failure would suggest a wrong password. Everything else goes through
+   * `messageFor`, which tells the cases apart on the `code` field.
    *
-   * @param twoFactor Second facteur fourni par l'utilisateur, s'il y en avait un.
-   * @param submission Ce qui a réellement été envoyé — éventuellement un jeton
-   *   de dispense repris du stockage.
+   * @param twoFactor The second factor the user supplied, if there was one.
+   * @param submission What was actually sent — possibly a remember token taken
+   *   from storage.
    */
   async function onUnlockFailure(
     err: unknown,
@@ -585,32 +581,31 @@ function App() {
       setError(messageFor(err));
       return;
     }
-    // Un jeton de dispense refusé est expiré : on l'oublie et on repasse par la
-    // saisie.
+    // A refused remember token is an expired one: forget it and fall back to
+    // the entry screen.
     if (submission?.provider === TwoFactorProvider.Remember) {
       await clearRememberToken(serverUrl, email);
     }
-    const saisissables = err.providers.filter((p) => p in PROVIDER_LABELS);
+    const available = err.providers.filter((p) => p in PROVIDER_LABELS);
     setTwoFaProviders(err.providers);
-    setTwoFaChoice(saisissables[0] ?? '');
+    setTwoFaChoice(available[0] ?? '');
     if (twoFactor !== undefined) {
-      setError('Second facteur refusé — réessayer.');
+      setError('Second factor refused — try again.');
     }
   }
 
   /**
-   * Purge tout ce que l'état déverrouillé a laissé dans la popup.
+   * Purges everything the unlocked state left in the popup.
    *
-   * `lockVault()` porte la liste côté stockage ; celle-ci porte la liste côté
-   * mémoire, et les deux doivent être appelées ensemble — sans quoi la règle
-   * « verrouiller, c'est tout purger » (`docs/EXTENSION.md` §2) ne vaut que
-   * pour la moitié qu'on a pensé à écrire.
+   * `lockVault()` carries the storage-side list; this one carries the
+   * memory-side list, and the two must be called together — otherwise the rule
+   * "to lock is to purge everything" (`docs/EXTENSION.md` §2) only holds for the
+   * half somebody remembered to write.
    *
-   * Y figurent des secrets déchiffrés qu'on n'attend pas au premier coup
-   * d'œil : `otp` porte le secret TOTP **et** un minuteur qui recalcule un
-   * code chaque seconde, `generator` un mot de passe engendré, et le
-   * formulaire d'édition le mot de passe de l'item ouvert. Aucun n'est visible
-   * après verrouillage — ils survivaient pourtant en mémoire.
+   * It includes decrypted secrets one does not expect at first glance: `otp`
+   * carries the TOTP secret **and** a timer recomputing a code every second, the
+   * generator its output, and the edit form the open item's password. None of
+   * them is visible after locking — they survived in memory all the same.
    */
   function resetVaultState(): void {
     clearRevealTimer();
@@ -619,7 +614,7 @@ function App() {
     setRevealed(null);
     setProposal(null);
     setOtp(null);
-    generateur.close();
+    generator.close();
     setEditing(null);
     setEditForm(EMPTY_EDIT);
     setEditOriginalPassword('');
@@ -630,8 +625,8 @@ function App() {
 
   function onLock(): void {
     if (vault !== null) {
-      // Tout le trousseau, pas seulement la clé du coffre : les clés
-      // d'organisation déchiffrent les items partagés.
+      // The whole keyring, not just the vault key: organisation keys decrypt
+      // the shared items.
       destroyVaultKeys(vault.keys);
     }
     void lockVault();
@@ -652,17 +647,17 @@ function App() {
   }
 
   /**
-   * Décide s'il y a quelque chose à proposer, une fois le coffre affiché.
+   * Decides whether there is anything to offer, once the vault is on screen.
    *
-   * Le service worker capture sans savoir ce que le coffre contient — il n'a
-   * pas la clé. C'est donc ici, et seulement ici, que la question se tranche :
+   * The service worker captures without knowing what the vault holds — it has no
+   * key. So it is here, and only here, that the question is settled:
    *
-   * - identifiant déjà connu sur cette origine, **même** mot de passe → rien à
-   *   proposer, la capture est jetée sans rien afficher. C'est le cas le plus
-   *   fréquent, celui d'une connexion ordinaire : ne pas le taire rendrait la
-   *   pastille insignifiante à force de s'allumer pour rien ;
-   * - identifiant connu, mot de passe différent → mise à jour ;
-   * - sinon → nouvel item.
+   * - username already known on this origin, **same** password → nothing to
+   *   offer, the capture is dropped with nothing shown. This is the most
+   *   frequent case, an ordinary sign-in: not keeping quiet about it would make
+   *   the badge meaningless by lighting up for nothing;
+   * - username known, different password → update;
+   * - otherwise → a new item.
    */
   async function evaluatePending(
     items: readonly CipherOverview[],
@@ -678,10 +673,10 @@ function App() {
 
     const existing = findSaveCandidate(items, capture.origin, capture.username, matchesOrigin);
 
-    // Le mot de passe de l'item rapproché est déchiffré ici — c'est la popup qui
-    // détient les clés — puis la règle est appliquée par `decideProposal`, pure
-    // et testée. Un item introuvable dans `raw` donne `null`, que la règle
-    // traite comme « illisible » : elle propose plutôt que de se taire.
+    // The matched item's password is decrypted here — the popup is what holds
+    // the keys — and then the rule is applied by `decideProposal`, pure and
+    // tested. An item missing from `raw` yields `null`, which the rule treats as
+    // "unreadable": it offers rather than stay quiet.
     let existingPassword: string | null = null;
     if (existing !== null) {
       const cipher = raw.get(existing.id);
@@ -692,21 +687,21 @@ function App() {
     }
 
     const issue = decideProposal(existing, capture.password, existingPassword);
-    if (issue.kind === 'aucune') {
+    if (issue.kind === 'none') {
       await dismissProposal();
       return;
     }
-    setProposal({ capture, existing: issue.kind === 'miseAJour' ? issue.item : null });
+    setProposal({ capture, existing: issue.kind === 'update' ? issue.item : null });
   }
 
-  /** Oublie la proposition en cours : capture purgée, pastille éteinte. */
+  /** Forgets the current proposal: capture purged, badge switched off. */
   async function dismissProposal(): Promise<void> {
     setProposal(null);
     await clearPendingSave();
     await setSaveBadge(false);
   }
 
-  /** « Ne plus proposer pour ce site » — l'hôte rejoint la liste d'exclusion. */
+  /** "Never for this site" — the host joins the exclusion list. */
   async function onNeverForHost(): Promise<void> {
     if (proposal !== null) {
       await addNeverSaveHost(proposal.capture.host);
@@ -715,32 +710,32 @@ function App() {
   }
 
   /**
-   * Enregistre la capture : création d'un item, ou mise à jour du mot de passe
-   * de l'item rapproché.
+   * Saves the capture: creating an item, or updating the matched item's
+   * password.
    *
-   * La mise à jour reprend l'item existant tel quel et n'en change que le mot
-   * de passe — nom, dossier, notes et champs personnalisés survivent — et
-   * consigne l'ancien dans l'historique : un enregistrement automatique ne
-   * doit jamais faire perdre ce qui était là avant.
+   * The update takes the existing item as it stands and changes only the
+   * password — name, folder, notes and custom fields survive — and records the
+   * old one in the history: a near-automatic save must never lose what was there
+   * before.
    */
   async function onSaveProposal(): Promise<void> {
     if (vault === null || proposal === null) {
       return;
     }
-    const ouvert = vault;
+    const open = vault;
     const { capture, existing } = proposal;
 
     setError(null);
-    setBusy('Chiffrement…');
+    setBusy('Encrypting…');
     try {
       const auth = await authorize();
       if (existing === null) {
-        await createFromCapture(auth, ouvert, capture);
+        await createFromCapture(auth, open, capture);
       } else {
-        await updateFromCapture(auth, ouvert, capture, existing);
+        await updateFromCapture(auth, open, capture, existing);
       }
       await dismissProposal();
-      await refreshAfterWrite(auth, ouvert.userKey);
+      await refreshAfterWrite(auth, open.userKey);
     } catch (err) {
       setError(messageFor(err));
     } finally {
@@ -749,15 +744,15 @@ function App() {
   }
 
   /**
-   * Crée un item depuis une capture.
+   * Creates an item from a capture.
    *
-   * Volontairement pauvre : ni dossier, ni organisation, ni champs
-   * personnalisés. Un item né d'une saisie observée porte ce qui a été observé,
-   * et rien de plus — l'utilisateur complétera s'il le souhaite.
+   * Deliberately poor: no folder, no organisation, no custom fields. An item
+   * born of an observed entry carries what was observed and nothing more — the
+   * user fills in the rest if they wish.
    */
   async function createFromCapture(
     auth: AuthorizedSession,
-    ouvert: OpenVault,
+    open: OpenVault,
     capture: PendingSave,
   ): Promise<void> {
     const payload = await buildCipherCreatePayload(
@@ -769,33 +764,33 @@ function App() {
         notes: '',
         uris: [capture.origin],
       },
-      ouvert.userKey,
+      open.userKey,
     );
-    setBusy('Enregistrement…');
+    setBusy('Saving…');
     await auth.client.createCipher(auth.accessToken, payload);
   }
 
   /**
-   * Met à jour le mot de passe d'un item rapproché, et lui seul.
+   * Updates a matched item's password, and that alone.
    *
-   * Nom, dossier, notes, TOTP et champs personnalisés sont relus de l'item
-   * existant et réécrits tels quels : une mise à jour remplace l'item entier
-   * côté serveur, donc tout champ non transmis serait perdu. Un enregistrement
-   * quasi automatique ne doit jamais faire disparaître ce qui était là.
+   * Name, folder, notes, TOTP and custom fields are read back from the existing
+   * item and rewritten as-is: an update replaces the whole item server-side, so
+   * any field not sent would be lost. A near-automatic save must never make what
+   * was there disappear.
    */
   async function updateFromCapture(
     auth: AuthorizedSession,
-    ouvert: OpenVault,
+    open: OpenVault,
     capture: PendingSave,
     existing: CipherOverview,
   ): Promise<void> {
-    const cipher = ouvert.raw.get(existing.id);
+    const cipher = open.raw.get(existing.id);
     if (cipher === undefined) {
-      throw new Error('Item introuvable — resynchroniser puis réessayer.');
+      throw new Error('Item not found — resync, then try again.');
     }
-    // `onError` qui relance : sur une écriture, un champ illisible doit arrêter
-    // l'opération, pas la laisser écraser ce qu'elle n'a pas su lire.
-    const details = await decryptCipherDetails(cipher, ouvert.keys, (err) => {
+    // An `onError` that rethrows: on a write, an unreadable field must stop the
+    // operation, not let it overwrite what it could not read.
+    const details = await decryptCipherDetails(cipher, open.keys, (err) => {
       throw err;
     });
     const payload = await buildCipherUpdatePayload(
@@ -808,26 +803,26 @@ function App() {
         notes: details.notes ?? '',
         uris: existing.uris.length > 0 ? existing.uris : [capture.origin],
       },
-      ouvert.keys,
+      open.keys,
       true,
     );
-    setBusy('Enregistrement…');
+    setBusy('Saving…');
     await auth.client.updateCipher(auth.accessToken, existing.id, payload);
   }
 
   /**
-   * Affiche — et copie — le code à usage unique d'un item.
+   * Shows — and copies — an item's one-time code.
    *
-   * Le secret TOTP est déchiffré à la demande, comme le mot de passe : la
-   * règle du déchiffrement partiel (`docs/EXTENSION.md` §3) vaut pour lui.
-   * Un second clic referme.
+   * The TOTP secret is decrypted on demand, like the password: the partial
+   * decryption rule (`docs/EXTENSION.md` §3) applies to it too. A second click
+   * closes it again.
    *
-   * La copie est immédiate parce qu'un code à six chiffres n'est jamais
-   * consulté pour le plaisir : on le veut dans le presse-papiers, et il aura
-   * expiré avant qu'on ait fini de le recopier à la main.
+   * The copy is immediate because a six-digit code is never looked at for
+   * pleasure: one wants it in the clipboard, and it will have expired before one
+   * finishes copying it by hand.
    */
   function onToggleOtp(item: CipherOverview): void {
-    // Refermer n'expose rien : la garde ne porte que sur l'ouverture.
+    // Closing exposes nothing: the guard covers opening only.
     if (otp?.id === item.id) {
       setOtp(null);
       return;
@@ -844,10 +839,10 @@ function App() {
       const config = parseTotp(secret);
       setOtp({ id: item.id, config });
       void noteUsage(item);
-      // Copie immédiate : un code à six chiffres n'est jamais consulté pour le
-      // plaisir, et il aura expiré avant qu'on ait fini de le recopier à la
-      // main. Le calcul est refait ici plutôt que réclamé au composant — ce
-      // serait la seule raison pour lui de remonter son état.
+      // Immediate copy: a six-digit code is never looked at for pleasure, and
+      // it will have expired before one finishes copying it by hand. The
+      // computation is redone here rather than demanded of the component — that
+      // would be its only reason to lift its state up.
       await copyOtp(await generateTotp(config));
     } catch (err) {
       setError(messageFor(err));
@@ -855,21 +850,20 @@ function App() {
   }
 
   /**
-   * Programme l'effacement du presse-papiers après le délai configuré.
+   * Schedules the clipboard wipe after the configured delay.
    *
-   * Factorisé parce que les trois copies — mot de passe, code à usage unique,
-   * mot de passe engendré — doivent suivre la même règle, et qu'en dupliquer la
-   * condition était déjà la raison pour laquelle le code à usage unique y
-   * échappait.
+   * Factored out because the three copies — password, one-time code, generated
+   * password — must all follow the same rule, and duplicating the condition was
+   * already the reason the one-time code escaped it.
    */
   function scheduleClipboardClear(): void {
     if (settings.clipboardClearSeconds <= 0) {
       return;
     }
-    // Deux effacements, délibérément. Le minuteur local respecte le délai exact
-    // tant que la popup vit ; l'alarme survit à sa fermeture mais est ramenée à
-    // trente secondes minimum par Chrome. Le premier qui aboutit gagne, et
-    // aucun des deux n'a besoin de l'autre.
+    // Two wipes, deliberately. The local timer honours the exact delay while the
+    // popup lives; the alarm survives its closing but is raised to thirty
+    // seconds minimum by Chrome. The first to land wins, and neither needs the
+    // other.
     setTimeout(() => {
       void navigator.clipboard.writeText('');
     }, settings.clipboardClearSeconds * 1000);
@@ -884,11 +878,11 @@ function App() {
   }
 
   /**
-   * Note l'usage d'un item : il remontera en tête à la prochaine ouverture.
+   * Records that an item was used: it will float to the top next time.
    *
-   * Appelé sur toute action qui sort réellement un secret du coffre — copie,
-   * remplissage, révélation. Ouvrir l'édition n'en est pas une : on y va pour
-   * corriger une faute de frappe aussi souvent que pour s'en servir.
+   * Called on every action that genuinely takes a secret out of the vault —
+   * copy, fill, reveal. Opening the editor is not one: one goes there to fix a
+   * typo as often as to use the item.
    */
   async function noteUsage(item: CipherOverview): Promise<void> {
     await markUsed(item.id);
@@ -899,9 +893,9 @@ function App() {
   }
 
   async function doCopyPassword(item: CipherOverview): Promise<void> {
-    const motDePasse = (await detailsOf(item))?.password ?? null;
-    if (motDePasse !== null) {
-      await navigator.clipboard.writeText(motDePasse);
+    const secret = (await detailsOf(item))?.password ?? null;
+    if (secret !== null) {
+      await navigator.clipboard.writeText(secret);
       void noteUsage(item);
       setCopiedId(item.id);
       setTimeout(() => setCopiedId(null), 1500);
@@ -918,7 +912,7 @@ function App() {
     }
   }
 
-  /** Minuteur d'auto-masquage du mot de passe révélé. */
+  /** Auto-hide timer for the revealed password. */
   const revealTimer = useRef<number | undefined>(undefined);
 
   function clearRevealTimer(): void {
@@ -930,7 +924,7 @@ function App() {
 
   function onToggleReveal(item: CipherOverview): void {
     clearRevealTimer();
-    // Masquer n'expose rien : seule la révélation est gardée.
+    // Hiding exposes nothing: only revealing is guarded.
     if (revealed?.id === item.id) {
       setRevealed(null);
       return;
@@ -939,32 +933,31 @@ function App() {
   }
 
   async function doReveal(item: CipherOverview): Promise<void> {
-    const motDePasse = (await detailsOf(item))?.password ?? null;
-    if (motDePasse !== null) {
+    const secret = (await detailsOf(item))?.password ?? null;
+    if (secret !== null) {
       void noteUsage(item);
-      setRevealed({ id: item.id, password: motDePasse });
-      // Auto-masquage : un mot de passe affiché ne doit pas rester à l'écran
-      // par oubli.
+      setRevealed({ id: item.id, password: secret });
+      // Auto-hide: a displayed password must not stay on screen through
+      // forgetfulness.
       revealTimer.current = window.setTimeout(() => setRevealed(null), REVEAL_HIDE_MS);
     }
   }
 
   /**
-   * Remplit le formulaire de l'onglet actif avec les identifiants de l'item.
+   * Fills the active tab's form with the item's credentials.
    *
-   * Uniquement sur geste explicite, et uniquement si le bouton était visible —
-   * c'est-à-dire si l'origine de l'item correspond à celle de l'onglet
-   * (`docs/EXTENSION.md`, règles d'autofill). Revérifiée ici : l'onglet a pu
-   * changer depuis le rendu.
+   * On an explicit gesture only, and only if the button was visible — that is,
+   * if the item's origin matches the tab's (`docs/EXTENSION.md`, autofill
+   * rules). Rechecked here: the tab may have changed since the render.
    */
   async function onFill(item: CipherOverview): Promise<void> {
     const tab = await activeWebTab();
     if (tab === null || !matchesOrigin(item.uris, tab.url.origin)) {
-      setError('L’onglet actif ne correspond plus à cet item.');
+      setError('The active tab no longer matches this item.');
       return;
     }
-    // L'origine d'abord, la garde ensuite : demander un mot de passe pour
-    // ensuite refuser le remplissage serait le pire des deux ordres.
+    // Origin first, guard second: asking for a password only to then refuse the
+    // fill would be the worst of the two orders.
     reprompt.guarded(item, () => doFill(item, tab));
   }
 
@@ -979,17 +972,17 @@ function App() {
       func: fillCredentials,
       args: [details.username ?? '', details.password ?? ''],
     });
-    // Attendu, pas lancé en fond : `window.close()` tue la popup avant que
-    // l'écriture ne parte, et l'usage le plus fréquent serait le seul à ne
-    // jamais être compté.
+    // Awaited, not fired and forgotten: `window.close()` kills the popup before
+    // the write leaves, and the most frequent use would be the only one never
+    // counted.
     await noteUsage(item);
     window.close();
   }
 
-  /** Ouvre l'écran d'édition, prérempli avec les valeurs déchiffrées. */
+  /** Opens the edit screen, pre-filled with the decrypted values. */
   function onEdit(item: CipherOverview): void {
-    // Le formulaire affiche le mot de passe en clair dans son champ : c'est
-    // une sortie de secret comme une autre.
+    // The form shows the password in the clear in its field: that is a secret
+    // leaving the vault like any other.
     reprompt.guarded(item, () => doEdit(item));
   }
 
@@ -1014,18 +1007,18 @@ function App() {
   }
 
   /**
-   * Session écrivable : client API et jetons rafraîchis si besoin.
+   * A writable session: API client and tokens refreshed if needed.
    *
-   * Toute écriture (édition, enregistrement d'une capture) commence par là.
-   * Le jeton d'accès expire en ~1 h ; le renouveler au moment d'écrire évite
-   * un 401 sur un geste que l'utilisateur croit abouti.
+   * Every write (an edit, saving a capture) starts here. The access token
+   * expires in about an hour; renewing it at write time avoids a 401 on a
+   * gesture the user believes has succeeded.
    *
-   * @throws {Error} Session absente — le coffre a été verrouillé entre-temps.
+   * @throws {Error} No session — the vault was locked in the meantime.
    */
   async function authorize(): Promise<AuthorizedSession> {
     const stored = await loadStoredSession();
     if (stored === null) {
-      throw new Error('Session expirée — verrouiller puis déverrouiller.');
+      throw new Error('Session expired — lock, then unlock again.');
     }
     const client = makeClient(settings, stored.serverUrl, await getDeviceId());
 
@@ -1037,21 +1030,21 @@ function App() {
       accessToken = renewed.accessToken;
       refreshToken = renewed.refreshToken ?? refreshToken;
       expiresAt = renewed.expiresAt;
-      // Persistés **avant** l'écriture qu'ils autorisent. Un serveur qui fait
-      // tourner les jetons de rafraîchissement a déjà invalidé l'ancien : si
-      // l'appel suivant échoue et qu'on n'a rien enregistré, la session est
-      // morte et il faut tout redéverrouiller pour un simple échec réseau.
+      // Persisted **before** the write they authorise. A server that rotates
+      // refresh tokens has already invalidated the old one: if the next call
+      // fails and nothing was saved, the session is dead and everything must be
+      // unlocked again over a simple network failure.
       await saveStoredSession({ ...stored, accessToken, refreshToken, expiresAt });
     }
     return { client, stored, accessToken, refreshToken, expiresAt };
   }
 
   /**
-   * Resynchronise après une écriture, met le cache à jour et réaffiche la
-   * liste. Sans cela, la popup montrerait encore l'état d'avant l'écriture.
+   * Resyncs after a write, updates the cache and redisplays the list. Without
+   * it, the popup would still be showing the state from before the write.
    */
   async function refreshAfterWrite(auth: AuthorizedSession, userKey: SymmetricCryptoKey): Promise<void> {
-    setBusy('Synchronisation…');
+    setBusy('Syncing…');
     const sync = await auth.client.sync(auth.accessToken);
     await saveStoredSession({
       userKeyB64: auth.stored.userKeyB64,
@@ -1067,7 +1060,7 @@ function App() {
     await showVault(sync, userKey, false);
   }
 
-  /** Chiffre, envoie la mise à jour, resynchronise et revient à la liste. */
+  /** Encrypts, sends the update, resyncs and returns to the list. */
   async function onSaveEdit(event: Event): Promise<void> {
     event.preventDefault();
     if (vault === null || editing === null) {
@@ -1079,7 +1072,7 @@ function App() {
     }
 
     setError(null);
-    setBusy('Chiffrement…');
+    setBusy('Encrypting…');
     try {
       const auth = await authorize();
 
@@ -1097,7 +1090,7 @@ function App() {
         editForm.password !== editOriginalPassword,
       );
 
-      setBusy('Enregistrement…');
+      setBusy('Saving…');
       await auth.client.updateCipher(auth.accessToken, editing.id, payload);
       await refreshAfterWrite(auth, vault.userKey);
 
@@ -1128,7 +1121,7 @@ function App() {
     );
   }
 
-  // --- Initialisation : ni mire ni liste tant qu'on ne sait pas -------------
+  // --- Initialising: neither sign-in screen nor list until we know ----------
   if (vault === null && initializing) {
     return (
       <div>
@@ -1136,18 +1129,18 @@ function App() {
           <h1>Zwarden</h1>
         </header>
         <main>
-          <p class="statut">{busy ?? 'Ouverture…'}</p>
+          <p class="status">{busy ?? 'Opening…'}</p>
         </main>
       </div>
     );
   }
 
-  // --- Écran second facteur -------------------------------------------------
+  // --- Second-factor screen -------------------------------------------------
   if (vault === null && twoFaProviders !== null) {
     return (
-      <EcranSecondFacteur
-        saisissables={twoFaProviders.filter((p) => p in PROVIDER_LABELS)}
-        libelles={PROVIDER_LABELS}
+      <TwoFactorScreen
+        available={twoFaProviders.filter((p) => p in PROVIDER_LABELS)}
+        labels={PROVIDER_LABELS}
         choice={twoFaChoice}
         code={twoFaCode}
         remember={rememberDevice}
@@ -1173,10 +1166,10 @@ function App() {
     );
   }
 
-  // --- Écran de déverrouillage ----------------------------------------------
+  // --- Unlock screen --------------------------------------------------------
   if (vault === null) {
     return (
-      <EcranDeverrouillage
+      <UnlockScreen
         serverUrl={serverUrl}
         email={email}
         password={password}
@@ -1193,29 +1186,29 @@ function App() {
     );
   }
 
-  // --- Écran d'édition ------------------------------------------------------
+  // --- Edit screen ----------------------------------------------------------
   if (editing !== null) {
     return (
-      <FormulaireEdition
+      <EditItemForm
         form={editForm}
-        estLogin={editing.type === 1}
+        isLogin={editing.type === 1}
         showPassword={editShowPassword}
         passkeys={editPasskeys}
         busy={busy}
         error={error}
-        generateur={generateur.render()}
+        generator={generator.render()}
         onPatch={(patch) => setEditForm({ ...editForm, ...patch })}
         onToggleShowPassword={() => setEditShowPassword(!editShowPassword)}
-        onOpenGenerator={() => void generateur.open('edit')}
+        onOpenGenerator={() => void generator.open('edit')}
         onSubmit={(e) => void onSaveEdit(e)}
         onCancel={onCancelEdit}
       />
     );
   }
 
-  // --- Liste du coffre ------------------------------------------------------
-  // Mémoïsé : le filtrage parcourait tout le coffre à chaque réaffichage, et
-  // un code à usage unique ouvert en provoquait un par seconde.
+  // --- Vault list -----------------------------------------------------------
+  // Memoised: filtering used to walk the whole vault on every re-render, and an
+  // open one-time code caused one of those every second.
   const needle = filter.trim().toLowerCase();
   const visible = useMemo(
     () =>
@@ -1231,32 +1224,32 @@ function App() {
         <h1>Zwarden</h1>
         <div>
           <button
-            class="discret"
-            title="Générer un mot de passe"
-            onClick={() => void generateur.open('standalone')}
+            class="quiet"
+            title="Generate a password"
+            onClick={() => void generator.open('standalone')}
           >
-            Générer
+            Generate
           </button>
-          <button class="discret" onClick={openOptions}>
-            Paramètres
+          <button class="quiet" onClick={openOptions}>
+            Settings
           </button>
-          <button class="discret" onClick={onLock}>
-            Verrouiller
+          <button class="quiet" onClick={onLock}>
+            Lock
           </button>
         </div>
       </header>
       <main>
         {reprompt.state !== null && (
-          <GardeReprompt
+          <RepromptGuard
             state={reprompt.state}
             onPassword={reprompt.setPassword}
             onConfirm={(e) => void reprompt.confirm(e)}
             onCancel={reprompt.cancel}
           />
         )}
-        {generateur.render()}
+        {generator.render()}
         {proposal !== null && (
-          <Proposition
+          <SaveProposalBanner
             proposal={proposal}
             busy={busy !== null}
             onSave={() => void onSaveProposal()}
@@ -1265,15 +1258,15 @@ function App() {
           />
         )}
         <input
-          class="recherche"
+          class="search"
           type="search"
-          placeholder={`Rechercher parmi ${vault.items.length} item(s)…`}
+          placeholder={`Search ${vault.items.length} item(s)…`}
           value={filter}
           onInput={(e) => setFilter(e.currentTarget.value)}
         />
         {vault.errors.length > 0 && (
           <details class="diagnostic">
-            <summary class="erreur">{vault.errors.length} champ(s) illisible(s) — détails</summary>
+            <summary class="error">{vault.errors.length} unreadable field(s) — details</summary>
             <ul>
               {groupErrors(vault.errors).map(([name, count]) => (
                 <li key={name}>
@@ -1281,27 +1274,27 @@ function App() {
                 </li>
               ))}
             </ul>
-            <p class="aide-diag">
-              Journal complet : clic droit sur la popup → « Inspecter » → Console.
+            <p class="hint-diag">
+              Full log: right-click the popup → “Inspect” → Console.
             </p>
           </details>
         )}
-        {error !== null && <p class="erreur">{error}</p>}
+        {error !== null && <p class="error">{error}</p>}
         {visible.length === 0 ? (
-          <p class="vide">Aucun item.</p>
+          <p class="empty">No items.</p>
         ) : (
           <ul class="items">
             {visible.map((item) => (
-              <LigneItem
+              <ItemRow
                 key={item.id}
                 item={item}
                 labels={vault.labels}
-                copiePassword={copiedId === item.id}
-                copieUsername={copiedUserId === item.id}
-                revele={revealed?.id === item.id ? revealed.password : null}
+                passwordCopied={copiedId === item.id}
+                usernameCopied={copiedUserId === item.id}
+                revealed={revealed?.id === item.id ? revealed.password : null}
                 otpConfig={otp?.id === item.id ? otp.config : null}
-                copieOtp={copiedOtp}
-                remplissable={tabOrigin !== null && matchesOrigin(item.uris, tabOrigin)}
+                otpCopied={copiedOtp}
+                fillable={tabOrigin !== null && matchesOrigin(item.uris, tabOrigin)}
                 onCopyUsername={() => void onCopyUsername(item)}
                 onCopyPassword={() => onCopyPassword(item)}
                 onToggleReveal={() => onToggleReveal(item)}

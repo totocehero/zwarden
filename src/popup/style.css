@@ -1,13 +1,13 @@
 /* Popup Zwarden — style minimal de la version de preuve de vie. */
 
 :root {
-  --fond: #1c1f26;
-  --panneau: #262a33;
-  --texte: #e6e8ee;
-  --texte-2: #9aa1af;
+  --background: #1c1f26;
+  --panel: #262a33;
+  --text: #e6e8ee;
+  --text-2: #9aa1af;
   --accent: #4f8cff;
-  --erreur: #ff6b6b;
-  --bord: #3a3f4b;
+  --error: #ff6b6b;
+  --border: #3a3f4b;
 }
 
 * {
@@ -18,8 +18,8 @@ body {
   width: 420px;
   margin: 0;
   font: 13px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif;
-  background: var(--fond);
-  color: var(--texte);
+  background: var(--background);
+  color: var(--text);
 }
 
 header {
@@ -27,7 +27,7 @@ header {
   align-items: center;
   justify-content: space-between;
   padding: 10px 12px;
-  border-bottom: 1px solid var(--bord);
+  border-bottom: 1px solid var(--border);
 }
 
 header h1 {
@@ -48,16 +48,16 @@ form {
 label {
   display: grid;
   gap: 3px;
-  color: var(--texte-2);
+  color: var(--text-2);
   font-size: 12px;
 }
 
 input {
   padding: 7px 9px;
-  border: 1px solid var(--bord);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--panneau);
-  color: var(--texte);
+  background: var(--panel);
+  color: var(--text);
   font-size: 13px;
 }
 
@@ -69,10 +69,10 @@ input:focus {
 select,
 textarea {
   padding: 7px 9px;
-  border: 1px solid var(--bord);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--panneau);
-  color: var(--texte);
+  background: var(--panel);
+  color: var(--text);
   font-size: 13px;
   font-family: inherit;
   resize: vertical;
@@ -83,29 +83,29 @@ textarea:focus {
   outline-offset: -1px;
 }
 
-label.ligne {
+label.row {
   display: flex;
   flex-direction: row;
   align-items: center;
   gap: 6px;
-  color: var(--texte);
+  color: var(--text);
 }
 
-label.ligne input {
+label.row input {
   width: auto;
 }
 
-/* Champ mot de passe avec œil intégré. */
-.champ-mdp {
+/* Password field with a built-in eye. */
+.password-field {
   position: relative;
   display: grid;
 }
 
-.champ-mdp input {
+.password-field input {
   padding-right: 32px;
 }
 
-button.oeil {
+button.eye {
   position: absolute;
   right: 4px;
   top: 50%;
@@ -115,37 +115,37 @@ button.oeil {
   padding: 4px;
   background: transparent;
   border: 0;
-  color: var(--texte-2);
+  color: var(--text-2);
   cursor: pointer;
 }
 
-button.oeil:hover {
-  color: var(--texte);
+button.eye:hover {
+  color: var(--text);
 }
 
-/* Boutons-icônes des items de la liste : compacts, le texte a la place. */
-button.oeil-item,
-button.icone {
+/* Icon buttons on list items: compact, so the text gets the room. */
+button.eye-item,
+button.icon {
   display: flex;
   align-items: center;
   padding: 5px;
   background: transparent;
   border: 0;
-  color: var(--texte-2);
+  color: var(--text-2);
   cursor: pointer;
 }
 
-button.oeil-item:hover,
-button.icone:hover {
-  color: var(--texte);
+button.eye-item:hover,
+button.icon:hover {
+  color: var(--text);
 }
 
-button.icone.copie-ok {
+button.icon.copied-ok {
   color: var(--accent);
 }
 
 /* « Remplir » reste le seul bouton texte : action principale. */
-.item-ligne button.remplir {
+.item-row button.fill {
   padding: 5px 10px;
 }
 
@@ -165,31 +165,31 @@ button:disabled {
   cursor: default;
 }
 
-button.discret {
+button.quiet {
   background: transparent;
-  color: var(--texte-2);
+  color: var(--text-2);
   font-weight: 400;
   padding: 4px 8px;
 }
 
-.statut {
+.status {
   margin-top: 8px;
-  color: var(--texte-2);
+  color: var(--text-2);
 }
 
-.erreur {
+.error {
   margin-top: 8px;
-  color: var(--erreur);
+  color: var(--error);
   white-space: pre-wrap;
 }
 
-.recherche {
+.search {
   width: 100%;
   margin-bottom: 8px;
 }
 
-/* Code à usage unique, sous la ligne de l'item. Chiffres espacés et
-   tabulaires : on les recopie parfois à la main, l'œil ne doit pas glisser. */
+/* One-time code, below the item's row. Spaced, tabular figures: they sometimes
+   get copied by hand, and the eye must not slip. */
 .otp {
   display: flex;
   align-items: baseline;
@@ -207,59 +207,59 @@ button.discret {
   font-size: 17px;
   font-variant-numeric: tabular-nums;
   letter-spacing: 2px;
-  color: var(--texte);
+  color: var(--text);
 }
 
-.otp-fin {
+.otp-end {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.otp-copie {
+.otp-copied {
   font-size: 11px;
-  color: var(--texte-2);
+  color: var(--text-2);
 }
 
-.anneau {
+.ring {
   color: var(--accent);
   flex: none;
 }
 
-/* Le code va expirer : l'anneau passe à l'alerte plutôt que de disparaître
-   sans prévenir sous les doigts. */
-.anneau-urgent {
-  color: var(--erreur);
+/* The code is about to expire: the ring turns to alert rather than vanish
+   without warning under the fingers. */
+.ring-urgent {
+  color: var(--error);
 }
 
-.anneau-texte {
-  fill: var(--texte-2);
+.ring-text {
+  fill: var(--text-2);
   font-size: 9px;
   font-variant-numeric: tabular-nums;
 }
 
-/* La jauge glisse d'une seconde à l'autre au lieu de sauter — sauf si le
-   système demande la sobriété de mouvement. */
-.anneau circle {
+/* The gauge glides from one second to the next instead of jumping — unless the
+   system asks for reduced motion. */
+.ring circle {
   transition: stroke-dashoffset 0.3s linear;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .anneau circle {
+  .ring circle {
     transition: none;
   }
 }
 
-/* Générateur de mots de passe. */
-.generateur {
+/* Password generator. */
+.generator {
   margin-bottom: 10px;
   padding: 9px 10px;
-  border: 1px solid var(--bord);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  background: var(--panneau);
+  background: var(--panel);
 }
 
-.generateur-sortie {
+.generator-output {
   padding: 8px;
   border-radius: 5px;
   background: #10131a;
@@ -270,7 +270,7 @@ button.discret {
   user-select: all;
 }
 
-.generateur-actions {
+.generator-actions {
   display: flex;
   gap: 6px;
   align-items: center;
@@ -278,18 +278,18 @@ button.discret {
   margin-top: 8px;
 }
 
-.generateur-longueur {
+.generator-length {
   display: block;
   margin-top: 8px;
-  color: var(--texte-2);
+  color: var(--text-2);
   font-size: 12px;
 }
 
-.generateur-longueur input {
+.generator-length input {
   width: 100%;
 }
 
-.generateur-classes {
+.generator-classes {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 12px;
@@ -297,40 +297,40 @@ button.discret {
   font-size: 12px;
 }
 
-/* Le dé partage la colonne de l'œil : décalé pour ne pas le recouvrir, et le
-   champ gagne la place des deux boutons. */
-.champ-mdp .de {
+/* The die shares the eye's column: offset so as not to cover it, and the
+   field gets the room for both buttons. */
+.password-field .dice {
   right: 30px;
 }
 
-.champ-mdp:has(.de) input {
+.password-field:has(.dice) input {
   padding-right: 58px;
 }
 
-/* Proposition d'enregistrement — au-dessus de la recherche, cadrée pour se
-   distinguer de la liste sans crier : c'est une question, pas une alerte. */
-.proposition {
+/* Save proposal — above the search box, framed so it reads as
+   distinct from the list without shouting: it is a question, not an alert. */
+.proposal {
   margin-bottom: 10px;
   padding: 9px 10px;
   border: 1px solid var(--accent);
   border-radius: 6px;
-  background: var(--panneau);
+  background: var(--panel);
 }
 
-.proposition-titre {
+.proposal-title {
   margin: 0 0 3px;
   font-size: 13px;
   font-weight: 600;
 }
 
-.proposition-detail {
+.proposal-detail {
   margin: 0 0 8px;
-  color: var(--texte-2);
+  color: var(--text-2);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
 
-.proposition-actions {
+.proposal-actions {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -347,10 +347,10 @@ ul.items {
 
 ul.items li {
   padding: 7px 6px;
-  border-bottom: 1px solid var(--bord);
+  border-bottom: 1px solid var(--border);
 }
 
-.item-ligne {
+.item-row {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -359,21 +359,21 @@ ul.items li {
 .secret {
   margin-top: 6px;
   padding: 6px 8px;
-  border: 1px dashed var(--bord);
+  border: 1px dashed var(--border);
   border-radius: 6px;
-  background: var(--panneau);
+  background: var(--panel);
   font-family: ui-monospace, 'Cascadia Mono', monospace;
   font-size: 12px;
   word-break: break-all;
   user-select: all;
 }
 
-.item-texte {
+.item-text {
   flex: 1;
   min-width: 0;
 }
 
-.item-nom {
+.item-name {
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -381,7 +381,7 @@ ul.items li {
 }
 
 .item-uri {
-  color: var(--texte-2);
+  color: var(--text-2);
   font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -389,7 +389,7 @@ ul.items li {
 }
 
 .item-user {
-  color: var(--texte-2);
+  color: var(--text-2);
   font-size: 12px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -398,19 +398,19 @@ ul.items li {
 }
 
 .item-user:hover {
-  color: var(--texte);
+  color: var(--text);
 }
 
-.vide {
-  color: var(--texte-2);
+.empty {
+  color: var(--text-2);
   text-align: center;
   padding: 24px 0;
 }
 
-button.secondaire {
+button.secondary {
   background: transparent;
-  border: 1px solid var(--bord);
-  color: var(--texte);
+  border: 1px solid var(--border);
+  color: var(--text);
   font-weight: 400;
 }
 
@@ -426,11 +426,11 @@ button.secondaire {
 .diagnostic ul {
   margin: 4px 0;
   padding-left: 18px;
-  color: var(--texte-2);
+  color: var(--text-2);
 }
 
-.aide-diag {
-  color: var(--texte-2);
+.hint-diag {
+  color: var(--text-2);
   margin: 2px 0 0;
 }
 
@@ -449,7 +449,7 @@ button.secondaire {
 .passkeys-info p {
   margin: 4px 0;
   font-size: 12px;
-  color: var(--texte-2);
+  color: var(--text-2);
 }
 
 .passkeys-info .badge {
@@ -475,13 +475,13 @@ button.chip {
   cursor: pointer;
 }
 
-button.chip-dossier {
-  border: 1px solid var(--bord);
-  color: var(--texte-2);
+button.chip-folder {
+  border: 1px solid var(--border);
+  color: var(--text-2);
 }
 
-button.chip-dossier:hover {
-  color: var(--texte);
+button.chip-folder:hover {
+  color: var(--text);
 }
 
 button.chip-collection {
@@ -494,10 +494,10 @@ button.chip-collection:hover {
   color: #fff;
 }
 
-/* --- Garde « mot de passe maître requis » ---------------------------------
-   Superposition plutôt que bandeau : la demande protège une action précise,
-   et laisser la liste cliquable derrière elle brouillerait ce qu'on confirme. */
-.voile {
+/* --- The "master password required" guard --------------------------------
+   An overlay rather than a banner: the prompt protects one precise action, and
+   leaving the list clickable behind it would blur what is being confirmed. */
+.overlay {
   position: fixed;
   inset: 0;
   display: flex;
@@ -514,10 +514,10 @@ button.chip-collection:hover {
   padding: 12px;
   border: 1px solid var(--accent);
   border-radius: 8px;
-  background: var(--panneau);
+  background: var(--panel);
 }
 
-.reprompt-titre {
+.reprompt-title {
   margin: 0 0 3px;
   font-size: 13px;
   font-weight: 600;
@@ -525,14 +525,14 @@ button.chip-collection:hover {
 
 .reprompt-detail {
   margin: 0 0 8px;
-  color: var(--texte-2);
+  color: var(--text-2);
   font-size: 12px;
   overflow-wrap: anywhere;
 }
 
-.reprompt-erreur {
+.reprompt-error {
   margin: 6px 0 0;
-  color: var(--erreur);
+  color: var(--error);
   font-size: 12px;
 }
 

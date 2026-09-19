@@ -1,15 +1,15 @@
 /**
- * @file Garde par item : l'état, et la vérification du mot de passe maître.
+ * @file The per-item guard: its state, and master-password verification.
  *
- * Regroupé hors de `App` parce que c'est une mécanique complète et refermée —
- * un état, une vérification, une action suspendue — et qu'elle n'a besoin de
- * rien du coffre déchiffré. La sortir la rend lisible d'un seul tenant, ce qui
- * compte pour un code dont le rôle est de **refuser** quelque chose.
+ * Grouped outside `App` because it is a complete, self-contained mechanism — a
+ * state, a verification, a suspended action — and needs nothing from the
+ * decrypted vault. Lifting it out makes it readable in one piece, which matters
+ * for code whose job is to **refuse** something.
  *
- * La vérification est hors réseau : on redérive la clé maître depuis la saisie
- * et on la compare au hash local conservé au déverrouillage. Voir
- * `docs/CRYPTO.md` §7 pour le raisonnement — faire valider un `reprompt` par le
- * serveur donnerait à qui contrôle le réseau le pouvoir de le désarmer.
+ * The verification is offline: we re-derive the master key from the entry and
+ * compare it against the local hash kept at unlock. See `docs/CRYPTO.md` §7 for
+ * the reasoning — having the server validate a `reprompt` would hand whoever
+ * controls the network the power to disarm it.
  */
 
 import { useState } from 'preact/hooks';
@@ -18,22 +18,22 @@ import { deriveMasterKey, verifyLocalPasswordHash } from '@core/crypto/kdf.js';
 import type { CipherOverview } from '@core/vault/cipherService.js';
 import { loadStoredSession } from '@shared/storage.js';
 
-import type { RepromptState } from '../components/GardeReprompt.js';
+import type { RepromptState } from '../components/RepromptGuard.js';
 
-/** Action protégée : elle peut être synchrone ou non, son résultat est ignoré. */
+/** A guarded action: it may be sync or not, and its result is ignored. */
 type Action = () => void | Promise<void>;
 
 export interface Reprompt {
-  /** État courant de la garde, ou `null` si aucune action n'est suspendue. */
+  /** Current guard state, or `null` if no action is suspended. */
   readonly state: RepromptState<void | Promise<void>> | null;
   /**
-   * Exécute une action qui sort un secret du coffre, derrière la garde de
-   * l'item.
+   * Runs an action that takes a secret out of the vault, behind the item's
+   * guard.
    *
-   * Item sans garde : l'action part immédiatement, rien ne change. Item marqué
-   * `reprompt` : elle est suspendue jusqu'à vérification. Le point important est
-   * que la garde se pose **avant** tout déchiffrement — un secret protégé n'est
-   * pas déchiffré puis caché, il n'est pas déchiffré du tout.
+   * Item with no guard: the action leaves immediately, nothing changes. Item
+   * marked `reprompt`: it is suspended until verification. The important part is
+   * that the guard stands **before** any decryption — a protected secret is not
+   * decrypted and then hidden, it is not decrypted at all.
    */
   readonly guarded: (item: CipherOverview, run: Action) => void;
   readonly setPassword: (password: string) => void;
@@ -42,23 +42,23 @@ export interface Reprompt {
 }
 
 /**
- * @param messageFor Traduction d'une erreur en message affichable, fournie par
- *   l'appelant pour rester cohérente avec le reste de la popup.
+ * @param messageFor Turns an error into a displayable message, supplied by the
+ *   caller so it stays consistent with the rest of the popup.
  */
 export function useReprompt(messageFor: (error: unknown) => string): Reprompt {
   const [state, setState] = useState<RepromptState<void | Promise<void>> | null>(null);
 
-  /** Redérive la clé maître et la compare au témoin local. */
+  /** Re-derives the master key and compares it against the local witness. */
   async function verify(candidate: string): Promise<boolean> {
     const stored = await loadStoredSession();
     if (stored === null) {
-      throw new Error('Session expirée — verrouiller puis déverrouiller.');
+      throw new Error('Session expired — lock, then unlock again.');
     }
     const masterKey = await deriveMasterKey(candidate, stored.email, stored.kdfConfig);
     try {
       return await verifyLocalPasswordHash(masterKey, candidate, stored.localPasswordHash);
     } finally {
-      // Elle n'a servi qu'à comparer.
+      // It only ever served to compare.
       masterKey.destroy();
     }
   }
@@ -80,22 +80,22 @@ export function useReprompt(messageFor: (error: unknown) => string): Reprompt {
 
     async confirm(event) {
       event.preventDefault();
-      const en_cours = state;
-      if (en_cours === null || en_cours.busy) {
+      const pending = state;
+      if (pending === null || pending.busy) {
         return;
       }
-      // La dérivation dure : sans cet état, un second envoi lancerait un
-      // deuxième KDF pendant que le premier tourne.
-      setState({ ...en_cours, busy: true, error: null });
+      // Derivation takes time: without this state, a second submit would start a
+      // second KDF while the first is still running.
+      setState({ ...pending, busy: true, error: null });
       try {
-        if (!(await verify(en_cours.password))) {
-          setState({ ...en_cours, busy: false, password: '', error: 'Mot de passe incorrect.' });
+        if (!(await verify(pending.password))) {
+          setState({ ...pending, busy: false, password: '', error: 'Incorrect password.' });
           return;
         }
         setState(null);
-        await en_cours.run();
+        await pending.run();
       } catch (err) {
-        setState({ ...en_cours, busy: false, password: '', error: messageFor(err) });
+        setState({ ...pending, busy: false, password: '', error: messageFor(err) });
       }
     },
 

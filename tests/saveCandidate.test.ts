@@ -1,11 +1,10 @@
 /**
- * @file Rapprochement d'un identifiant saisi avec le coffre.
+ * @file Matching an entered credential against the vault.
  *
- * `findSaveCandidate` décide entre « créer un item » et « mettre à jour
- * celui-ci ». Une erreur de sens n'est pas un défaut d'affichage : elle
- * écrase un mot de passe encore valide, ou en crée un doublon silencieux.
- * D'où l'insistance sur l'origine stricte, reprise de la règle 2 du §4 de
- * `docs/EXTENSION.md`.
+ * `findSaveCandidate` decides between "create an item" and "update this one". An
+ * error of direction is not a display defect: it overwrites a still-valid
+ * password, or silently creates a duplicate. Hence the insistence on strict
+ * origin, taken from rule 2 of §4 in `docs/EXTENSION.md`.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -31,82 +30,82 @@ function item(id: string, username: string, uris: string[]): CipherOverview {
 }
 
 describe('findSaveCandidate', () => {
-  const perso = item('perso', 'moi@exemple.fr', ['https://github.com']);
-  const pro = item('pro', 'moi@boite.fr', ['https://github.com']);
-  const ailleurs = item('ailleurs', 'moi@exemple.fr', ['https://gitlab.com']);
-  const coffre = [perso, pro, ailleurs];
+  const personal = item('personal', 'me@example.com', ['https://github.com']);
+  const work = item('work', 'me@company.com', ['https://github.com']);
+  const elsewhere = item('elsewhere', 'me@example.com', ['https://gitlab.com']);
+  const vault = [personal, work, elsewhere];
 
-  const chercher = (origin: string, username: string) =>
-    findSaveCandidate(coffre, origin, username, matchesOrigin);
+  const find = (origin: string, username: string) =>
+    findSaveCandidate(vault, origin, username, matchesOrigin);
 
-  it('rapproche l’item de même origine et même identifiant', () => {
-    expect(chercher('https://github.com', 'moi@exemple.fr')).toBe(perso);
+  it('matches the item with the same origin and the same username', () => {
+    expect(find('https://github.com', 'me@example.com')).toBe(personal);
   });
 
-  it('distingue deux comptes du même site', () => {
-    expect(chercher('https://github.com', 'moi@boite.fr')).toBe(pro);
+  it('tells two accounts on the same site apart', () => {
+    expect(find('https://github.com', 'me@company.com')).toBe(work);
   });
 
-  it('ignore la casse et les espaces de l’identifiant', () => {
-    expect(chercher('https://github.com', '  MOI@Exemple.FR ')).toBe(perso);
+  it('ignores the username case and surrounding spaces', () => {
+    expect(find('https://github.com', '  ME@Example.COM ')).toBe(personal);
   });
 
-  it('ne rapproche rien pour un identifiant inconnu sur ce site', () => {
-    // Second compte : il faut créer, surtout pas écraser.
-    expect(chercher('https://github.com', 'autre@exemple.fr')).toBeNull();
+  it('matches nothing for a username unknown on this site', () => {
+    // A second account: it must be created, and above all not overwritten.
+    expect(find('https://github.com', 'other@example.com')).toBeNull();
   });
 
-  it('ne rapproche rien sur une autre origine', () => {
-    expect(chercher('https://bitbucket.org', 'moi@exemple.fr')).toBeNull();
+  it('matches nothing on a different origin', () => {
+    expect(find('https://bitbucket.org', 'me@example.com')).toBeNull();
   });
 
-  it('n’accepte pas une origine voisine', () => {
-    // La règle §4 : origine stricte. `github.com.attaquant.com` ne doit
-    // rapprocher aucun item, sous peine d'y écraser un mot de passe.
-    expect(chercher('https://github.com.attaquant.com', 'moi@exemple.fr')).toBeNull();
-    expect(chercher('http://github.com', 'moi@exemple.fr')).toBeNull();
+  it('does not accept a neighbouring origin', () => {
+    // The §4 rule: strict origin. `github.com.attacker.com` must match no item,
+    // on pain of overwriting a password there.
+    expect(find('https://github.com.attacker.com', 'me@example.com')).toBeNull();
+    expect(find('http://github.com', 'me@example.com')).toBeNull();
   });
 
-  it('ne rapproche rien sans identifiant détecté', () => {
-    expect(chercher('https://github.com', '')).toBeNull();
-    expect(chercher('https://github.com', '   ')).toBeNull();
+  it('matches nothing when no username was detected', () => {
+    expect(find('https://github.com', '')).toBeNull();
+    expect(find('https://github.com', '   ')).toBeNull();
   });
 });
 
 describe('decideProposal', () => {
-  const capture = 'nouveau-secret';
+  const captured = 'new-secret';
 
-  it('propose la création quand rien ne se rapproche', () => {
-    expect(decideProposal(null, capture, null)).toEqual({ kind: 'creation' });
+  it('offers creation when nothing matches', () => {
+    expect(decideProposal(null, captured, null)).toEqual({ kind: 'create' });
   });
 
   /**
-   * Le cas le plus fréquent : une connexion ordinaire. Le taire est ce qui donne
-   * du sens à la pastille — s'allumer à chaque connexion réussie la rendrait
-   * insignifiante.
+   * The most frequent case: an ordinary sign-in. Staying quiet about it is what
+   * gives the badge meaning — lighting up on every successful sign-in would make
+   * it meaningless.
    */
-  it('se tait quand le coffre a déjà ce mot de passe', () => {
-    const existant = item('i1', 'alice', ['https://exemple.fr']);
-    expect(decideProposal(existant, capture, capture)).toEqual({ kind: 'aucune' });
+  it('stays quiet when the vault already holds this password', () => {
+    const existing = item('i1', 'alice', ['https://example.com']);
+    expect(decideProposal(existing, captured, captured)).toEqual({ kind: 'none' });
   });
 
-  it('propose la mise à jour quand le mot de passe a changé', () => {
-    const existant = item('i1', 'alice', ['https://exemple.fr']);
-    expect(decideProposal(existant, capture, 'ancien')).toEqual({
-      kind: 'miseAJour',
-      item: existant,
+  it('offers an update when the password has changed', () => {
+    const existing = item('i1', 'alice', ['https://example.com']);
+    expect(decideProposal(existing, captured, 'old')).toEqual({
+      kind: 'update',
+      item: existing,
     });
   });
 
   /**
-   * Item illisible : se taire sur la foi d'une comparaison impossible ferait
-   * perdre la saisie. On propose, l'utilisateur tranche.
+   * An unreadable item: staying quiet on the strength of an impossible
+   * comparison would lose the entry. We offer, and the user decides.
    */
-  it('propose la mise à jour quand l’item existant est illisible', () => {
-    const existant = item('i1', 'alice', ['https://exemple.fr']);
-    expect(decideProposal(existant, capture, null)).toEqual({
-      kind: 'miseAJour',
-      item: existant,
+  it('offers an update when the existing item is unreadable', () => {
+    const existing = item('i1', 'alice', ['https://example.com']);
+    expect(decideProposal(existing, captured, null)).toEqual({
+      kind: 'update',
+      item: existing,
     });
   });
 });

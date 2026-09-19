@@ -1,28 +1,26 @@
 /**
- * @file Client HTTP pour l'API de coffre auto-hébergé.
+ * @file HTTP client for the self-hosted vault API.
  *
- * ## Responsabilité
+ * ## Responsibility
  *
- * Transport et analyse de réponses, rien d'autre. Ce module ne déchiffre rien,
- * ne détient aucune clé et **n'importe aucune primitive cryptographique** — la
- * cryptographie vit dans `core/crypto`, l'orchestration dans `core/vault`. La
- * séparation permet d'auditer les couches indépendamment : une faille de
- * transport ne peut pas exposer de clé, puisqu'il n'y en a aucune ici.
+ * Transport and response parsing, nothing else. This module decrypts nothing,
+ * holds no key and **imports no cryptographic primitive** — cryptography lives
+ * in `core/crypto`, orchestration in `core/vault`. The separation lets the
+ * layers be audited independently: a transport flaw cannot expose a key, since
+ * there is none here.
  *
- * ## Ni mot de passe, ni clé ne traversent ce module
+ * ## Neither password nor key crosses this module
  *
- * {@link ApiClient.login} prend le **hash d'autorisation déjà calculé**
- * (`derivePasswordHash`, usage `ServerAuthorization`) — jamais le mot de
- * passe, jamais la clé maître. Cette signature rend l'erreur impossible à
- * commettre par inadvertance : il n'existe aucun paramètre où placer un
- * secret.
+ * {@link ApiClient.login} takes the **already-computed authorization hash**
+ * (`derivePasswordHash`, `ServerAuthorization` purpose) — never the password,
+ * never the master key. That signature makes the mistake impossible to commit
+ * by accident: there is no parameter to put a secret in.
  *
- * ## Aucun serveur par défaut
+ * ## No default server
  *
- * `serverUrl` est obligatoire et sans valeur de repli. Zwarden ne se connecte
- * qu'à l'instance que l'utilisateur désigne explicitement : aucun service tiers
- * n'est contacté, ni pour l'authentification, ni pour les icônes, ni pour de la
- * télémétrie.
+ * `serverUrl` is mandatory and has no fallback. Zwarden connects only to the
+ * instance the user explicitly names: no third-party service is contacted, not
+ * for authentication, not for icons, not for telemetry.
  */
 
 import { type KdfConfig, KdfType } from '../crypto/kdf.js';
@@ -37,7 +35,7 @@ import {
   readField,
 } from './models.js';
 
-/** Échec d'un appel API, avec le contexte nécessaire au diagnostic. */
+/** An API call failure, with the context needed to diagnose it. */
 export class ApiError extends Error {
   override readonly name = 'ApiError';
   /** Identifiant stable pour l'interface : les messages servent aux journaux. */
@@ -52,7 +50,7 @@ export class ApiError extends Error {
   }
 }
 
-/** Levée lorsque le serveur exige une seconde étape d'authentification. */
+/** Thrown when the server requires a second authentication step. */
 export class TwoFactorRequiredError extends Error {
   override readonly name = 'TwoFactorRequiredError';
   /** Identifiant stable pour l'interface : les messages servent aux journaux. */
@@ -60,17 +58,17 @@ export class TwoFactorRequiredError extends Error {
 
   constructor(readonly providers: readonly string[]) {
     super(
-      `Authentification à deux facteurs requise (fournisseurs : ${providers.join(', ') || 'non précisés'})`,
+      `Two-factor authentication required (providers: ${providers.join(', ') || 'unspecified'})`,
     );
   }
 }
 
 /**
- * Levée lorsque le serveur exige la résolution d'un captcha.
+ * Thrown when the server requires a captcha to be solved.
  *
- * Vaultwarden peut l'imposer après des échecs répétés ou selon sa
- * configuration. Sans traitement dédié, l'utilisateur verrait un « échec
- * d'authentification » inexpliqué alors que son mot de passe est correct.
+ * Vaultwarden may impose one after repeated failures or by configuration.
+ * Without dedicated handling, the user would see an unexplained "authentication
+ * failed" while their password is perfectly correct.
  */
 export class CaptchaRequiredError extends Error {
   override readonly name = 'CaptchaRequiredError';
@@ -78,18 +76,17 @@ export class CaptchaRequiredError extends Error {
   readonly code = 'captcha-required';
 
   constructor(readonly siteKey: string) {
-    super('Le serveur exige la résolution d’un captcha avant de poursuivre');
+    super('The server requires a captcha to be solved before continuing');
   }
 }
 
 /**
- * Levée lorsque le serveur limite le débit (HTTP 429).
+ * Thrown when the server rate-limits (HTTP 429).
  *
- * Vaultwarden applique un limiteur sur l'authentification — 10 tentatives par
- * minute dans sa configuration par défaut. Distinguer ce cas d'un échec
- * d'identifiants est indispensable : réessayer immédiatement aggrave la
- * situation, et afficher « mot de passe incorrect » induirait l'utilisateur en
- * erreur.
+ * Vaultwarden applies a limiter on authentication — 10 attempts per minute in
+ * its default configuration. Telling this apart from a credentials failure is
+ * essential: retrying immediately makes things worse, and showing "wrong
+ * password" would mislead the user.
  */
 export class RateLimitedError extends Error {
   override readonly name = 'RateLimitedError';
@@ -99,88 +96,87 @@ export class RateLimitedError extends Error {
   constructor(readonly retryAfterSeconds: number | undefined) {
     super(
       retryAfterSeconds === undefined
-        ? 'Trop de tentatives : le serveur limite temporairement les connexions'
-        : `Trop de tentatives : réessayer dans ${retryAfterSeconds} seconde(s)`,
+        ? 'Too many attempts: the server is temporarily rate-limiting connections'
+        : `Too many attempts: retry in ${retryAfterSeconds} second(s)`,
     );
   }
 }
 
-/** Session authentifiée, telle que renvoyée par {@link ApiClient.login}. */
+/** An authenticated session, as returned by {@link ApiClient.login}. */
 export interface LoginResult {
   readonly accessToken: string;
   readonly refreshToken: string | undefined;
-  /** Instant d'expiration, en millisecondes epoch. */
+  /** Expiry instant, in epoch milliseconds. */
   readonly expiresAt: number;
   /**
-   * Clé du coffre, enveloppée par la clé maître étirée. Toujours chiffrée :
-   * le déchiffrement relève de l'appelant.
+   * Vault key, wrapped by the stretched master key. Always encrypted:
+   * decryption is the caller's business.
    */
   readonly protectedUserKey: string | undefined;
   readonly protectedPrivateKey: string | undefined;
   /**
-   * Jeton de dispense de second facteur, présent si `remember` a été demandé
-   * et accepté. À persister par appareil, puis rejouer comme fournisseur 5
-   * (`Remember`) pour ne plus être sollicité sur cet appareil.
+   * Two-factor remember token, present if `remember` was requested and granted.
+   * To be persisted per device, then replayed as provider 5 (`Remember`) so the
+   * device is no longer challenged.
    */
   readonly twoFactorRememberToken: string | undefined;
 }
 
-/** Second facteur joint à une tentative d'authentification. */
+/** Second factor attached to an authentication attempt. */
 export interface TwoFactorSubmission {
-  /** Identifiant du fournisseur (voir `TwoFactorProvider` dans models.ts). */
+  /** Provider identifier (see `TwoFactorProvider` in models.ts). */
   readonly provider: number;
-  /** Code TOTP, code e-mail, OTP YubiKey, ou jeton de dispense (fournisseur 5). */
+  /** TOTP code, email code, YubiKey OTP, or remember token (provider 5). */
   readonly token: string;
-  /** Demande un jeton de dispense pour cet appareil. */
+  /** Requests a remember token for this device. */
   readonly remember?: boolean;
 }
 
 export interface ApiClientOptions {
   /**
-   * URL de l'instance auto-hébergée, par exemple `https://coffre.exemple.fr`.
-   * Obligatoire, sans valeur par défaut. HTTPS exigé — HTTP n'est toléré que
-   * vers localhost, pour le développement.
+   * URL of the self-hosted instance, for example `https://vault.example.com`.
+   * Mandatory, with no default. HTTPS required — HTTP is tolerated only towards
+   * localhost, for development.
    */
   readonly serverUrl: string;
-  /** Nom affiché dans la liste des sessions actives côté serveur. */
+  /** Name shown in the server's list of active sessions. */
   readonly deviceName?: string;
   /**
-   * Identifiant stable de l'appareil (UUID). Doit être persisté : le
-   * régénérer à chaque connexion crée une session supplémentaire à chaque fois
-   * et déclenche les alertes « nouvel appareil ».
+   * Stable device identifier (UUID). Must be persisted: regenerating it on every
+   * connection creates an extra session each time and triggers "new device"
+   * alerts.
    */
   readonly deviceIdentifier: string;
   /**
-   * Type d'appareil annoncé à l'authentification. À fixer selon la cible de
-   * build (`ChromeExtension` par défaut, `FirefoxExtension` pour le paquet
-   * Firefox) : Vaultwarden s'en sert pour l'affichage des sessions actives.
+   * Device type announced at authentication. To be set per build target
+   * (`ChromeExtension` by default, `FirefoxExtension` for the Firefox package):
+   * Vaultwarden uses it to display active sessions.
    */
   readonly deviceType?: DeviceType;
   /**
-   * Délai maximal d'une requête, en millisecondes. Un dépassement rejette avec
-   * une `DOMException` de nom `TimeoutError`. Une requête sans borne est
-   * particulièrement coûteuse dans un service worker MV3, dont la durée de vie
-   * est comptée.
+   * Maximum request duration, in milliseconds. Exceeding it rejects with a
+   * `DOMException` named `TimeoutError`. An unbounded request is especially
+   * costly inside an MV3 service worker, whose lifetime is counted.
    */
   readonly timeoutMs?: number;
-  /** Injection pour les tests. Par défaut, le `fetch` global. */
+  /** Injection point for tests. Defaults to the global `fetch`. */
   readonly fetchFn?: typeof fetch;
 }
 
 /**
- * Identifiant de client transmis à l'authentification.
+ * Client identifier sent at authentication.
  *
- * Vérifié empiriquement : Vaultwarden n'impose aucune valeur particulière et
- * accepte `zwarden`. Zwarden s'annonce donc sous son propre nom plutôt que de
- * se faire passer pour un autre client. Cela rend aussi les sessions actives
- * lisibles côté serveur.
+ * Verified empirically: Vaultwarden imposes no particular value and accepts
+ * `zwarden`. Zwarden therefore announces itself under its own name rather than
+ * impersonating another client. It also makes active sessions legible
+ * server-side.
  */
 const CLIENT_ID = 'zwarden';
 
-/** Portée OAuth2 demandée. `offline_access` conditionne l'émission d'un jeton de rafraîchissement. */
+/** OAuth2 scope requested. `offline_access` is what makes a refresh token be issued. */
 const SCOPE = 'api offline_access';
 
-/** Délai réseau par défaut, en millisecondes. */
+/** Default network timeout, in milliseconds. */
 const DEFAULT_TIMEOUT_MS = 30_000;
 
 export class ApiClient {
@@ -192,8 +188,8 @@ export class ApiClient {
   private readonly fetchFn: typeof fetch;
 
   /**
-   * @throws {RangeError} Si `serverUrl` n'est pas une URL valide, ou n'est ni
-   *   HTTPS ni du HTTP vers localhost.
+   * @throws {RangeError} If `serverUrl` is not a valid URL, or is neither HTTPS
+   *   nor HTTP towards localhost.
    */
   constructor(options: ApiClientOptions) {
     this.baseUrl = validateServerUrl(options.serverUrl);
@@ -205,16 +201,16 @@ export class ApiClient {
   }
 
   /**
-   * Récupère les paramètres de dérivation de clé du compte.
+   * Fetches the account's key derivation parameters.
    *
-   * Appel **non authentifié** : quiconque connaît l'e-mail peut l'effectuer.
-   * Les valeurs renvoyées sont donc non fiables et doivent passer par
-   * `assertKdfIsAcceptable` avant toute dérivation — ce que fait
-   * `deriveMasterKey`.
+   * An **unauthenticated** call: anyone who knows the email can make it. The
+   * values returned are therefore untrusted and must pass through
+   * `assertKdfIsAcceptable` before any derivation — which `deriveMasterKey`
+   * does.
    *
-   * @param email E-mail du compte.
-   * @returns Paramètres de dérivation normalisés.
-   * @throws {ApiError} Si le serveur répond en erreur.
+   * @param email Account email.
+   * @returns Normalised derivation parameters.
+   * @throws {ApiError} If the server answers with an error.
    */
   async prelogin(email: string): Promise<KdfConfig> {
     const data = await this.requestJson<PreloginResponse>('/identity/accounts/prelogin', {
@@ -227,21 +223,21 @@ export class ApiClient {
   }
 
   /**
-   * Authentifie le compte et ouvre une session.
+   * Authenticates the account and opens a session.
    *
-   * @param email E-mail du compte.
-   * @param passwordHash Hash d'autorisation, produit par `derivePasswordHash`
-   *   avec l'usage `ServerAuthorization`. Ni le mot de passe ni la clé maître
-   *   ne doivent jamais atteindre ce module.
-   * @param twoFactor Second facteur, lors d'une seconde tentative après
-   *   {@link TwoFactorRequiredError} — ou jeton de dispense (fournisseur 5)
-   *   dès la première.
-   * @returns Jetons de session et clé de coffre enveloppée.
-   * @throws {TwoFactorRequiredError} Si une seconde étape est exigée — y
-   *   compris lorsque le second facteur fourni est invalide ou expiré.
-   * @throws {CaptchaRequiredError} Si le serveur exige un captcha.
-   * @throws {RateLimitedError} Si le serveur limite le débit.
-   * @throws {ApiError} Pour tout autre échec.
+   * @param email Account email.
+   * @param passwordHash Authorization hash, produced by `derivePasswordHash`
+   *   with the `ServerAuthorization` purpose. Neither the password nor the
+   *   master key must ever reach this module.
+   * @param twoFactor Second factor, on a second attempt after
+   *   {@link TwoFactorRequiredError} — or a remember token (provider 5) from the
+   *   very first attempt.
+   * @returns Session tokens and the wrapped vault key.
+   * @throws {TwoFactorRequiredError} If a second step is demanded — including
+   *   when the second factor supplied is invalid or expired.
+   * @throws {CaptchaRequiredError} If the server demands a captcha.
+   * @throws {RateLimitedError} If the server rate-limits.
+   * @throws {ApiError} For any other failure.
    */
   async login(
     email: string,
@@ -263,19 +259,18 @@ export class ApiClient {
   }
 
   /**
-   * Renouvelle la session à partir du jeton de rafraîchissement.
+   * Renews the session from the refresh token.
    *
-   * Indispensable au service worker MV3 : le jeton d'accès expire en une
-   * heure environ, bien après la mort du worker. Rafraîchir évite de
-   * redemander le mot de passe — et donc de refaire une dérivation KDF —
-   * à chaque expiration.
+   * Indispensable to the MV3 service worker: the access token expires in about
+   * an hour, long after the worker has died. Refreshing avoids asking for the
+   * password again — and therefore redoing a KDF derivation — on every expiry.
    *
-   * @param refreshToken Jeton émis par {@link ApiClient.login} (portée
-   *   `offline_access`).
-   * @returns Nouvelle session ; le serveur peut faire tourner le jeton de
-   *   rafraîchissement, utiliser systématiquement celui du résultat.
-   * @throws {RateLimitedError} Si le serveur limite le débit.
-   * @throws {ApiError} Si le jeton est expiré ou révoqué.
+   * @param refreshToken Token issued by {@link ApiClient.login} (`offline_access`
+   *   scope).
+   * @returns A new session; the server may rotate the refresh token, so always
+   *   use the one from the result.
+   * @throws {RateLimitedError} If the server rate-limits.
+   * @throws {ApiError} If the token is expired or revoked.
    */
   async refreshToken(refreshToken: string): Promise<LoginResult> {
     return this.requestToken(
@@ -287,7 +282,7 @@ export class ApiClient {
     );
   }
 
-  /** Appelle `/identity/connect/token` et analyse la réponse de jeton. */
+  /** Calls `/identity/connect/token` and parses the token response. */
   private async requestToken(
     form: URLSearchParams,
     extraHeaders?: Record<string, string>,
@@ -309,20 +304,20 @@ export class ApiClient {
 
     const data = parseJsonOrUndefined<TokenResponse>(body);
     if (data === undefined || typeof data.access_token !== 'string' || data.access_token === '') {
-      // Un 200 sans jeton produirait une session silencieusement inutilisable :
-      // mieux vaut échouer ici, avec le corps sous les yeux.
-      throw new ApiError("Réponse d'authentification sans jeton d'accès", response.status, body);
+      // A 200 with no token would produce a silently unusable session: better to
+      // fail here, with the body in plain sight.
+      throw new ApiError('Authentication response without an access token', response.status, body);
     }
 
     return toLoginResult(data);
   }
 
   /**
-   * Récupère l'intégralité du coffre, sous forme chiffrée.
+   * Fetches the whole vault, in encrypted form.
    *
-   * @param accessToken Jeton d'accès issu de {@link ApiClient.login}.
-   * @returns Réponse de synchronisation, tous champs sensibles encore chiffrés.
-   * @throws {ApiError} Si le serveur répond en erreur.
+   * @param accessToken Access token from {@link ApiClient.login}.
+   * @returns Sync response, every sensitive field still encrypted.
+   * @throws {ApiError} If the server answers with an error.
    */
   async sync(accessToken: string): Promise<SyncResponse> {
     return this.requestJson<SyncResponse>('/api/sync?excludeDomains=true', {
@@ -331,16 +326,15 @@ export class ApiClient {
   }
 
   /**
-   * Crée un item dans le coffre.
+   * Creates an item in the vault.
    *
-   * Le corps transmis doit être **déjà chiffré** par l'appelant : ce client ne
-   * détient aucune clé. Y passer du texte en clair l'enverrait tel quel.
+   * The body passed must be **already encrypted** by the caller: this client
+   * holds no key. Handing it plaintext would send it as-is.
    *
-   * @param accessToken Jeton d'accès.
-   * @param cipher Item dont tous les champs sensibles sont des `EncString`
-   *   sérialisées.
-   * @returns Item créé, tel que renvoyé par le serveur, avec son identifiant.
-   * @throws {ApiError} Si le serveur refuse la création.
+   * @param accessToken Access token.
+   * @param cipher Item whose every sensitive field is a serialised `EncString`.
+   * @returns The created item, as returned by the server, with its identifier.
+   * @throws {ApiError} If the server refuses the creation.
    */
   async createCipher(accessToken: string, cipher: Record<string, unknown>): Promise<CipherResponse> {
     return this.requestJson<CipherResponse>('/api/ciphers', {
@@ -354,18 +348,18 @@ export class ApiClient {
   }
 
   /**
-   * Met à jour un item du coffre.
+   * Updates a vault item.
    *
-   * Le corps transmis doit être **complet et déjà chiffré** : le serveur
-   * remplace les données de l'item par ce qu'il reçoit, les champs omis sont
-   * perdus. Voir `buildCipherUpdatePayload` dans la couche coffre, qui
-   * reconstruit le corps à partir de l'item existant.
+   * The body passed must be **complete and already encrypted**: the server
+   * replaces the item's data with what it receives, and omitted fields are lost.
+   * See `buildCipherUpdatePayload` in the vault layer, which rebuilds the body
+   * from the existing item.
    *
-   * @param accessToken Jeton d'accès.
-   * @param cipherId Identifiant de l'item.
-   * @param cipher Corps complet, champs sensibles en `EncString` sérialisées.
-   * @returns Item mis à jour, tel que renvoyé par le serveur.
-   * @throws {ApiError} Si le serveur refuse la mise à jour.
+   * @param accessToken Access token.
+   * @param cipherId Item identifier.
+   * @param cipher Complete body, sensitive fields as serialised `EncString`s.
+   * @returns The updated item, as returned by the server.
+   * @throws {ApiError} If the server refuses the update.
    */
   async updateCipher(
     accessToken: string,
@@ -383,15 +377,15 @@ export class ApiClient {
   }
 
   /**
-   * Supprime définitivement un item, sans passer par la corbeille.
+   * Permanently deletes an item, bypassing the trash.
    *
-   * Un 404 est traité comme un succès : l'item n'existe plus, l'intention est
-   * satisfaite. Cela rend l'opération idempotente, utile au nettoyage après
-   * échec partiel.
+   * A 404 is treated as success: the item no longer exists, the intent is
+   * satisfied. That makes the operation idempotent, which helps when cleaning up
+   * after a partial failure.
    *
-   * @param accessToken Jeton d'accès.
-   * @param cipherId Identifiant de l'item.
-   * @throws {ApiError} Si la suppression échoue pour une autre raison.
+   * @param accessToken Access token.
+   * @param cipherId Item identifier.
+   * @throws {ApiError} If the deletion fails for any other reason.
    */
   async deleteCipher(accessToken: string, cipherId: string): Promise<void> {
     const url = `${this.baseUrl}/api/ciphers/${encodeURIComponent(cipherId)}`;
@@ -403,14 +397,14 @@ export class ApiClient {
 
     if (!response.ok && response.status !== 404) {
       throw new ApiError(
-        "Échec de la suppression de l'item",
+        'Failed to delete the item',
         response.status,
         await response.text(),
       );
     }
   }
 
-  /** Construit le formulaire d'authentification OAuth2. */
+  /** Builds the OAuth2 authentication form. */
   private buildTokenForm(email: string, passwordHash: string): URLSearchParams {
     return new URLSearchParams({
       grant_type: 'password',
@@ -425,11 +419,11 @@ export class ApiClient {
   }
 
   /**
-   * Traduit un échec d'authentification en erreur typée.
+   * Translates an authentication failure into a typed error.
    *
-   * L'ordre compte : le limiteur de débit répond avant toute vérification
-   * d'identifiants, une demande de second facteur n'est pas un échec, et un
-   * captcha exigé n'est pas un mauvais mot de passe.
+   * Order matters: the rate limiter answers before any credentials check, a
+   * second-factor demand is not a failure, and a required captcha is not a wrong
+   * password.
    */
   private toLoginError(response: Response, body: string): Error {
     if (response.status === 429) {
@@ -448,18 +442,18 @@ export class ApiClient {
     }
 
     return new ApiError(
-      error?.error_description ?? "Échec de l'authentification",
+      error?.error_description ?? 'Authentication failed',
       response.status,
       body,
     );
   }
 
   /**
-   * Exécute une requête attendue en JSON, en traduisant les échecs.
+   * Runs a request expected to return JSON, translating failures.
    *
-   * Couvre aussi le cas du 200 non-JSON — page de garde d'un reverse-proxy,
-   * portail captif — qui doit produire une `ApiError` exploitable, pas une
-   * `SyntaxError` brute.
+   * Also covers the non-JSON 200 case — a reverse proxy's landing page, a
+   * captive portal — which must produce a usable `ApiError`, not a raw
+   * `SyntaxError`.
    */
   private async requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await this.fetchFn(`${this.baseUrl}${path}`, {
@@ -472,46 +466,45 @@ export class ApiClient {
       throw new RateLimitedError(parseRetryAfter(response.headers.get('Retry-After')));
     }
     if (!response.ok) {
-      throw new ApiError(`Échec de la requête ${path}`, response.status, body);
+      throw new ApiError(`Request to ${path} failed`, response.status, body);
     }
 
     try {
       return JSON.parse(body) as T;
     } catch {
-      throw new ApiError(`Réponse illisible (JSON attendu) pour ${path}`, response.status, body);
+      throw new ApiError(`Unreadable response (JSON expected) for ${path}`, response.status, body);
     }
   }
 }
 
 /**
- * Valide l'URL du serveur et la normalise.
+ * Validates the server URL and normalises it.
  *
- * HTTPS est exigé : un coffre — même chiffré de bout en bout — ne transite pas
- * en clair, ne serait-ce que pour protéger les jetons de session. HTTP reste
- * toléré vers localhost, pour le développement.
+ * HTTPS is required: a vault — end-to-end encrypted though it is — does not
+ * travel in the clear, if only to protect the session tokens. HTTP stays
+ * tolerated towards localhost, for development.
  *
- * **La valeur renvoyée est reconstruite depuis l'URL analysée**, jamais la
- * chaîne d'entrée. Les renvoyer telle quelle laissait passer paramètres et
- * ancres, que la concaténation de chemin qui suit rend silencieusement
- * destructeurs : `https://coffre.fr/#x` + `/api/sync` donne
- * `https://coffre.fr/#x/api/sync`, où l'ancre avale le chemin. La requête
- * partait sur la racine, le serveur répondait du HTML, et l'utilisateur lisait
- * « Réponse illisible » sans pouvoir soupçonner son URL. Une saisie collée
- * depuis une barre d'adresse porte couramment l'un ou l'autre : mieux vaut les
- * refuser franchement.
+ * **The value returned is rebuilt from the parsed URL**, never the input string.
+ * Returning the input as-is let query strings and fragments through, which the
+ * path concatenation that follows makes silently destructive:
+ * `https://vault.example/#x` + `/api/sync` gives `https://vault.example/#x/api/sync`,
+ * where the fragment swallows the path. The request went to the root, the server
+ * answered HTML, and the user read "unreadable response" with no way to suspect
+ * their URL. A value pasted from an address bar commonly carries one or the
+ * other: better to refuse them outright.
  *
- * Le slash final est retiré pour éviter les `//` dans les chemins, que certains
- * reverse-proxies traitent différemment du serveur applicatif.
+ * The trailing slash is dropped to avoid `//` in paths, which some reverse
+ * proxies treat differently from the application server.
  *
- * @throws {RangeError} URL invalide, protocole refusé, ou URL porteuse d'un
- *   paramètre ou d'une ancre.
+ * @throws {RangeError} Invalid URL, refused protocol, or a URL carrying a query
+ *   string or a fragment.
  */
 function validateServerUrl(serverUrl: string): string {
   let url: URL;
   try {
     url = new URL(serverUrl);
   } catch {
-    throw new RangeError(`URL de serveur invalide : « ${serverUrl} »`);
+    throw new RangeError(`Invalid server URL: "${serverUrl}"`);
   }
 
   const isLoopback =
@@ -523,25 +516,25 @@ function validateServerUrl(serverUrl: string): string {
 
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLoopback)) {
     throw new RangeError(
-      `Le serveur doit être joint en HTTPS (HTTP toléré pour localhost uniquement) : « ${serverUrl} »`,
+      `The server must be reached over HTTPS (HTTP tolerated for localhost only): "${serverUrl}"`,
     );
   }
 
   if (url.search !== '' || url.hash !== '') {
     throw new RangeError(
-      `L'URL du serveur ne doit porter ni paramètre ni ancre : « ${serverUrl} »`,
+      `The server URL must carry neither a query string nor a fragment: "${serverUrl}"`,
     );
   }
 
   return `${url.origin}${url.pathname}`.replace(/\/+$/, '');
 }
 
-/** Normalise l'e-mail comme le fait la dérivation de clé, pour rester cohérent. */
+/** Normalises the email the way key derivation does, to stay consistent. */
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-/** Convertit la réponse de prelogin en configuration de dérivation. */
+/** Converts the prelogin response into a derivation configuration. */
 function toKdfConfig(data: PreloginResponse): KdfConfig {
   const kdf = readField<number>(data, 'kdf') ?? KdfType.PBKDF2_SHA256;
   const iterations = readField<number>(data, 'kdfIterations') ?? 0;
@@ -558,7 +551,7 @@ function toKdfConfig(data: PreloginResponse): KdfConfig {
   return { type: KdfType.PBKDF2_SHA256, iterations };
 }
 
-/** Convertit la réponse de jeton en session exploitable. */
+/** Converts the token response into a usable session. */
 function toLoginResult(data: TokenResponse): LoginResult {
   const expiresIn = readField<number>(data, 'expires_in') ?? 3600;
 
@@ -573,10 +566,10 @@ function toLoginResult(data: TokenResponse): LoginResult {
 }
 
 /**
- * Extrait la liste des fournisseurs de second facteur.
+ * Extracts the list of second-factor providers.
  *
- * Deux formes coexistent selon les versions : un tableau, ou un objet dont les
- * clés sont les identifiants de fournisseur.
+ * Two shapes coexist across versions: an array, or an object whose keys are the
+ * provider identifiers.
  */
 function extractTwoFactorProviders(error: TokenErrorResponse | undefined): readonly string[] {
   const liste = readField<string[]>(error, 'TwoFactorProviders');
@@ -588,7 +581,7 @@ function extractTwoFactorProviders(error: TokenErrorResponse | undefined): reado
   return objet ? Object.keys(objet) : [];
 }
 
-/** Lit l'en-tête `Retry-After`, en secondes. Ignore la forme date HTTP. */
+/** Reads the `Retry-After` header, in seconds. Ignores the HTTP-date form. */
 function parseRetryAfter(value: string | null): number | undefined {
   if (value === null) {
     return undefined;
@@ -597,7 +590,7 @@ function parseRetryAfter(value: string | null): number | undefined {
   return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
 }
 
-/** Analyse un JSON sans jeter : les corps d'erreur ne sont pas toujours du JSON. */
+/** Parses JSON without throwing: error bodies are not always JSON. */
 function parseJsonOrUndefined<T>(body: string): T | undefined {
   try {
     return JSON.parse(body) as T;

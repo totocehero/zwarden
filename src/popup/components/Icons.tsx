@@ -1,16 +1,16 @@
 /**
- * @file Icônes de la popup.
+ * @file The popup's icons.
  *
- * Des SVG en ligne plutôt qu'une police ou un sprite : à cette échelle — six
- * icônes de quinze pixels — un fichier d'icônes coûterait plus que les icônes
- * elles-mêmes, et le budget de poids du projet se joue à ce niveau de détail.
+ * Inline SVGs rather than a font or a sprite: at this scale — six fifteen-pixel
+ * icons — an icon file would cost more than the icons themselves, and this
+ * project's size budget is decided at exactly that level of detail.
  *
- * Toutes portent `aria-hidden` : chacune double un bouton qui a déjà son
- * `title`, et les annoncer deux fois nuirait à la lecture d'écran.
+ * All of them carry `aria-hidden`: each one doubles a button that already has
+ * its `title`, and announcing them twice would hurt screen-reader use.
  */
 
-/** Icône crayon, pour l'édition. */
-export function IconCrayon() {
+/** Pencil icon, for editing. */
+export function IconPencil() {
   return (
     <svg
       width="15"
@@ -28,8 +28,8 @@ export function IconCrayon() {
   );
 }
 
-/** Icône copie (coche quand la copie vient d'aboutir). */
-export function IconCopie({ fait }: { fait: boolean }) {
+/** Copy icon (a tick once the copy has just succeeded). */
+export function IconCopy({ done }: { done: boolean }) {
   return (
     <svg
       width="15"
@@ -42,7 +42,7 @@ export function IconCopie({ fait }: { fait: boolean }) {
       stroke-linejoin="round"
       aria-hidden="true"
     >
-      {fait ? (
+      {done ? (
         <polyline points="20 6 9 17 4 12" />
       ) : (
         <>
@@ -54,8 +54,8 @@ export function IconCopie({ fait }: { fait: boolean }) {
   );
 }
 
-/** Icône œil (barré quand le secret est visible, pour proposer de le cacher). */
-export function IconOeil({ barre }: { barre: boolean }) {
+/** Eye icon (struck through when the secret is visible, to offer hiding it). */
+export function IconEye({ struck }: { struck: boolean }) {
   return (
     <svg
       width="16"
@@ -70,12 +70,12 @@ export function IconOeil({ barre }: { barre: boolean }) {
     >
       <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z" />
       <circle cx="12" cy="12" r="3" />
-      {barre && <line x1="4" y1="3" x2="20" y2="21" />}
+      {struck && <line x1="4" y1="3" x2="20" y2="21" />}
     </svg>
   );
 }
 
-/** Icône « code à usage unique » : une horloge. */
+/** "One-time code" icon: a clock. */
 export function IconOtp() {
   return (
     <svg
@@ -95,8 +95,8 @@ export function IconOtp() {
   );
 }
 
-/** Icône du générateur : un dé. */
-export function IconDe() {
+/** The generator's icon: a die. */
+export function IconDice() {
   return (
     <svg
       width="15"
@@ -117,4 +117,3 @@ export function IconDe() {
     </svg>
   );
 }
-

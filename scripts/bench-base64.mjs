@@ -1,6 +1,6 @@
 /**
- * Compare trois implémentations base64 pour arbitrer une simplification.
- * Usage : node scripts/bench-base64.mjs
+ * Compares three base64 implementations to settle a simplification.
+ * Usage: node scripts/bench-base64.mjs
  */
 
 const LOOKUP = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
@@ -79,36 +79,36 @@ function bench(label, fn, iterations) {
   return { label, ms: +(performance.now() - t0).toFixed(1) };
 }
 
-// Profil réaliste : un coffre de 1000 items, ~6 EncString par item,
+// A realistic profile: a 1000-item vault, ~6 EncStrings per item,
 // chacune ~120 octets (IV 16 + ciphertext ~64 + MAC 32).
 const SAMPLES = Array.from({ length: 6000 }, () =>
   crypto.getRandomValues(new Uint8Array(120)),
 );
 const ENCODED = SAMPLES.map(handToBase64);
 
-console.log(`Node ${process.version} — toBase64/fromBase64 natif : ${hasNative ? 'oui' : 'non'}`);
-console.log('\nProfil : 6000 EncString de 120 octets (coffre de ~1000 items), 20 passes\n');
+console.log(`Node ${process.version} — native toBase64/fromBase64: ${hasNative ? 'yes' : 'no'}`);
+console.log('\nProfile: 6000 EncStrings of 120 bytes (a ~1000-item vault), 20 passes\n');
 
 const results = [
-  bench('encode  fait main', () => SAMPLES.forEach(handToBase64), 20),
+  bench('encode  hand-made', () => SAMPLES.forEach(handToBase64), 20),
   bench('encode  btoa     ', () => SAMPLES.forEach(atobToBase64), 20),
-  bench('décode  fait main', () => ENCODED.forEach(handFromBase64), 20),
-  bench('décode  atob     ', () => ENCODED.forEach(atobFromBase64), 20),
+  bench('decode  hand-made', () => ENCODED.forEach(handFromBase64), 20),
+  bench('decode  atob     ', () => ENCODED.forEach(atobFromBase64), 20),
 ];
 
 if (hasNative) {
   results.push(
-    bench('encode  natif    ', () => SAMPLES.forEach((b) => b.toBase64()), 20),
-    bench('décode  natif    ', () => ENCODED.forEach((s) => Uint8Array.fromBase64(s)), 20),
+    bench('encode  native   ', () => SAMPLES.forEach((b) => b.toBase64()), 20),
+    bench('decode  native   ', () => ENCODED.forEach((s) => Uint8Array.fromBase64(s)), 20),
   );
 }
 
 for (const r of results) console.log(`  ${r.label}  ${String(r.ms).padStart(7)} ms`);
 
-// Vérification de cohérence entre implémentations.
+// Consistency check across implementations.
 const probe = crypto.getRandomValues(new Uint8Array(257));
 const ok =
   handToBase64(probe) === atobToBase64(probe) &&
   Buffer.compare(Buffer.from(handFromBase64(ENCODED[0])), Buffer.from(atobFromBase64(ENCODED[0]))) === 0 &&
   (!hasNative || handToBase64(probe) === probe.toBase64());
-console.log(`\nCohérence entre implémentations : ${ok ? 'OK' : 'DIVERGENCE'}`);
+console.log(`\nConsistency across implementations: ${ok ? 'OK' : 'DIVERGENCE'}`);

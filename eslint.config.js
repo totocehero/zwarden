@@ -1,28 +1,28 @@
 /**
- * @file Configuration ESLint (format « flat », ESLint 9).
+ * @file ESLint configuration ("flat" format, ESLint 9).
  *
- * ## Ce que le linter a à faire ici, et ce qu'il n'a pas à faire
+ * ## What the linter has to do here, and what it does not
  *
- * `tsconfig.json` est déjà sévère — `strict`, `noUncheckedIndexedAccess`,
- * `exactOptionalPropertyTypes`, `noUnusedLocals`. Le typage est donc couvert,
- * et redemander au linter ce que le compilateur refuse déjà ne ferait que
- * doubler les messages.
+ * `tsconfig.json` is already severe — `strict`, `noUncheckedIndexedAccess`,
+ * `exactOptionalPropertyTypes`, `noUnusedLocals`. Typing is therefore covered,
+ * and asking the linter again for what the compiler already refuses would only
+ * double the messages.
  *
- * Restent deux familles que `tsc` ne voit pas et qui, dans un gestionnaire de
- * mots de passe, coûtent cher :
+ * That leaves two families `tsc` does not see and which, in a password manager,
+ * cost dearly:
  *
- * 1. **Les promesses perdues.** Une écriture de stockage ou une purge de
- *    session oubliée sans `await` échoue en silence — le coffre se croit
- *    verrouillé sans l'être. `no-floating-promises` l'interdit, et le code
- *    marque déjà d'un `void` explicite les appels délibérément non attendus.
- * 2. **Les comparaisons laxistes.** Un `==` entre deux valeurs converties est
- *    une source d'erreurs silencieuses. Seule exception, explicitement
- *    tolérée : `== null`, que le code emploie partout pour dire « absent,
- *    `null` ou `undefined` » — le distinguer en deux tests ne dirait rien de
- *    plus et alourdirait treize lectures de champs déjà denses.
+ * 1. **Lost promises.** A storage write or a session purge forgotten without
+ *    `await` fails in silence — the vault believes itself locked without being
+ *    so. `no-floating-promises` forbids it, and the code already marks
+ *    deliberately unawaited calls with an explicit `void`.
+ * 2. **Loose comparisons.** A `==` between two coerced values is a source of
+ *    silent errors. One exception, explicitly tolerated: `== null`, which the
+ *    code uses throughout to mean "absent, `null` or `undefined`" — splitting it
+ *    into two tests would say nothing more and would weigh down thirteen
+ *    already-dense field reads.
  *
- * Les règles à information de types exigent le `tsconfig` du projet : d'où
- * `projectService`, qui le résout seul pour chaque fichier.
+ * The type-aware rules require the project's `tsconfig`: hence `projectService`,
+ * which resolves it on its own for each file.
  */
 
 import tseslint from '@typescript-eslint/eslint-plugin';
@@ -46,16 +46,16 @@ export default [
       ...tseslint.configs['eslint-recommended'].overrides[0].rules,
       ...tseslint.configs.recommended.rules,
 
-      // Promesses : la famille complète, parce que c'est elle qui protège les
-      // purges de session.
+      // Promises: the whole family, because it is what protects the session
+      // purges.
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/no-misused-promises': 'error',
       '@typescript-eslint/await-thenable': 'error',
 
-      // Comparaisons strictes, sauf l'idiome `== null` (voir l'en-tête).
+      // Strict comparisons, except the `== null` idiom (see the header).
       eqeqeq: ['error', 'always', { null: 'ignore' }],
 
-      // Un paramètre inutilisé se préfixe d'un `_` — la convention de `tsc`.
+      // An unused parameter is prefixed with `_` — `tsc`'s own convention.
       '@typescript-eslint/no-unused-vars': [
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
@@ -63,8 +63,8 @@ export default [
     },
   },
   {
-    // Les scripts d'outillage et de sonde tournent sous Node, hors du coffre :
-    // ils n'ont pas à subir les règles de rigueur du code d'extension.
+    // The tooling and probe scripts run under Node, outside the vault: they have
+    // no business being held to the extension code's rules of rigour.
     files: ['scripts/**/*.mjs'],
     rules: {},
   },

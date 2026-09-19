@@ -1,0 +1,140 @@
+/**
+ * @file The settings page's state and actions.
+ *
+ * Everything the page does — load, save, and the five hygiene actions — lives
+ * here, outside the render. The actions share one pattern: act, then say what
+ * was done. That message matters more than it looks: "forget 2FA exemptions" and
+ * "restore excluded sites" have no visible effect, and without confirmation the
+ * user cannot know whether their click registered.
+ */
+
+import { useEffect, useState } from 'preact/hooks';
+
+import {
+  type AppSettings,
+  DEFAULT_SETTINGS,
+  clearAllRememberTokens,
+  clearLastUsed,
+  clearNeverSaveHosts,
+  getDeviceId,
+  loadSettings,
+  lockVault,
+  regenerateDeviceId,
+  saveSettings,
+  startAutoLockWatch,
+} from '@shared/storage.js';
+
+/** Network timeout bounds, in seconds. */
+const TIMEOUT_MIN = 5;
+const TIMEOUT_MAX = 120;
+
+/** How long a confirmation message stays up. */
+const FLASH_MS = 2500;
+
+export interface Settings {
+  readonly settings: AppSettings;
+  readonly deviceId: string;
+  /** The current confirmation message, or the empty string. */
+  readonly status: string;
+  readonly patch: (field: Partial<AppSettings>) => void;
+  readonly save: (event: Event) => Promise<void>;
+  readonly lockNow: () => Promise<void>;
+  readonly forgetTwoFa: () => Promise<void>;
+  readonly forgetNeverSave: () => Promise<void>;
+  readonly forgetLastUsed: () => Promise<void>;
+  readonly regenerateDevice: () => Promise<void>;
+}
+
+export function useSettings(): Settings {
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [deviceId, setDeviceId] = useState('');
+  const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    void (async () => {
+      setSettings(await loadSettings());
+      setDeviceId(await getDeviceId());
+    })();
+  }, []);
+
+  function flash(message: string): void {
+    setStatus(message);
+    setTimeout(() => setStatus(''), FLASH_MS);
+  }
+
+  return {
+    settings,
+    deviceId,
+    status,
+
+    patch(field) {
+      setSettings((current) => ({ ...current, ...field }));
+    },
+
+    async save(event) {
+      event.preventDefault();
+      const timeoutSeconds = Math.min(
+        TIMEOUT_MAX,
+        Math.max(TIMEOUT_MIN, Math.round(settings.timeoutSeconds)),
+      );
+      const clean = { ...settings, timeoutSeconds };
+      setSettings(clean);
+      await saveSettings(clean);
+      // The new delay applies to an already-unlocked vault, without waiting for
+      // the popup to open again.
+      await startAutoLockWatch(clean.autoLockMinutes);
+      flash('Settings saved.');
+    },
+
+    async lockNow() {
+      await lockVault();
+      flash('Vault locked.');
+    },
+
+    async forgetTwoFa() {
+      const n = await clearAllRememberTokens();
+      flash(
+        n === 0
+          ? 'No 2FA exemption to forget.'
+          : `${n} 2FA exemption(s) forgotten — the second factor will be asked for again.`,
+      );
+    },
+
+    async forgetNeverSave() {
+      const n = await clearNeverSaveHosts();
+      flash(
+        n === 0
+          ? 'No excluded site.'
+          : `${n} site(s) restored — saving will be offered there again.`,
+      );
+    },
+
+    async forgetLastUsed() {
+      await clearLastUsed();
+      flash('Use ordering forgotten — the list returns to the server order.');
+    },
+
+    /**
+     * Regenerates the device identifier, after explicit confirmation.
+     *
+     * The consequences are real server-side — an extra session, a "new device"
+     * alert, invalidated 2FA exemptions — and invisible from the extension:
+     * hence the confirmation, and the enumeration of what is about to happen
+     * rather than an "are you sure?".
+     */
+    async regenerateDevice() {
+      const ok = confirm(
+        'Regenerate the device identifier?\n\n' +
+          'The server will see a new device: an extra session will appear in the list, a ' +
+          '"new device" alert may be sent, and this device\'s 2FA exemptions will become ' +
+          'invalid.',
+      );
+      if (!ok) {
+        return;
+      }
+      setDeviceId(await regenerateDeviceId());
+      await clearAllRememberTokens();
+      flash('Identifier regenerated.');
+    },
+  };
+}

@@ -1,50 +1,47 @@
 /**
- * @file Service worker — verrouillage automatique et capture d'identifiants.
+ * @file Service worker — auto-lock and credential capture.
  *
- * ## Pourquoi le minuteur vit ici
+ * ## Why the timer lives here
  *
- * L'inactivité qui intéresse l'utilisateur est celle du **navigateur**, pas
- * celle de la popup : celui qui remplit des formulaires et change d'onglet
- * pendant une heure est actif, même s'il n'a pas rouvert le panneau. Seul le
- * service worker voit ces événements ; c'est donc lui qui tient l'horodatage
- * d'activité et qui tranche.
+ * The inactivity that matters to the user is the **browser's**, not the popup's:
+ * someone filling forms and switching tabs for an hour is active, even without
+ * reopening the panel. Only the service worker sees those events; it is
+ * therefore the one that keeps the activity timestamp and decides.
  *
- * ## Mécanique
+ * ## Mechanics
  *
  * ```
- *   onglet activé ─┐
- *   fenêtre focus ─┼─► recordActivity()  (storage.session, seuil 20 s)
+ *   tab activated ─┐
+ *   window focus ──┼─► recordActivity()  (storage.session, 20 s threshold)
  *   navigation ────┤                                │
- *   popup ouverte ─┘  (battement propre à la popup) ▼
- *   alarme (1 min) ──────────► shouldAutoLock() ──► purge de la session
+ *   popup open ────┘  (the popup's own heartbeat)   ▼
+ *   alarm (1 min) ───────────► shouldAutoLock() ──► session purged
  *                                                        ▲
- *   session du système verrouillée ────────────────────────┘ (immédiat)
+ *   system session locked ─────────────────────────────────┘ (immediate)
  * ```
  *
- * L'alarme est un battement, pas une échéance : la recréer à chaque
- * événement d'activité se heurterait à la limitation de débit de
- * `chrome.alarms`. Contrepartie assumée : le verrouillage peut tarder d'au
- * plus une minute sur le délai configuré.
+ * The alarm is a heartbeat, not a deadline: recreating it on every activity
+ * event would run into `chrome.alarms`' rate limit. Acknowledged trade-off:
+ * locking can be up to a minute later than the configured delay.
  *
- * Le verrouillage de la session du système (`Win+L`, veille, écran de
- * verrouillage) court-circuite tout délai : on s'éloigne d'une machine bien
- * plus souvent qu'on ne ferme son navigateur, et c'est ce filet qui rend le
- * défaut « verrouiller à la fermeture du navigateur » tenable.
+ * Locking the system session (`Win+L`, sleep, lock screen) short-circuits every
+ * delay: one walks away from a machine far more often than one closes the
+ * browser, and it is that net which makes the "lock on browser close" default
+ * tenable.
  *
- * L'activité n'est enregistrée que coffre déverrouillé — verrouillé, il n'y a
- * rien à préserver et le service worker n'a aucune raison d'écrire.
+ * Activity is recorded only while the vault is unlocked — locked, there is
+ * nothing to preserve and the service worker has no reason to write.
  *
- * ## Second rôle : la proposition d'enregistrement
+ * ## Second role: the save proposal
  *
- * Le détecteur en page (`content/detector.ts`) n'envoie ici que ce que
- * l'utilisateur vient de taper. Le worker filtre — coffre déverrouillé ?
- * fonction activée ? site non exclu ? — puis range la capture en mémoire et
- * allume la pastille. Il ne décide **pas** s'il faut proposer : lui n'a pas
- * la clé, il ne sait pas ce que le coffre contient déjà. C'est la popup qui
- * tranche, à l'ouverture.
+ * The in-page detector (`content/detector.ts`) sends here only what the user has
+ * just typed. The worker filters — vault unlocked? feature on? site not
+ * excluded? — then files the capture in memory and lights the badge. It does
+ * **not** decide whether to offer: it has no key, and does not know what the
+ * vault already holds. The popup settles that, when it opens.
  *
- * La cible décrite dans `docs/EXTENSION.md` — dérivation dans le worker,
- * popup sans clé — remplacera progressivement ce fichier.
+ * The target described in `docs/EXTENSION.md` — derivation in the worker, a
+ * popup with no key — will gradually replace this file.
  */
 
 import { generatePassword } from '@core/generator/password.js';
@@ -67,9 +64,9 @@ import {
 } from '@shared/storage.js';
 
 /**
- * Enregistre une activité, sauf coffre verrouillé. La lecture de session
- * précède l'écriture : sans elle, chaque changement d'onglet ferait écrire le
- * service worker alors qu'il n'y a aucune échéance à repousser.
+ * Records activity, unless the vault is locked. The session read precedes the
+ * write: without it, every tab switch would have the service worker writing when
+ * there is no deadline to push back.
  */
 async function onActivity(): Promise<void> {
   if ((await loadStoredSession()) === null) {
@@ -78,31 +75,31 @@ async function onActivity(): Promise<void> {
   await recordActivity();
 }
 
-/** Verrouille — purge complète, `lockVault` en porte la liste. */
+/** Locks — a full purge, `lockVault` carries the list. */
 async function lockNow(): Promise<void> {
   await lockVault();
 }
 
-/** Un battement : compare l'inactivité au délai configuré. */
+/** One heartbeat: compares inactivity against the configured delay. */
 async function tick(): Promise<void> {
   if ((await loadStoredSession()) === null) {
-    // Session déjà partie (verrouillage manuel, redémarrage du navigateur) :
-    // le battement n'a plus d'objet.
+    // Session already gone (manual lock, browser restart): the heartbeat has
+    // nothing left to do.
     await stopAutoLockWatch();
     return;
   }
 
   const { autoLockMinutes } = await loadSettings();
   if (autoLockMinutes <= 0) {
-    // Réglage passé à « fermeture du navigateur » depuis l'armement.
+    // The setting moved to "browser close" since the watch was armed.
     await stopAutoLockWatch();
     return;
   }
 
   const last = await loadLastActivity();
   if (last === null) {
-    // Horodatage perdu : on repart de maintenant plutôt que de verrouiller
-    // sur une absence d'information.
+    // Timestamp lost: start again from now rather than lock on an absence of
+    // information.
     await recordActivity();
     return;
   }
@@ -121,10 +118,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 /**
- * Transitions d'état du système. Seul `locked` verrouille — `idle` (aucune
- * saisie depuis quelques minutes) ne dit rien de la présence de
- * l'utilisateur, qui peut lire son écran. `active` compte comme activité :
- * revenir d'une veille repousse l'échéance.
+ * System state transitions. Only `locked` locks — `idle` (no input for a few
+ * minutes) says nothing about the user's presence, who may well be reading their
+ * screen. `active` counts as activity: coming back from sleep pushes the
+ * deadline back.
  */
 async function onIdleState(state: chrome.idle.IdleState): Promise<void> {
   if (state === 'locked') {
@@ -149,8 +146,8 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
   }
 });
 
-// Seul l'onglet au premier plan compte : une page d'arrière-plan qui se
-// rafraîchit toute seule ne doit pas maintenir le coffre ouvert.
+// Only the foreground tab counts: a background page refreshing itself must not
+// hold the vault open.
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
   if (changeInfo.status === 'loading' && tab.active) {
     void onActivity();
@@ -158,9 +155,9 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
 });
 
 /**
- * Réveil du navigateur ou mise à jour de l'extension : `storage.session` est
- * purgé, mais les alarmes, elles, sont persistées. On remet les deux d'accord
- * plutôt que de laisser un battement tourner sur un coffre verrouillé.
+ * Browser wake-up or extension update: `storage.session` is purged, but the
+ * alarms are persisted. We bring the two back into agreement rather than leave a
+ * heartbeat running on a locked vault.
  */
 async function resync(): Promise<void> {
   await applyDetectorRegistration();
@@ -175,33 +172,32 @@ async function resync(): Promise<void> {
 chrome.runtime.onStartup.addListener(() => void resync());
 
 chrome.runtime.onInstalled.addListener((details) => {
-  console.log(`Zwarden installé (${details.reason})`);
+  console.log(`Zwarden installed (${details.reason})`);
   void resync();
 });
 
 export {};
 
-// --- Presse-papiers ----------------------------------------------------------
+// --- Clipboard ---------------------------------------------------------------
 
-/** Chemin du document hors écran, relatif à la racine de `dist/`. */
+/** Path of the offscreen document, relative to the root of `dist/`. */
 const OFFSCREEN_PATH = 'offscreen.html';
 
-/** Type des messages adressés au document hors écran. */
+/** Type of the messages addressed to the offscreen document. */
 const CLIPBOARD_MESSAGE = 'zwarden-clipboard';
 
 /**
- * Écrit dans le presse-papiers depuis le service worker.
+ * Writes to the clipboard from the service worker.
  *
- * Un worker MV3 n'a pas de DOM, et le presse-papiers en exige un : on ouvre donc
- * un document hors écran le temps de l'écriture, puis on le referme. Le garder
- * ouvert coûterait un processus permanent pour une opération qui dure des
- * millisecondes.
+ * An MV3 worker has no DOM, and the clipboard requires one: we therefore open an
+ * offscreen document for the duration of the write, then close it. Keeping it
+ * open would cost a permanent process for an operation lasting milliseconds.
  *
- * Silencieux en cas d'échec, et c'est délibéré : l'API `offscreen` peut manquer
- * (autre navigateur, version ancienne), auquel cas le minuteur de la popup reste
- * le seul effacement — le comportement d'avant, jamais moins.
+ * Silent on failure, and deliberately so: the `offscreen` API may be missing
+ * (another browser, an older version), in which case the popup's timer remains
+ * the only wipe — the previous behaviour, never less.
  *
- * @param text Texte à placer dans le presse-papiers. Vide = effacement.
+ * @param text Text to place in the clipboard. Empty = wipe.
  */
 async function writeClipboard(text: string): Promise<void> {
   if (typeof chrome.offscreen === 'undefined') {
@@ -211,38 +207,37 @@ async function writeClipboard(text: string): Promise<void> {
     await chrome.offscreen.createDocument({
       url: OFFSCREEN_PATH,
       reasons: [chrome.offscreen.Reason.CLIPBOARD],
-      justification:
-        'Effacement différé du presse-papiers après la copie d’un secret du coffre.',
+      justification: 'Deferred clipboard wipe after copying a secret from the vault.',
     });
   } catch {
-    // Déjà ouvert : un seul document hors écran est permis par extension, et
-    // c'est exactement celui dont on a besoin.
+    // Already open: only one offscreen document is allowed per extension, and it
+    // is exactly the one we need.
   }
 
   try {
-    // Attendue : le document doit avoir confirmé avant qu'on le referme.
+    // Awaited: the document must have confirmed before we close it.
     await chrome.runtime.sendMessage({ type: CLIPBOARD_MESSAGE, text });
   } catch {
-    // Document absent ou déjà fermé : rien à rattraper.
+    // Document absent or already closed: nothing to recover from.
   } finally {
     try {
       await chrome.offscreen.closeDocument();
     } catch {
-      // Déjà fermé.
+      // Already closed.
     }
   }
 }
 
-// --- Raccourcis clavier ------------------------------------------------------
+// --- Keyboard shortcuts ------------------------------------------------------
 
 /**
- * Commandes du manifest.
+ * Manifest commands.
  *
- * Seules celles qui peuvent aboutir **sans la clé du coffre** sont déclarées :
- * le worker ne la détient pas. Le remplissage automatique par raccourci
- * (`Ctrl+Shift+L` chez l'extension officielle) attend donc la dérivation dans le
- * worker décrite en cible dans `docs/EXTENSION.md` — déclarer un raccourci qui
- * ne fait rien serait pire que ne pas le déclarer.
+ * Only those that can succeed **without the vault key** are declared: the worker
+ * does not hold it. Autofill by shortcut (`Ctrl+Shift+L` in the official
+ * extension) therefore waits on the in-worker derivation described as a target
+ * in `docs/EXTENSION.md` — declaring a shortcut that does nothing would be worse
+ * than not declaring it.
  */
 async function onCommand(command: string): Promise<void> {
   if (command === 'lock-vault') {
@@ -250,8 +245,8 @@ async function onCommand(command: string): Promise<void> {
     return;
   }
   if (command === 'generate-password') {
-    // Engendrer ne demande aucune clé : c'est ce qui rend ce raccourci possible
-    // dès maintenant.
+    // Generating requires no key: that is what makes this shortcut possible
+    // right now.
     const password = generatePassword(await loadGeneratorOptions());
     await writeClipboard(password);
     const { clipboardClearSeconds } = await loadSettings();
@@ -263,12 +258,12 @@ if (typeof chrome.commands !== 'undefined') {
   chrome.commands.onCommand.addListener((command) => void onCommand(command));
 }
 
-// --- Capture d'identifiants --------------------------------------------------
+// --- Credential capture ------------------------------------------------------
 
-/** Identifiant de l'enregistrement dynamique du détecteur. */
+/** Identifier of the detector's dynamic registration. */
 const DETECTOR_SCRIPT_ID = 'zwarden-detector';
 
-/** Type de message émis par le détecteur. */
+/** Type of the message the detector emits. */
 const CREDENTIALS_MESSAGE = 'zwarden-credentials';
 
 interface CredentialsMessage {
@@ -278,19 +273,18 @@ interface CredentialsMessage {
 }
 
 /**
- * Range une capture et allume la pastille — ou l'ignore, silencieusement.
+ * Files a capture and lights the badge — or drops it, silently.
  *
- * Quatre refus, tous silencieux : ce qui ne vient pas d'un onglet (donc pas
- * du détecteur), la fonction désactivée, le coffre verrouillé — on ne garde
- * pas un mot de passe en clair en mémoire quand tout le reste est purgé — et
- * les sites que l'utilisateur a exclus.
+ * Four refusals, all silent: anything not coming from a tab (hence not from the
+ * detector), the feature switched off, the vault locked — we do not keep a
+ * cleartext password in memory while everything else is purged — and the sites
+ * the user has excluded.
  *
- * **L'origine ne vient pas du message.** Elle est lue sur `sender`, que le
- * navigateur remplit lui-même : un champ du message est déclaratif, alors que
- * celui-ci est constaté. L'écart compte, parce que c'est cette origine qui
- * devient l'URI de l'item créé et la clé du rapprochement — une origine
- * choisie par l'émetteur ferait enregistrer un mot de passe sous l'adresse
- * d'un autre site.
+ * **The origin does not come from the message.** It is read off `sender`, which
+ * the browser fills in itself: a message field is declared, whereas this one is
+ * observed. The gap matters, because this origin becomes the created item's URI
+ * and the matching key — an origin chosen by the sender would have a password
+ * saved under another site's address.
  */
 async function onCredentials(
   message: CredentialsMessage,
@@ -324,8 +318,8 @@ async function onCredentials(
 
   await savePendingSave({ origin, host, username, password, capturedAt: Date.now() });
   await setSaveBadge(true);
-  // Taper un mot de passe est une activité : elle repousse l'échéance au même
-  // titre qu'un changement d'onglet.
+  // Typing a password is activity: it pushes the deadline back just as a tab
+  // switch does.
   await recordActivity();
 }
 
@@ -337,17 +331,16 @@ chrome.runtime.onMessage.addListener((message: unknown, sender) => {
   ) {
     void onCredentials(message as CredentialsMessage, sender);
   }
-  // Aucune réponse asynchrone attendue : ne pas retourner `true`.
+  // No async response expected: do not return `true`.
   return false;
 });
 
 /**
- * Aligne la présence du détecteur sur le réglage.
+ * Keeps the detector's presence aligned with the setting.
  *
- * Enregistrement dynamique plutôt que déclaration dans le manifest : réglage
- * désactivé, il n'y a **aucun** script injecté dans les pages — pas un script
- * qui se tait, pas de script du tout. C'est la différence entre une promesse
- * et une garantie.
+ * Dynamic registration rather than a manifest declaration: with the setting off,
+ * there is **no** script injected into pages — not a script keeping quiet, no
+ * script at all. That is the difference between a promise and a guarantee.
  */
 async function applyDetectorRegistration(): Promise<void> {
   if (typeof chrome.scripting?.getRegisteredContentScripts !== 'function') {
@@ -363,8 +356,8 @@ async function applyDetectorRegistration(): Promise<void> {
       {
         id: DETECTOR_SCRIPT_ID,
         js: ['content.js'],
-        // Mêmes hôtes que les permissions du manifest, cadre principal
-        // seulement : les iframes sont explicitement hors périmètre (§4).
+        // Same hosts as the manifest permissions, main frame only: iframes are
+        // explicitly out of scope (§4).
         matches: ['https://*/*', 'http://localhost/*', 'http://127.0.0.1/*'],
         allFrames: false,
         runAt: 'document_idle',
@@ -376,8 +369,8 @@ async function applyDetectorRegistration(): Promise<void> {
   }
 }
 
-// Le réglage se modifie depuis la page d'options, dans un autre contexte :
-// c'est le stockage qui le notifie.
+// The setting changes from the options page, in another context: storage is what
+// notifies us.
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && 'offerToSave' in changes) {
     void applyDetectorRegistration();

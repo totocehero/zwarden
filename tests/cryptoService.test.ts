@@ -11,15 +11,15 @@ import {
 } from '../src/core/crypto/cryptoService.js';
 import { toBase64 } from '../src/core/crypto/encoding.js';
 
-/** Clé de test déterministe : encKey = 0x00..0x1f, macKey = 0x20..0x3f. */
+/** Deterministic test key: encKey = 0x00..0x1f, macKey = 0x20..0x3f. */
 function testKey(): SymmetricCryptoKey {
   const raw = new Uint8Array(64);
   for (let i = 0; i < 64; i++) raw[i] = i;
   return new SymmetricCryptoKey(raw);
 }
 
-describe('EncString — analyse', () => {
-  it('analyse un type 2 complet', () => {
+describe('EncString — parsing', () => {
+  it('parses a complete type 2', () => {
     const iv = toBase64(new Uint8Array(16).fill(1));
     const ct = toBase64(new Uint8Array(32).fill(2));
     const mac = toBase64(new Uint8Array(32).fill(3));
@@ -32,7 +32,7 @@ describe('EncString — analyse', () => {
     expect(enc.isSymmetric).toBe(true);
   });
 
-  it('fait un aller-retour exact sur la sérialisation', () => {
+  it('round-trips serialisation exactly', () => {
     const iv = toBase64(new Uint8Array(16).fill(1));
     const ct = toBase64(new Uint8Array(48).fill(2));
     const mac = toBase64(new Uint8Array(32).fill(3));
@@ -40,63 +40,63 @@ describe('EncString — analyse', () => {
     expect(EncString.parse(raw).toString()).toBe(raw);
   });
 
-  it('analyse un type 0 sans MAC', () => {
+  it('parses a type 0 without a MAC', () => {
     const raw = `0.${toBase64(new Uint8Array(16))}|${toBase64(new Uint8Array(16))}`;
     const enc = EncString.parse(raw);
     expect(enc.hasMac).toBe(false);
     expect(enc.toString()).toBe(raw);
   });
 
-  it('analyse un type 3 (RSA)', () => {
+  it('parses a type 3 (RSA)', () => {
     const enc = EncString.parse(`3.${toBase64(new Uint8Array(256).fill(9))}`);
     expect(enc.isSymmetric).toBe(false);
     expect(enc.iv).toBeUndefined();
   });
 
-  const invalides: ReadonlyArray<readonly [string, string]> = [
-    ['sans point', 'abcdef'],
-    ['type non numérique', 'x.aaaa|bbbb|cccc'],
-    ['type inconnu', '99.aaaa'],
-    ['segments manquants', `2.${toBase64(new Uint8Array(16))}|AAAA`],
-    ['segments en trop', `2.${toBase64(new Uint8Array(16))}|AAAA|BBBB|CCCC`],
-    ['chaîne vide', ''],
-    ['point en tête', '.aaaa'],
+  const invalid: ReadonlyArray<readonly [string, string]> = [
+    ['no dot', 'abcdef'],
+    ['non-numeric type', 'x.aaaa|bbbb|cccc'],
+    ['unknown type', '99.aaaa'],
+    ['missing segments', `2.${toBase64(new Uint8Array(16))}|AAAA`],
+    ['extra segments', `2.${toBase64(new Uint8Array(16))}|AAAA|BBBB|CCCC`],
+    ['empty string', ''],
+    ['leading dot', '.aaaa'],
   ];
 
-  it.each(invalides)('rejette : %s', (_label, raw) => {
+  it.each(invalid)('rejects: %s', (_label, raw) => {
     expect(() => EncString.parse(raw)).toThrow(EncStringParseError);
   });
 
-  it('rejette un IV de mauvaise taille', () => {
+  it('rejects an IV of the wrong size', () => {
     const raw = `2.${toBase64(new Uint8Array(8))}|AAAA|${toBase64(new Uint8Array(32))}`;
-    expect(() => EncString.parse(raw)).toThrow(/« iv » : 8 octets, 16 attendus/);
+    expect(() => EncString.parse(raw)).toThrow(/"iv": 8 bytes, 16 expected/);
   });
 
-  it('rejette un MAC de mauvaise taille', () => {
+  it('rejects a MAC of the wrong size', () => {
     const raw = `2.${toBase64(new Uint8Array(16))}|${toBase64(new Uint8Array(16))}|${toBase64(
       new Uint8Array(16),
     )}`;
-    expect(() => EncString.parse(raw)).toThrow(/« mac » : 16 octets, 32 attendus/);
+    expect(() => EncString.parse(raw)).toThrow(/"mac": 16 bytes, 32 expected/);
   });
 
-  it('rejette un ciphertext vide sur un type symétrique', () => {
+  it('rejects an empty ciphertext on a symmetric type', () => {
     const raw = `2.${toBase64(new Uint8Array(16))}||${toBase64(new Uint8Array(32))}`;
-    expect(() => EncString.parse(raw)).toThrow(/« ciphertext » : 0 octets/);
+    expect(() => EncString.parse(raw)).toThrow(/"ciphertext": 0 bytes/);
   });
 
-  it('rejette un ciphertext non aligné sur les blocs AES', () => {
+  it('rejects a ciphertext not aligned on AES blocks', () => {
     const raw = `2.${toBase64(new Uint8Array(16))}|${toBase64(new Uint8Array(15))}|${toBase64(
       new Uint8Array(32),
     )}`;
     expect(() => EncString.parse(raw)).toThrow(EncStringParseError);
   });
 
-  it('n’impose pas l’alignement de bloc aux types RSA', () => {
-    // La contrainte des blocs AES ne concerne que les types symétriques.
+  it('does not impose block alignment on RSA types', () => {
+    // The AES block constraint concerns the symmetric types alone.
     expect(() => EncString.parse(`3.${toBase64(new Uint8Array(11))}`)).not.toThrow();
   });
 
-  it('parseOrNull renvoie null au lieu de jeter, en notifiant les malformations', () => {
+  it('parseOrNull returns null instead of throwing, reporting malformations', () => {
     const erreurs: unknown[] = [];
     const surErreur = (e: unknown) => erreurs.push(e);
 
@@ -104,7 +104,7 @@ describe('EncString — analyse', () => {
     expect(erreurs).toHaveLength(1);
     expect(erreurs[0]).toBeInstanceOf(EncStringParseError);
 
-    // Absence légitime : null renvoyé sans notification.
+    // Legitimate absence: null returned with no notification.
     expect(EncString.parseOrNull(null, surErreur)).toBeNull();
     expect(EncString.parseOrNull('', surErreur)).toBeNull();
     expect(erreurs).toHaveLength(1);
@@ -112,7 +112,7 @@ describe('EncString — analyse', () => {
 });
 
 describe('SymmetricCryptoKey', () => {
-  it('scinde une clé de 64 octets en encKey / macKey', () => {
+  it('splits a 64-byte key into encKey / macKey', () => {
     const key = testKey();
     expect(key.encKey).toHaveLength(32);
     expect(key.macKey).toHaveLength(32);
@@ -122,134 +122,134 @@ describe('SymmetricCryptoKey', () => {
     expect(key.encryptionType).toBe(EncryptionType.AesCbc256_HmacSha256_B64);
   });
 
-  it('traite une clé de 32 octets comme non authentifiée', () => {
+  it('treats a 32-byte key as unauthenticated', () => {
     const key = new SymmetricCryptoKey(new Uint8Array(32));
     expect(key.macKey).toBeUndefined();
     expect(key.isAuthenticated).toBe(false);
   });
 
-  it.each([0, 16, 31, 33, 63, 65])('rejette une clé de %i octets', (len) => {
+  it.each([0, 16, 31, 33, 63, 65])('rejects a key of %i bytes', (len) => {
     expect(() => new SymmetricCryptoKey(new Uint8Array(len))).toThrow(RangeError);
   });
 
-  it('efface le matériel de clé', () => {
+  it('erases the key material', () => {
     const key = testKey();
     key.destroy();
     expect(key.key.every((b) => b === 0)).toBe(true);
   });
 });
 
-describe('chiffrement / déchiffrement', () => {
-  it('fait un aller-retour sur une chaîne', async () => {
+describe('encryption / decryption', () => {
+  it('round-trips a string', async () => {
     const key = testKey();
-    const enc = await encryptString('mot de passe très secret', key);
-    expect(await decryptString(enc, key)).toBe('mot de passe très secret');
+    const enc = await encryptString('a very secret password', key);
+    expect(await decryptString(enc, key)).toBe('a very secret password');
   });
 
-  it('produit toujours du type 2', async () => {
+  it('always produces type 2', async () => {
     const enc = await encryptString('x', testKey());
     expect(enc.encryptionType).toBe(EncryptionType.AesCbc256_HmacSha256_B64);
     expect(enc.toString().startsWith('2.')).toBe(true);
   });
 
-  it('utilise un IV différent à chaque chiffrement', async () => {
+  it('uses a different IV on every encryption', async () => {
     const key = testKey();
-    const a = await encryptString('même contenu', key);
-    const b = await encryptString('même contenu', key);
+    const a = await encryptString('same content', key);
+    const b = await encryptString('same content', key);
     expect(toBase64(a.iv!)).not.toBe(toBase64(b.iv!));
     expect(a.toString()).not.toBe(b.toString());
   });
 
   it.each(['', 'a', 'a'.repeat(15), 'a'.repeat(16), 'a'.repeat(17), 'a'.repeat(10_000)])(
-    'gère un texte de %i caractères',
+    'handles a text of %i characters',
     async (text) => {
       const key = testKey();
       expect(await decryptString(await encryptString(text, key), key)).toBe(text);
     },
   );
 
-  it('préserve l’UTF-8 multi-octets', async () => {
+  it('preserves multi-byte UTF-8', async () => {
     const key = testKey();
     const text = 'p@ssw0rd — 日本語 🔐 àéîõü ñ';
     expect(await decryptString(await encryptString(text, key), key)).toBe(text);
   });
 
-  it('survit à un aller-retour par la forme sérialisée', async () => {
+  it('survives a round trip through the serialised form', async () => {
     const key = testKey();
-    const serialise = (await encryptString('via le réseau', key)).toString();
-    expect(await decryptString(EncString.parse(serialise), key)).toBe('via le réseau');
+    const serialised = (await encryptString('over the wire', key)).toString();
+    expect(await decryptString(EncString.parse(serialised), key)).toBe('over the wire');
   });
 });
 
-/** Retourne une copie du tampon avec un octet inversé. */
+/** Returns a copy of the buffer with one byte flipped. */
 function flipByte(bytes: Uint8Array, index: number): Uint8Array {
   const copy = new Uint8Array(bytes);
   copy.set([(copy.at(index) ?? 0) ^ 0xff], index);
   return copy;
 }
 
-describe('résistance à l’altération', () => {
-  it('rejette un ciphertext modifié', async () => {
+describe('tamper resistance', () => {
+  it('rejects a modified ciphertext', async () => {
     const key = testKey();
-    const enc = await encryptString('solde: 100', key);
+    const enc = await encryptString('balance: 100', key);
     const ct = flipByte(enc.ciphertext, 0);
     const falsifie = EncString.fromParts(enc.encryptionType, enc.iv, ct, enc.mac);
 
     await expect(decryptString(falsifie, key)).rejects.toThrow(MacMismatchError);
   });
 
-  it('rejette un IV modifié', async () => {
+  it('rejects a modified IV', async () => {
     const key = testKey();
-    const enc = await encryptString('solde: 100', key);
+    const enc = await encryptString('balance: 100', key);
     const iv = flipByte(enc.iv!, 0);
     const falsifie = EncString.fromParts(enc.encryptionType, iv, enc.ciphertext, enc.mac);
 
     await expect(decryptString(falsifie, key)).rejects.toThrow(MacMismatchError);
   });
 
-  it('rejette un MAC modifié', async () => {
+  it('rejects a modified MAC', async () => {
     const key = testKey();
-    const enc = await encryptString('solde: 100', key);
+    const enc = await encryptString('balance: 100', key);
     const mac = flipByte(enc.mac!, 31);
     const falsifie = EncString.fromParts(enc.encryptionType, enc.iv, enc.ciphertext, mac);
 
     await expect(decryptString(falsifie, key)).rejects.toThrow(MacMismatchError);
   });
 
-  it('rejette un MAC absent sur du type 2', async () => {
+  it('rejects a missing MAC on type 2', async () => {
     const key = testKey();
-    const enc = await encryptString('solde: 100', key);
+    const enc = await encryptString('balance: 100', key);
     const sansMac = EncString.fromParts(enc.encryptionType, enc.iv, enc.ciphertext, undefined);
 
     await expect(decryptString(sansMac, key)).rejects.toThrow(MacMismatchError);
   });
 
-  it('rejette une clé différente', async () => {
-    const enc = await encryptString('solde: 100', testKey());
+  it('rejects a different key', async () => {
+    const enc = await encryptString('balance: 100', testKey());
     const autre = new SymmetricCryptoKey(new Uint8Array(64).fill(9));
 
     await expect(decryptString(enc, autre)).rejects.toThrow(MacMismatchError);
   });
 
-  it('rejette une rétrogradation vers le type 0 (attaque par downgrade)', async () => {
+  it('rejects a downgrade to type 0 (downgrade attack)', async () => {
     const key = testKey();
-    const enc = await encryptString('solde: 100', key);
-    const retrograde = EncString.fromParts(
+    const enc = await encryptString('balance: 100', key);
+    const downgraded = EncString.fromParts(
       EncryptionType.AesCbc256_B64,
       enc.iv,
       enc.ciphertext,
       undefined,
     );
 
-    await expect(decryptString(retrograde, key)).rejects.toThrow(UnsupportedEncryptionError);
+    await expect(decryptString(downgraded, key)).rejects.toThrow(UnsupportedEncryptionError);
   });
 
-  it('refuse de chiffrer avec une clé sans MAC', async () => {
-    const faible = new SymmetricCryptoKey(new Uint8Array(32));
-    await expect(encryptString('secret', faible)).rejects.toThrow(UnsupportedEncryptionError);
+  it('refuses to encrypt with a key that has no MAC', async () => {
+    const weak = new SymmetricCryptoKey(new Uint8Array(32));
+    await expect(encryptString('secret', weak)).rejects.toThrow(UnsupportedEncryptionError);
   });
 
-  it('refuse le déchiffrement du type 1 (AES-128 obsolète)', async () => {
+  it('refuses to decrypt type 1 (obsolete AES-128)', async () => {
     const key = testKey();
     const raw = `1.${toBase64(new Uint8Array(16))}|${toBase64(new Uint8Array(16))}|${toBase64(
       new Uint8Array(32),
@@ -259,7 +259,7 @@ describe('résistance à l’altération', () => {
     );
   });
 
-  it('refuse le déchiffrement symétrique d’une EncString RSA', async () => {
+  it('refuses symmetric decryption of an RSA EncString', async () => {
     const key = testKey();
     const raw = `3.${toBase64(new Uint8Array(256))}`;
     await expect(decryptString(EncString.parse(raw), key)).rejects.toThrow(
@@ -269,7 +269,7 @@ describe('résistance à l’altération', () => {
 });
 
 describe('decryptStringOrNull', () => {
-  it('déchiffre une valeur valide sans invoquer onError', async () => {
+  it('decrypts a valid value without invoking onError', async () => {
     const key = testKey();
     const enc = (await encryptString('visible', key)).toString();
     const erreurs: unknown[] = [];
@@ -278,10 +278,10 @@ describe('decryptStringOrNull', () => {
     expect(erreurs).toHaveLength(0);
   });
 
-  it('renvoie null sans erreur pour un champ absent', async () => {
+  it('returns null without an error for a missing field', async () => {
     const key = testKey();
     const jamais = () => {
-      throw new Error('onError ne doit pas être appelé pour un champ absent');
+      throw new Error('onError must not be called for a missing field');
     };
 
     expect(await decryptStringOrNull(null, key, jamais)).toBeNull();
@@ -289,7 +289,7 @@ describe('decryptStringOrNull', () => {
     expect(await decryptStringOrNull('', key, jamais)).toBeNull();
   });
 
-  it('renvoie null et notifie sur une donnée illisible', async () => {
+  it('returns null and reports on unreadable data', async () => {
     const key = testKey();
     const erreurs: unknown[] = [];
 
@@ -297,7 +297,7 @@ describe('decryptStringOrNull', () => {
     expect(erreurs).toHaveLength(1);
   });
 
-  it('renvoie null et notifie sur un MAC invalide', async () => {
+  it('returns null and reports on an invalid MAC', async () => {
     const key = testKey();
     const autre = new SymmetricCryptoKey(new Uint8Array(64).fill(7));
     const enc = (await encryptString('secret', key)).toString();
@@ -309,12 +309,12 @@ describe('decryptStringOrNull', () => {
   });
 });
 
-describe('vecteur figé (détection de régression de format)', () => {
-  // Chiffré avec la clé de test et un IV fixe. Si ce test casse, le format
-  // sur le fil a changé et les coffres existants deviennent illisibles.
+describe('frozen vector (format regression detection)', () => {
+  // Encrypted with the test key and a fixed IV. If this test breaks, the wire
+  // format has changed and existing vaults become unreadable.
   const IV_FIXE = new Uint8Array(16).fill(0xa5);
 
-  it('reste stable dans le temps', async () => {
+  it('stays stable over time', async () => {
     const key = testKey();
     const { aesCbcEncrypt, hmacSha256 } = await import('../src/core/crypto/primitives.js');
     const { concatBytes, toUtf8Bytes } = await import('../src/core/crypto/encoding.js');

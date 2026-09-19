@@ -1,287 +1,275 @@
-# Décisions d'ergonomie et de sécurité de l'extension
+# The extension's usability and security decisions
 
-Ce document fixe les décisions de conception de l'extension **avant** que le
-code d'interface n'existe, avec le même sérieux que `CRYPTO.md` fixe le schéma
-cryptographique. Chaque section énonce une règle et sa raison ; s'en écarter
-demandera un argument, pas un oubli.
+This document fixes the extension's design decisions **before** the interface
+code exists, with the same seriousness that `CRYPTO.md` fixes the cryptographic
+scheme. Each section states a rule and its reason; departing from one will take
+an argument, not an oversight.
 
 ---
 
-## 1. Déverrouillage
+## 1. Unlocking
 
-**Cible : la dérivation s'exécute dans le service worker, jamais dans la
-popup.** ⏳ *Non encore implémenté — aujourd'hui `unlock()` tourne dans la
-popup, qui détient donc la clé.* Fermer la popup ne doit pas annuler un
-déverrouillage en cours, et le matériel de clé n'a rien à faire dans un contexte
-d'interface. La popup enverra le mot de passe au worker, affichera la
-progression, et recevra un signal de succès — pas de clé.
+**Target: derivation runs in the service worker, never in the popup.**
+⏳ *Not implemented yet — today `unlock()` runs in the popup, which therefore
+holds the key.* Closing the popup must not cancel an unlock in progress, and key
+material has no business in a UI context. The popup will send the password to
+the worker, display progress, and receive a success signal — not a key.
 
-Ce déplacement n'est pas un réglage mais une refonte : « popup sans clé »
-implique que **chaque** déchiffrement devienne un aller-retour vers le worker,
-donc une couche de messages sur tout le chemin de données. C'est pourquoi il
-attend une couverture de tests de l'interface plutôt que d'être tenté à l'aveugle
-— et c'est aussi ce qui bloque le raccourci d'autofill (§4 ter).
+This move is not a setting but a redesign: "a popup with no key" implies that
+**every** decryption becomes a round trip to the worker, hence a message layer
+across the whole data path. That is why it waits on a test suite for the
+interface rather than being attempted blind — and it is also what blocks the
+autofill shortcut (§4 ter).
 
-**Le chemin de déverrouillage est unique : `core/vault/unlock()`.**
-L'enchaînement prelogin → dérivation → hashs → login → étirement → déballage,
-avec l'effacement des clés intermédiaires, est écrit et audité une fois.
-Aucun autre code ne recompose cette chorégraphie.
+**There is one unlock path: `core/vault/unlock()`.** The sequence prelogin →
+derivation → hashes → login → stretching → unwrapping, with the intermediate
+keys erased, is written and audited once. No other code recomposes that
+choreography.
 
-**Déverrouillage hors ligne.** Le premier déverrouillage réussi conserve
-localement : le hash `LocalAuthorization`, la clé de coffre enveloppée et les
-paramètres KDF validés. Serveur injoignable ⇒ validation par
-`verifyLocalPasswordHash` (comparaison à temps constant sur les octets, jamais
-`===` sur le base64) puis ouverture sur le dernier état synchronisé. Un
-gestionnaire de mots de passe inaccessible pendant une panne serveur est
-rédhibitoire.
+**Offline unlocking.** The first successful unlock keeps locally: the
+`LocalAuthorization` hash, the wrapped vault key and the validated KDF
+parameters. Server unreachable ⇒ validation through `verifyLocalPasswordHash`
+(a constant-time comparison on the bytes, never `===` on the base64) then the
+vault opens on the last synced state. A password manager that is inaccessible
+during a server outage is a non-starter.
 
-**Erreurs distinctes à l'écran.** Mot de passe incorrect, limitation de débit
-(avec le délai), second facteur requis, captcha requis, serveur injoignable,
-KDF refusé : chaque cas a son message. Le routage se fait sur le champ
-`code` des erreurs, jamais sur les messages (qui servent aux journaux).
+**Distinct errors on screen.** Wrong password, rate limiting (with the delay),
+second factor required, captcha required, server unreachable, KDF refused: each
+case has its own message. Routing is on the errors' `code` field, never on the
+messages (which are for logs).
 
-## 2. Cycle de verrouillage
+## 2. The locking cycle
 
-- L'état déverrouillé vit dans `chrome.storage.session` (mémoire seulement) :
-  fermeture du navigateur ⇒ verrouillage, gratuitement. **C'est le défaut** —
-  `autoLockMinutes = 0` — et c'est le comportement attendu par qui vient de
-  l'extension officielle.
-- Un délai d'inactivité optionnel se superpose à cette garantie. « Inactivité »
-  signifie *navigateur* inactif, pas *popup* fermée : un utilisateur qui change
-  d'onglet et navigue est actif. Compter le temps depuis la dernière ouverture
-  de popup redemandait le mot de passe en plein travail — le reproche récurrent
-  fait à la version précédente.
-- Le service worker en est le seul propriétaire (`background/main.ts`) : il
-  écoute `tabs.onActivated`, `windows.onFocusChanged` et `tabs.onUpdated` (sur
-  l'onglet au premier plan uniquement, pour qu'une page d'arrière-plan qui se
-  rafraîchit ne maintienne pas le coffre ouvert), et enregistre un horodatage
-  dans `chrome.storage.session`. La popup ouverte y ajoute son propre battement.
-- L'alarme `chrome.alarms` — le seul minuteur qui survit à la mort du service
-  worker MV3 — est un **battement d'une minute**, pas une échéance : la
-  recréer à chaque événement d'activité se heurterait à la limitation de débit.
-  Contrepartie assumée : le verrouillage peut tarder d'au plus une minute.
-  La règle de décision est `shouldAutoLock()`, pure et testée.
-- Le verrouillage de la session du système (`chrome.idle`, état `locked` :
-  écran de verrouillage, veille) verrouille immédiatement, quel que soit le
-  délai — c'est ce filet qui rend le défaut « fermeture du navigateur »
-  tenable, puisqu'on s'éloigne d'une machine bien plus souvent qu'on ne ferme
-  son navigateur. Réglage `lockOnSystemLock`, activé par défaut. L'état `idle`
-  (aucune saisie depuis quelques minutes) ne verrouille **pas** : il ne dit
-  rien de la présence de l'utilisateur, qui peut lire son écran.
-- Verrouiller = `userKey.destroy()` **et** purge de `chrome.storage.session`
-  **et** purge de l'état de la popup. Les trois, systématiquement, et d'un seul
-  geste : `lockVault()` porte la liste du stockage, `resetVaultState()` celle de
-  la mémoire. La seconde n'est pas cosmétique — le code à usage unique affiché
-  retient le secret TOTP déchiffré *et* un minuteur qui le recalcule chaque
-  seconde, le générateur retient sa production, et le formulaire d'édition le
-  mot de passe de l'item ouvert. Rien de tout cela n'est visible après
-  verrouillage : c'est précisément ce qui rend l'oubli facile.
-- Limite du filet « session du système verrouillée » : il dépend de la remontée
-  de l'état `locked` par `chrome.idle`, que tous les environnements de bureau
-  n'émettent pas (notamment selon le gestionnaire de session sous Linux). Là où
-  l'événement ne vient pas, le défaut `autoLockMinutes = 0` laisse le coffre
-  ouvert tant que le navigateur vit — un délai d'inactivité explicite est alors
-  le seul recours.
-- Le jeton d'accès expirant (~1 h) se renouvelle par `refreshToken()` — jamais
-  en redemandant le mot de passe. Les jetons renouvelés sont enregistrés
-  **avant** l'écriture qu'ils autorisent : un serveur qui fait tourner les
-  jetons de rafraîchissement a déjà invalidé l'ancien, et ne rien enregistrer
-  ferait payer un échec réseau d'un déverrouillage complet.
+- The unlocked state lives in `chrome.storage.session` (memory only): closing
+  the browser ⇒ locking, for free. **That is the default** —
+  `autoLockMinutes = 0` — and it is the behaviour anyone coming from the
+  official extension expects.
+- An optional inactivity delay layers on top of that guarantee. "Inactivity"
+  means the *browser* is inactive, not that the *popup* is closed: a user
+  switching tabs and browsing is active. Counting time since the popup was last
+  opened asked for the password mid-work — the recurring complaint about the
+  previous version.
+- The service worker is its sole owner (`background/main.ts`): it listens to
+  `tabs.onActivated`, `windows.onFocusChanged` and `tabs.onUpdated` (on the
+  foreground tab only, so a background page refreshing itself does not hold the
+  vault open), and records a timestamp in `chrome.storage.session`. An open
+  popup adds its own heartbeat.
+- The `chrome.alarms` alarm — the only timer that survives the death of an MV3
+  service worker — is a **one-minute heartbeat**, not a deadline: recreating it
+  on every activity event would run into the rate limit. Acknowledged
+  trade-off: locking can be up to a minute late. The decision rule is
+  `shouldAutoLock()`, pure and tested.
+- Locking the system session (`chrome.idle`, state `locked`: lock screen,
+  sleep) locks immediately, whatever the delay — it is that net which makes the
+  "browser close" default tenable, since one walks away from a machine far more
+  often than one closes the browser. Setting `lockOnSystemLock`, on by default.
+  The `idle` state (no input for a few minutes) does **not** lock: it says
+  nothing about the user's presence, who may well be reading their screen.
+- To lock = `userKey.destroy()` **and** purging `chrome.storage.session` **and**
+  purging the popup's state. All three, systematically, in a single gesture:
+  `lockVault()` carries the storage list, `resetVaultState()` the memory one.
+  The second is not cosmetic — a displayed one-time code holds the decrypted
+  TOTP secret *and* a timer recomputing it every second, the generator holds its
+  output, and the edit form the open item's password. None of that is visible
+  after locking: which is precisely what makes it easy to forget.
+- Limit of the "system session locked" net: it depends on `chrome.idle`
+  reporting the `locked` state, which not every desktop environment emits
+  (depending on the session manager under Linux in particular). Where the event
+  does not come, the `autoLockMinutes = 0` default leaves the vault open for as
+  long as the browser lives — an explicit inactivity delay is then the only
+  recourse.
+- The expiring access token (~1 h) is renewed through `refreshToken()` — never
+  by asking for the password again. Renewed tokens are saved **before** the
+  write they authorise: a server that rotates refresh tokens has already
+  invalidated the old one, and saving nothing would make a network failure cost
+  a full unlock.
 
-## 3. Popup — deux vues commutables
+## 3. The popup — two switchable views
 
-| | Vue « Bitwarden-like » | Vue « Zwarden » |
+| | "Bitwarden-like" view | "Zwarden" view |
 |---|---|---|
-| Public | Migrants de l'extension officielle | Usage quotidien au clavier |
-| Ouverture | Liste complète, onglets classiques | Filtrée sur le domaine de l'onglet actif |
-| Navigation | Souris d'abord | Recherche focalisée, flèches + Entrée |
+| Audience | People migrating from the official extension | Daily keyboard use |
+| On opening | The full list, classic tabs | Filtered on the active tab's domain |
+| Navigation | Mouse first | Focused search, arrows + Enter |
 
-Les deux vues sont deux rendus Preact du **même view-model**
-(`core/vault/cipherService`) ; le choix est une préférence persistée. Aucune
-logique de coffre dans les composants.
+The two views are two Preact renderings of the **same view model**
+(`core/vault/cipherService`); the choice is a persisted preference. No vault
+logic in the components.
 
-Règles communes :
+Common rules:
 
-- **Déchiffrement partiel** : au déverrouillage, seuls noms et URIs sont
-  déchiffrés (`CipherOverview`). Mot de passe, TOTP et notes le sont à
-  l'ouverture de l'item (`CipherDetails`). Latence d'ouverture minimale, moins
-  de secrets en clair simultanément.
-- **Presse-papiers écrasé ~30 s** après la copie d'un secret, par **deux**
-  mécanismes délibérément redondants : un minuteur dans la popup, qui respecte le
-  délai exact tant qu'elle vit, et une alarme `chrome.alarms` qui lui survit et
-  déclenche un document hors écran (`src/offscreen/`). La popup seule ne
-  suffisait pas — son minuteur mourait avec elle, c'est-à-dire précisément quand
-  l'effacement compte. Deux réserves, dites franchement : Chrome ramène toute
-  alarme à trente secondes minimum, donc le réglage « 10 secondes » n'est tenu
-  que par la popup ; et `execCommand('copy')` ignorant une sélection vide, le
-  presse-papiers est **écrasé par une espace**, non vidé. L'effet utile est le
-  même, le mot juste n'est pas « effacé ». Verrouiller déclenche l'écrasement
-  immédiatement.
-- Mot de passe masqué par défaut ; révélation sur geste explicite.
-- **Garde par item (`reprompt`).** Un item marqué « redemander le mot de passe
-  maître » côté Bitwarden ne livre rien — copie, révélation, code à usage
-  unique, remplissage, édition — sans une nouvelle saisie. Trois points de
-  conception :
-  - la garde se pose **avant** `detailsOf`, donc avant tout déchiffrement : un
-    secret protégé n'est pas déchiffré puis caché, il n'est pas déchiffré ;
-  - `reprompt` est porté par `CipherOverview`, précisément pour que la garde
-    soit lisible sans rien déchiffrer ;
-  - la vérification est **hors réseau** : la clé maître est redérivée depuis la
-    saisie et comparée au hash local conservé au déverrouillage
-    (`verifyLocalPasswordHash`, comparaison à temps constant). Faire valider un
-    `reprompt` par le serveur donnerait à qui contrôle le réseau le pouvoir de
-    le désarmer.
+- **Partial decryption**: at unlock, only names and URIs are decrypted
+  (`CipherOverview`). Password, TOTP and notes are decrypted when the item is
+  opened (`CipherDetails`). Minimal opening latency, fewer cleartext secrets at
+  once.
+- **The clipboard is overwritten after ~30 s** following a secret being copied,
+  through **two** deliberately redundant mechanisms: a timer in the popup, which
+  honours the exact delay while it lives, and a `chrome.alarms` alarm that
+  survives its closing and triggers an offscreen document (`src/offscreen/`).
+  The popup alone was not enough — its timer died with it, which is precisely
+  when the wipe matters. Two caveats, said plainly: Chrome raises any alarm to
+  thirty seconds minimum, so the "10 seconds" setting is honoured by the popup
+  alone; and since `execCommand('copy')` ignores an empty selection, the
+  clipboard is **overwritten with a space**, not emptied. The useful effect is
+  the same, but "wiped" is not quite the word. Locking triggers the overwrite
+  immediately.
+- Passwords hidden by default; revealed on an explicit gesture.
+- **Per-item guard (`reprompt`).** An item marked "ask for the master password
+  again" on Bitwarden's side hands over nothing — copy, reveal, one-time code,
+  fill, edit — without a fresh entry. Three design points:
+  - the guard stands **before** `detailsOf`, hence before any decryption: a
+    protected secret is not decrypted and then hidden, it is not decrypted;
+  - `reprompt` is carried by `CipherOverview`, precisely so the guard is
+    readable without decrypting anything;
+  - verification is **offline**: the master key is re-derived from the entry and
+    compared against the local hash kept at unlock (`verifyLocalPasswordHash`, a
+    constant-time comparison). Having the server validate a `reprompt` would
+    hand whoever controls the network the power to disarm it.
 
-  Refermer un code ou masquer un mot de passe n'est pas gardé : seule la sortie
-  d'un secret l'est.
-- **Code à usage unique sur la ligne.** Les items porteurs d'un secret TOTP
-  affichent un bouton horloge ; un clic déchiffre le secret, affiche le code
-  avec son décompte et le copie. Le code est **recalculé** à chaque seconde à
-  partir de l'horloge, jamais décompté : un minuteur JavaScript dérive, et la
-  popup peut être gelée — afficher un code périmé serait pire que ne rien
-  afficher. `hasTotp` se déduit de la présence du champ chiffré, donc la liste
-  sait où poser le bouton sans déchiffrer un secret que personne n'a demandé.
-- **Générateur de mots de passe** (`core/generator`), ouvert depuis l'en-tête
-  ou depuis le champ mot de passe de l'édition — même panneau, deux points
-  d'entrée. Tirage sans biais de modulo (rejet de la tranche incomplète),
-  un caractère garanti par classe cochée, puis mélange. Options persistées à
-  part des paramètres d'application : la popup et la page d'options
-  n'écrivent pas dans le même objet.
-- **Les items récemment utilisés remontent en tête.** Copier, révéler ou
-  remplir note l'usage (`markUsed`) ; l'ordre est appliqué à l'ouverture
-  (`sortByLastUsed`), jamais pendant que la popup est ouverte — un item qui
-  remonterait sous le curseur ferait cliquer à côté la fois suivante. Les
-  items jamais utilisés gardent l'ordre du serveur. Le journal est plafonné à
-  100 entrées et effaçable depuis les options.
+  Closing a code or hiding a password is not guarded: only a secret leaving the
+  vault is.
+- **The one-time code on the row.** Items carrying a TOTP secret show a clock
+  button; one click decrypts the secret, displays the code with its countdown
+  and copies it. The code is **recomputed** every second from the clock, never
+  counted down: a JavaScript timer drifts, and the popup can be frozen —
+  displaying a stale code would be worse than displaying none. `hasTotp` is
+  inferred from the presence of the encrypted field, so the list knows where to
+  put the button without decrypting a secret nobody asked for.
+- **A password generator** (`core/generator`), opened from the header or from
+  the edit form's password field — one panel, two entry points. A draw with no
+  modulo bias (the incomplete slice is rejected), one character guaranteed per
+  ticked class, then a shuffle. The options are persisted apart from the
+  application settings: the popup and the options page do not write into the
+  same object.
+- **Recently used items float to the top.** Copying, revealing or filling
+  records the use (`markUsed`); the order is applied at opening
+  (`sortByLastUsed`), never while the popup is open — an item floating up under
+  the cursor would make the next click land on the wrong row. Items never used
+  keep the server's order. The log is capped at 100 entries and can be cleared
+  from the settings.
 
-## 4. Autofill — règles non négociables
+## 4. Autofill — non-negotiable rules
 
-Pendant de « MAC avant déchiffrement » côté extension. Deux règles, connues
-pour avoir fait défaut à d'autres gestionnaires :
+The extension-side counterpart of "MAC before decryption". Two rules, both known
+to have failed in other managers:
 
-1. **Jamais de remplissage sans geste utilisateur.** Le remplissage
-   automatique silencieux est le vecteur classique d'exfiltration par
-   formulaire invisible : une page compromise pose un champ caché, le
-   gestionnaire le remplit, le script l'exfiltre. Remplir exige un clic sur la
-   suggestion ou un raccourci clavier.
-2. **Correspondance d'URI par origine** (schéma + hôte + port), jamais par
-   sous-chaîne. Un matching laxiste livre les identifiants de `banque.fr` à
-   `banque.fr.attaquant.com`. Le matching par domaine de base exigerait la
-   Public Suffix List (inacceptable pour le budget de poids) ; l'origine
-   stricte est sûre sans elle.
+1. **Never fill without a user gesture.** Silent automatic filling is the classic
+   vector for exfiltration through an invisible form: a compromised page places
+   a hidden field, the manager fills it, the script exfiltrates it. Filling
+   requires a click on the suggestion or a keyboard shortcut.
+2. **URI matching by origin** (scheme + host + port), never by substring. Loose
+   matching hands `bank.example`'s credentials to `bank.example.attacker.com`.
+   Base-domain matching would require the Public Suffix List (unacceptable for
+   the size budget); strict origin is safe without it.
 
-Architecture en deux étages (cf. README) : détecteur léger à `document_start`,
-moteur injecté seulement si un champ pertinent existe, et uniquement dans les
-pages `http(s)`.
+A two-stage architecture (see the README): a light detector at
+`document_start`, the engine injected only if a relevant field exists, and only
+into `http(s)` pages.
 
-**État : v1 en place.** Le bouton « Remplir » de la popup injecte à la demande
-(`chrome.scripting`, cadre principal seulement) un remplisseur qui respecte
-les deux règles : geste explicite obligatoire, bouton visible uniquement quand
-l'origine de l'item correspond à celle de l'onglet (`uriMatch.ts`), et
-revérifiée au moment du clic. Restent pour la v2 : le détecteur en page, la
-suggestion inline et les iframes.
+**Status: v1 is in place.** The popup's "Fill" button injects on demand
+(`chrome.scripting`, main frame only) a filler that honours both rules: an
+explicit gesture required, the button visible only when the item's origin
+matches the tab's (`uriMatch.ts`), and rechecked at click time. Still to come in
+v2: the in-page detector, the inline suggestion, and iframes.
 
-## 4 bis. Proposer d'enregistrer un identifiant saisi
+## 4 bis. Offering to save an entered credential
 
-Trois acteurs, aux rôles volontairement disjoints — c'est le découpage qui
-tient la promesse, pas la bonne volonté de chacun :
+Three actors, with deliberately disjoint roles — it is the split that keeps the
+promise, not anyone's good intentions:
 
-| Acteur | Voit | Décide |
+| Actor | Sees | Decides |
 |---|---|---|
-| `content/detector.ts` | Ce que l'utilisateur tape dans la page | Rien — il transmet |
-| Service worker | Le réglage, l'état du coffre, la liste d'exclusion | S'il faut *retenir* la capture |
-| Popup | Le coffre déchiffré | S'il faut *proposer*, et quoi |
+| `content/detector.ts` | What the user types in the page | Nothing — it passes it on |
+| Service worker | The setting, the vault's state, the exclusion list | Whether to *keep* the capture |
+| Popup | The decrypted vault | Whether to *offer*, and what |
 
-Le détecteur n'a pas la clé et ne connaît pas le coffre ; le worker non plus.
-Seule la popup peut dire « ce mot de passe y est déjà » — d'où le fait qu'elle
-tranche, à son ouverture, entre trois issues : rien à proposer (même
-identifiant, même mot de passe sur cette origine — la connexion ordinaire,
-passée sous silence, sans quoi la pastille s'allumerait à chaque connexion et
-ne voudrait plus rien dire), mise à jour, ou création.
+The detector has no key and does not know the vault; neither does the worker.
+Only the popup can say "that password is already in there" — which is why it
+settles, when it opens, between three outcomes: nothing to offer (same username,
+same password on this origin — the ordinary sign-in, passed over in silence,
+without which the badge would light up on every sign-in and mean nothing any
+more), an update, or a creation.
 
-- **Signal unique : une pastille sur l'icône.** Rien n'est injecté dans la
-  page — pas de barre, pas de CSS à isoler, aucune interface qu'un site
-  hostile puisse lire, recouvrir ou imiter. Contrepartie assumée : il faut
-  ouvrir la popup pour voir la proposition.
-- **Détecteur enregistré dynamiquement** (`chrome.scripting`), pas déclaré
-  dans le manifest : réglage décoché, il n'y a aucun script dans les pages —
-  pas un script qui se tait. La différence entre une promesse et une garantie.
-- **Rien ne part sans un clic.** La capture attend ; « Ignorer » la jette,
-  « Ne plus proposer ici » ajoute l'hôte à une liste d'exclusion locale.
-- **Coffre verrouillé : la capture est refusée**, pas mise en file. Garder un
-  mot de passe en clair en mémoire pendant que tout le reste est purgé
-  contredirait le §2.
-- **Mise à jour non destructrice.** Seul le mot de passe change ; nom,
-  dossier, notes, TOTP et champs personnalisés sont repris, et l'ancien mot de
-  passe rejoint l'historique.
-- **Rapprochement par origine stricte** (`findSaveCandidate`), jamais par
-  domaine : un rapprochement laxiste n'afficherait pas une mauvaise ligne, il
-  écraserait un mot de passe valide depuis un site voisin.
+- **One signal only: a badge on the icon.** Nothing is injected into the page —
+  no bar, no CSS to isolate, no interface a hostile site could read, cover or
+  imitate. Acknowledged trade-off: the popup must be opened to see the offer.
+- **The detector is registered dynamically** (`chrome.scripting`), not declared
+  in the manifest: with the setting unticked, there is no script in pages at all
+  — not a script keeping quiet. The difference between a promise and a
+  guarantee.
+- **Nothing leaves without a click.** The capture waits; "Dismiss" throws it
+  away, "Never for this site" adds the host to a local exclusion list.
+- **Vault locked: the capture is refused**, not queued. Keeping a cleartext
+  password in memory while everything else is purged would contradict §2.
+- **Non-destructive updates.** Only the password changes; name, folder, notes,
+  TOTP and custom fields are carried over, and the old password joins the
+  history.
+- **Matching by strict origin** (`findSaveCandidate`), never by domain: a loose
+  match would not show a wrong row, it would overwrite a valid password from a
+  neighbouring site.
+- **The username is guessed, never guaranteed.** No site is obliged to announce
+  it (`autocomplete="username"`). The fallback rule — the last text field filled
+  before the password — gets contorted layouts wrong, and the user then corrects
+  it in the popup. One wrong guess was unacceptable: taking the password itself.
+  The two-field "show password" pattern (a `password` and a `text` mirror whose
+  visibility the site toggles) placed a filled, visible text field just before
+  the password field — the perfect candidate for the proximity rule. The item
+  created then carried the password in the clear in its username field. A
+  candidate whose value is exactly the password is now ruled out, as is a field
+  the site announces as a password.
 
-- **L'identifiant est deviné, jamais garanti.** Aucun site n'est obligé de
-  l'annoncer (`autocomplete="username"`). La règle de repli — le dernier champ
-  texte rempli avant le mot de passe — se trompe sur les mises en page tordues,
-  et l'utilisateur corrige alors dans la popup. Une seule erreur de devinette
-  était inacceptable : reprendre le mot de passe lui-même. Le motif « afficher
-  le mot de passe » à deux champs (un `password` et un `text` miroir dont le site
-  bascule la visibilité) plaçait un champ texte rempli, visible, juste avant le
-  champ mot de passe — le candidat parfait pour la règle de proximité. L'item
-  créé portait alors le mot de passe en clair dans son champ identifiant. Un
-  candidat dont la valeur est exactement le mot de passe est désormais écarté,
-  ainsi qu'un champ que le site annonce comme mot de passe.
+Known limits: main frame only, and sign-ins with neither a `<form>` nor an
+identifiable button escape the detector. A missed credential is recovered by
+hand; a credential captured in error costs only a "Dismiss".
 
-Limites connues : cadre principal seulement, et les connexions sans `<form>`
-ni bouton identifiable échappent au détecteur. Un identifiant manqué se
-rattrape à la main ; un identifiant capturé à tort ne coûte qu'un « Ignorer ».
+## 4 ter. Keyboard shortcuts — parity with the official extension
 
-## 4 ter. Raccourcis clavier — parité avec l'extension officielle
+The shortcuts follow the official extension's (read from its 2026.7.0 manifest).
+Only those that **can succeed without the vault key** are declared, since the
+service worker does not hold it: declaring a shortcut that does nothing would be
+worse than not declaring it.
 
-Les raccourcis reprennent ceux de l'extension officielle (relevés dans son
-manifest 2026.7.0). Seuls sont déclarés ceux qui **peuvent aboutir sans la clé du
-coffre**, que le service worker ne détient pas : déclarer un raccourci qui ne
-fait rien serait pire que ne pas le déclarer.
-
-| Commande | Raccourci | État |
+| Command | Shortcut | Status |
 |---|---|---|
-| Ouvrir la popup | `Ctrl+Shift+Y` (`Ctrl+Shift+U` sous Linux) | ✅ `_execute_action` |
-| Générer un mot de passe et le copier | `Ctrl+Shift+9` | ✅ engendrer ne demande aucune clé |
-| Verrouiller le coffre | sans défaut, configurable | ✅ purge, aucune clé requise |
-| Autofill identifiants | `Ctrl+Shift+L` | ⏳ exige la clé dans le worker (§1) |
+| Open the popup | `Ctrl+Shift+Y` (`Ctrl+Shift+U` on Linux) | ✅ `_execute_action` |
+| Generate a password and copy it | `Ctrl+Shift+9` | ✅ generating needs no key |
+| Lock the vault | no default, configurable | ✅ a purge, no key required |
+| Autofill credentials | `Ctrl+Shift+L` | ⏳ needs the key in the worker (§1) |
 
-## 4 quater. Manifest — notes relevées sur l'extension officielle
+## 4 quater. Manifest — notes taken from the official extension
 
-- **CSP** : exécuter du WASM en MV3 exige
-  `script-src 'self' 'wasm-unsafe-eval'`. Le module Argon2id (hash-wasm) en a
-  besoin — sans cette directive, le déverrouillage Argon2id échouera en
-  production alors qu'il passe en tests Node.
-- **Permissions** : l'officielle demande 16 permissions dont `webRequest`,
-  `tabs`, `unlimitedStorage` et `http(s)://*/*`. Zwarden vise le minimum :
-  `storage`, `alarms`, `idle`, `offscreen`, `activeTab`, `scripting`,
-  `clipboardWrite`,
-  plus les hôtes strictement nécessaires à l'autofill — et le modèle
-  `optional_permissions` pour le reste. `idle` ne donne que les transitions
-  actif / inactif / verrouillé de la session : elle sert au verrouillage sur
-  écran verrouillé, rien d'autre. Le suivi de l'activité de navigation se
-  contente des événements `tabs` et `windows` accessibles sans permission —
-  d'où l'absence de `tabs`, dont l'unique apport serait de lire les URL.
-- **Presse-papiers** : l'effacement différé passe par un document offscreen
-  (`offscreen`), le service worker MV3 n'ayant pas accès au DOM. Implémenté —
-  voir §3.
+- **CSP**: running WASM under MV3 requires
+  `script-src 'self' 'wasm-unsafe-eval'`. The Argon2id module (hash-wasm) needs
+  it — without that directive, Argon2id unlocking will fail in production while
+  passing in Node tests.
+- **Permissions**: the official one asks for 16 permissions including
+  `webRequest`, `tabs`, `unlimitedStorage` and `http(s)://*/*`. Zwarden aims for
+  the minimum: `storage`, `alarms`, `idle`, `offscreen`, `activeTab`,
+  `scripting`, `clipboardWrite`, plus the hosts strictly needed for autofill —
+  and the `optional_permissions` model for the rest. `idle` grants only the
+  session's active / idle / locked transitions: it serves the lock-on-lock-screen
+  behaviour and nothing else. Tracking browsing activity makes do with the `tabs`
+  and `windows` events available without permission — hence the absence of
+  `tabs`, whose only contribution would be reading URLs.
+- **Clipboard**: the deferred wipe goes through an offscreen document
+  (`offscreen`), since an MV3 service worker has no DOM access. Implemented —
+  see §3.
 
-## 5. Premier lancement
+## 5. First run
 
-- Champ serveur validé immédiatement (`new URL`, HTTPS exigé — HTTP toléré
-  pour localhost) avec message explicite.
-- Bouton « tester la connexion » = un simple `prelogin`.
-- Positionnement affiché : auto-hébergé, aucun service tiers contacté, ni
-  télémétrie, ni icônes distantes.
-- `deviceIdentifier` : UUID généré une fois, persisté dans
-  `chrome.storage.local` — le régénérer crée une session serveur par connexion.
-- `deviceType` : fixé par la cible de build (Chrome / Firefox).
+- The server field is validated immediately (`new URL`, HTTPS required — HTTP
+  tolerated for localhost) with an explicit message.
+- A "test the connection" button = a plain `prelogin`.
+- The stance is stated: self-hosted, no third-party service contacted, no
+  telemetry, no remote icons.
+- `deviceIdentifier`: a UUID generated once and persisted in
+  `chrome.storage.local` — regenerating it creates one server session per
+  connection.
+- `deviceType`: fixed by the build target (Chrome / Firefox).
 
-## 6. Différenciants retenus
+## 6. Chosen differentiators
 
-- Badge : nombre de correspondances pour l'onglet actif.
-- Copie automatique du TOTP après remplissage (payant chez Bitwarden).
-- Budget de poids : popup < 50 Ko, total < 300 Ko (cf. README) — chaque ajout
-  d'interface se mesure avec `npm run size`.
+- Badge: the number of matches for the active tab.
+- Automatic TOTP copy after filling (a paid feature at Bitwarden).
+- Size budget: popup under 50 KB, total under 300 KB (see the README) — every
+  interface addition is measured with `npm run size`.

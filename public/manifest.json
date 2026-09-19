@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Zwarden",
   "version": "0.1.0",
-  "description": "Gestionnaire de mots de passe open source, compatible Vaultwarden / API Bitwarden. Conçu pour la légèreté.",
+  "description": "Open-source password manager, compatible with Vaultwarden / the Bitwarden API. Built to stay light.",
   "minimum_chrome_version": "120",
   "icons": {
     "16": "images/icon16.png",
@@ -49,16 +49,16 @@
         "default": "Ctrl+Shift+Y",
         "linux": "Ctrl+Shift+U"
       },
-      "description": "Ouvrir Zwarden"
+      "description": "Open Zwarden"
     },
     "generate-password": {
       "suggested_key": {
         "default": "Ctrl+Shift+9"
       },
-      "description": "Engendrer un mot de passe et le copier"
+      "description": "Generate a password and copy it"
     },
     "lock-vault": {
-      "description": "Verrouiller le coffre"
+      "description": "Lock the vault"
     }
   }
 }
