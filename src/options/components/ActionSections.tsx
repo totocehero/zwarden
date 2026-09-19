@@ -1,3 +1,5 @@
+import { t } from '@shared/i18n.js';
+
 /**
  * @file Action sections: hygiene and device identity.
  *
@@ -19,19 +21,19 @@ export function ActionsSection({
 }) {
   return (
     <section>
-      <h2>Actions</h2>
+      <h2>{t('settingsActionsSection')}</h2>
       <div class="actions">
         <button class="secondary" onClick={onLockNow}>
-          Lock the vault now
+          {t('settingsLockNow')}
         </button>
         <button class="secondary" onClick={onForgetTwoFa}>
-          Forget 2FA exemptions
+          {t('settingsForgetTwoFa')}
         </button>
         <button class="secondary" onClick={onForgetNeverSave}>
-          Restore excluded sites
+          {t('settingsRestoreExcluded')}
         </button>
         <button class="secondary" onClick={onForgetLastUsed}>
-          Forget the use ordering
+          {t('settingsForgetOrdering')}
         </button>
       </div>
     </section>
@@ -47,14 +49,14 @@ export function DeviceSection({
 }) {
   return (
     <section>
-      <h2>Device</h2>
+      <h2>{t('settingsDeviceSection')}</h2>
       <div class="fields">
         <div>
-          <p class="hint">Identifier sent to the server:</p>
+          <p class="hint">{t('settingsDeviceIdLabel')}</p>
           <p class="device-id">{deviceId}</p>
         </div>
         <button class="danger" onClick={onRegenerate}>
-          Regenerate the device identifier
+          {t('settingsRegenerateDevice')}
         </button>
       </div>
     </section>

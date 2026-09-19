@@ -17,6 +17,7 @@
 
 import { useEffect, useState } from 'preact/hooks';
 
+import { t } from '@shared/i18n.js';
 import { type TotpConfig, formatTotp, generateTotp, secondsRemaining } from '@core/vault/totp.js';
 
 /**
@@ -69,21 +70,35 @@ export function OtpRing({ remaining, period }: { remaining: number; period: numb
 /**
  * An item's one-time code, with its countdown.
  *
+ * ## Why the first code is handed in rather than computed
+ *
+ * The caller copies the code to the clipboard the moment it opens this panel.
+ * If this component computed its own first value, the two computations would sit
+ * a few milliseconds apart — and a few milliseconds astride a window boundary
+ * are enough for them to fall in different windows. The user would then read one
+ * code and paste another: a silent failure, and one the site gets blamed for.
+ *
+ * So the value is computed once, by the caller, and handed in. Afterwards this
+ * component recomputes on its own every second, where there is only one reader.
+ *
  * @param config Resolved parameters, already decrypted by the caller: this
  *   component never touches the vault.
+ * @param initialCode The code the caller computed and copied.
  * @param onCopy Copies the code — the caller adds its own visual feedback.
  * @param copied True briefly after a copy.
  */
 export function OtpCode({
   config,
+  initialCode,
   onCopy,
   copied,
 }: {
   config: TotpConfig;
+  initialCode: string;
   onCopy: (code: string) => void;
   copied: boolean;
 }) {
-  const [code, setCode] = useState('');
+  const [code, setCode] = useState(initialCode);
   const [remaining, setRemaining] = useState(() => secondsRemaining(config));
 
   useEffect(() => {
@@ -95,7 +110,9 @@ export function OtpCode({
         setRemaining(secondsRemaining(config));
       }
     };
-    void beat();
+    // No immediate beat: `initialCode` is already the current window's value, and
+    // recomputing it here would reintroduce the very divergence this component
+    // exists to avoid.
     const timer = setInterval(() => void beat(), 1000);
     return () => {
       alive = false;
@@ -108,10 +125,10 @@ export function OtpCode({
   }
 
   return (
-    <div class="otp" title="Copy the code" onClick={() => onCopy(code)}>
+    <div class="otp" title={t('otpCopy')} onClick={() => onCopy(code)}>
       <span class="otp-code">{formatTotp(code)}</span>
       <span class="otp-end">
-        {copied && <span class="otp-copied">copied!</span>}
+        {copied && <span class="otp-copied">{t('otpCopied')}</span>}
         <OtpRing remaining={remaining} period={config.period} />
       </span>
     </div>

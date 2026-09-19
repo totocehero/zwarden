@@ -8,6 +8,7 @@
  * the entry, and it is `App` that calls `unlock()`.
  */
 
+import { t } from '@shared/i18n.js';
 import { IconEye } from './Icons.js';
 
 /** Shared header: the name, and the way to the settings. */
@@ -16,7 +17,7 @@ function Header({ onOptions }: { onOptions: () => void }) {
     <header>
       <h1>Zwarden</h1>
       <button class="quiet" onClick={onOptions}>
-        Settings
+        {t('actionSettings')}
       </button>
     </header>
   );
@@ -70,17 +71,17 @@ export function UnlockScreen({
           }}
         >
           <label>
-            Server
+            {t('unlockServer')}
             <input
               type="url"
-              placeholder="https://vault.example.com"
+              placeholder={t('unlockServerPlaceholder')}
               value={serverUrl}
               onInput={(e) => onServerUrl(e.currentTarget.value)}
               required
             />
           </label>
           <label>
-            Email
+            {t('unlockEmail')}
             <input
               type="email"
               value={email}
@@ -89,7 +90,7 @@ export function UnlockScreen({
             />
           </label>
           <label>
-            Master password
+            {t('unlockMasterPassword')}
             <div class="password-field">
               <input
                 type={showPassword ? 'text' : 'password'}
@@ -100,7 +101,7 @@ export function UnlockScreen({
               <button
                 type="button"
                 class="eye"
-                title={showPassword ? 'Hide the password' : 'Show the password'}
+                title={showPassword ? t('unlockHidePassword') : t('unlockShowPassword')}
                 onClick={onToggleShowPassword}
               >
                 <IconEye struck={showPassword} />
@@ -108,7 +109,7 @@ export function UnlockScreen({
             </div>
           </label>
           <button type="submit" disabled={busy !== null}>
-            Unlock
+            {t('unlockSubmit')}
           </button>
         </form>
         <Status busy={busy} error={error} />
@@ -151,12 +152,9 @@ export function TwoFactorScreen({
     <div>
       <Header onOptions={onOptions} />
       <main>
-        <p class="status">Two-factor authentication required.</p>
+        <p class="status">{t('twoFaRequired')}</p>
         {available.length === 0 ? (
-          <p class="error">
-            This account offers WebAuthn only, which is not supported yet. Enable the YubiKey's OTP
-            mode, or TOTP on the server.
-          </p>
+          <p class="error">{t('twoFaWebAuthnOnly')}</p>
         ) : (
           <form
             onSubmit={(e) => {
@@ -165,7 +163,7 @@ export function TwoFactorScreen({
             }}
           >
             <label>
-              Method
+              {t('twoFaMethod')}
               <select value={choice} onInput={(e) => onChoice(e.currentTarget.value)}>
                 {available.map((p) => (
                   <option key={p} value={p}>
@@ -175,7 +173,7 @@ export function TwoFactorScreen({
               </select>
             </label>
             <label>
-              Code
+              {t('twoFaCode')}
               <input
                 type="text"
                 autocomplete="one-time-code"
@@ -191,15 +189,15 @@ export function TwoFactorScreen({
                 checked={remember}
                 onInput={(e) => onRemember(e.currentTarget.checked)}
               />
-              Remember this device
+              {t('twoFaRemember')}
             </label>
             <button type="submit" disabled={busy !== null || code.trim() === ''}>
-              Submit
+              {t('twoFaSubmit')}
             </button>
           </form>
         )}
         <button class="quiet" onClick={onBack}>
-          ← Back
+          {t('actionBack')}
         </button>
         <Status busy={busy} error={error} />
       </main>

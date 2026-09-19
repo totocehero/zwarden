@@ -9,11 +9,14 @@
  * rendering in `components/`.
  */
 
+import { t } from '@shared/i18n.js';
 import { render } from 'preact';
+import { useEffect } from 'preact/hooks';
 
 import { ActionsSection, DeviceSection } from './components/ActionSections.js';
 import { SaveSection, SecuritySection, ServerSection } from './components/SettingsSections.js';
 import { useSettings } from './hooks/useSettings.js';
+import { followPageColorScheme } from '@shared/theme.js';
 
 /** Displayed version. `dev` outside an extension context (Vite preview). */
 function appVersion(): string {
@@ -26,17 +29,21 @@ function appVersion(): string {
 function App() {
   const s = useSettings();
 
+  // The settings page is the other extension page with a DOM: it settles the
+  // toolbar icon too, so opening it is enough to correct one left stale.
+  useEffect(followPageColorScheme, []);
+
   return (
     <div class="page">
-      <h1>Zwarden — Settings</h1>
-      <p class="version">Version {appVersion()}</p>
+      <h1>{t('appSettingsTitle')}</h1>
+      <p class="version">{t('settingsVersion', appVersion())}</p>
 
       <form onSubmit={(e) => void s.save(e)}>
         <ServerSection settings={s.settings} patch={s.patch} />
         <SecuritySection settings={s.settings} patch={s.patch} />
         <SaveSection settings={s.settings} patch={s.patch} />
 
-        <button type="submit">Save</button>
+        <button type="submit">{t('actionSave')}</button>
         <p class="status">{s.status}</p>
       </form>
 

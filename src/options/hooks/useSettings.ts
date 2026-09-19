@@ -8,6 +8,7 @@
  * user cannot know whether their click registered.
  */
 
+import { t } from '@shared/i18n.js';
 import { useEffect, useState } from 'preact/hooks';
 
 import {
@@ -83,35 +84,31 @@ export function useSettings(): Settings {
       // The new delay applies to an already-unlocked vault, without waiting for
       // the popup to open again.
       await startAutoLockWatch(clean.autoLockMinutes);
-      flash('Settings saved.');
+      flash(t('settingsSaved'));
     },
 
     async lockNow() {
       await lockVault();
-      flash('Vault locked.');
+      flash(t('settingsVaultLocked'));
     },
 
     async forgetTwoFa() {
       const n = await clearAllRememberTokens();
       flash(
-        n === 0
-          ? 'No 2FA exemption to forget.'
-          : `${n} 2FA exemption(s) forgotten — the second factor will be asked for again.`,
+        n === 0 ? t('settingsNoTwoFa') : t('settingsTwoFaForgotten', String(n)),
       );
     },
 
     async forgetNeverSave() {
       const n = await clearNeverSaveHosts();
       flash(
-        n === 0
-          ? 'No excluded site.'
-          : `${n} site(s) restored — saving will be offered there again.`,
+        n === 0 ? t('settingsNoExcluded') : t('settingsExcludedRestored', String(n)),
       );
     },
 
     async forgetLastUsed() {
       await clearLastUsed();
-      flash('Use ordering forgotten — the list returns to the server order.');
+      flash(t('settingsOrderingForgotten'));
     },
 
     /**
@@ -123,18 +120,13 @@ export function useSettings(): Settings {
      * rather than an "are you sure?".
      */
     async regenerateDevice() {
-      const ok = confirm(
-        'Regenerate the device identifier?\n\n' +
-          'The server will see a new device: an extra session will appear in the list, a ' +
-          '"new device" alert may be sent, and this device\'s 2FA exemptions will become ' +
-          'invalid.',
-      );
+      const ok = confirm(t('settingsRegenerateConfirm'));
       if (!ok) {
         return;
       }
       setDeviceId(await regenerateDeviceId());
       await clearAllRememberTokens();
-      flash('Identifier regenerated.');
+      flash(t('settingsDeviceRegenerated'));
     },
   };
 }

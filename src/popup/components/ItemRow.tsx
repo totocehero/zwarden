@@ -10,6 +10,7 @@
  * stable parameters.
  */
 
+import { t } from '@shared/i18n.js';
 import type { CipherOverview } from '@core/vault/cipherService.js';
 import type { VaultLabels } from '@core/vault/labels.js';
 import type { TotpConfig } from '@core/vault/totp.js';
@@ -30,7 +31,7 @@ export function chipsFor(item: CipherOverview, labels: VaultLabels): Chip[] {
   if (item.folderId !== null) {
     const name = labels.folders.get(item.folderId);
     if (name !== undefined) {
-      chips.push({ kind: 'folder', name, title: `Folder: ${name}` });
+      chips.push({ kind: 'folder', name, title: t('itemChipFolder', name) });
     }
   }
   for (const collectionId of item.collectionIds) {
@@ -43,7 +44,11 @@ export function chipsFor(item: CipherOverview, labels: VaultLabels): Chip[] {
       chips.push({
         kind: 'collection',
         name: collection.name,
-        title: `${org ?? 'Organisation'} — collection${collection.readOnly ? ' (read-only)' : ''}`,
+        title: t(
+          'itemChipCollection',
+          org ?? t('itemOrganisation'),
+          collection.readOnly ? t('itemChipReadOnly') : '',
+        ),
       });
     }
   }
@@ -56,7 +61,7 @@ export function ItemRow({
   passwordCopied,
   usernameCopied,
   revealed,
-  otpConfig,
+  otp,
   otpCopied,
   fillable,
   onCopyUsername,
@@ -74,8 +79,11 @@ export function ItemRow({
   usernameCopied: boolean;
   /** The revealed password, or `null` while it is hidden. */
   revealed: string | null;
-  /** Parameters of the open one-time code, or `null` while it is closed. */
-  otpConfig: TotpConfig | null;
+  /**
+   * The open one-time code — its parameters and the code already copied — or
+   * `null` while it is closed.
+   */
+  otp: { readonly config: TotpConfig; readonly code: string } | null;
   otpCopied: boolean;
   /** True if the active tab's origin matches: gates the "Fill" button. */
   fillable: boolean;
@@ -97,13 +105,13 @@ export function ItemRow({
       <div class="item-row">
         <div class="item-text">
           <div class="item-name" title={item.name ?? ''}>
-            {item.name ?? '(no name)'}
-            {item.hasPasskey && <span class="badge">passkey</span>}
+            {item.name ?? t('itemNoName')}
+            {item.hasPasskey && <span class="badge">{t('itemPasskeyBadge')}</span>}
           </div>
           {item.username !== null && (
-            <div class="item-user" title={`Copy: ${item.username}`} onClick={onCopyUsername}>
+            <div class="item-user" title={t('itemCopyUsername', item.username)} onClick={onCopyUsername}>
               {item.username}
-              {usernameCopied ? ' — copied!' : ''}
+              {usernameCopied ? t('itemUsernameCopied') : ''}
             </div>
           )}
           {item.uris[0] !== undefined && <div class="item-uri">{item.uris[0]}</div>}
@@ -113,7 +121,7 @@ export function ItemRow({
                 <button
                   key={`${chip.kind}:${chip.name}`}
                   class={`chip chip-${chip.kind}`}
-                  title={`${chip.title} — click to filter`}
+                  title={t('itemChipFilter', chip.title)}
                   onClick={() => onFilter(chip.name)}
                 >
                   {chip.kind === 'folder' ? `#${chip.name}` : `@${chip.name}`}
@@ -125,7 +133,7 @@ export function ItemRow({
         {item.hasTotp && (
           <button
             class="quiet eye-item"
-            title={otpConfig !== null ? 'Hide the code' : 'One-time code — shows and copies it'}
+            title={otp !== null ? t('itemHideOtp') : t('itemShowOtp')}
             onClick={onToggleOtp}
           >
             <IconOtp />
@@ -133,29 +141,36 @@ export function ItemRow({
         )}
         <button
           class="quiet eye-item"
-          title={revealed !== null ? 'Hide the password' : 'Show the password'}
+          title={revealed !== null ? t('itemHidePassword') : t('itemShowPassword')}
           onClick={onToggleReveal}
         >
           <IconEye struck={revealed !== null} />
         </button>
-        <button class="quiet eye-item" title="Edit the item" onClick={onEdit}>
+        <button class="quiet eye-item" title={t('itemEdit')} onClick={onEdit}>
           <IconPencil />
         </button>
         <button
           class={`icon${passwordCopied ? ' copie-ok' : ''}`}
-          title={passwordCopied ? 'Password copied!' : 'Copy the password'}
+          title={passwordCopied ? t('itemPasswordCopied') : t('itemCopyPassword')}
           onClick={onCopyPassword}
         >
           <IconCopy done={passwordCopied} />
         </button>
         {fillable && (
-          <button class="fill" title="Fill the active tab's form" onClick={onFill}>
-            Fill
+          <button class="fill" title={t('itemFillTitle')} onClick={onFill}>
+            {t('itemFill')}
           </button>
         )}
       </div>
       {revealed !== null && <div class="secret">{revealed}</div>}
-      {otpConfig !== null && <OtpCode config={otpConfig} copied={otpCopied} onCopy={onCopyOtp} />}
+      {otp !== null && (
+        <OtpCode
+          config={otp.config}
+          initialCode={otp.code}
+          copied={otpCopied}
+          onCopy={onCopyOtp}
+        />
+      )}
     </li>
   );
 }

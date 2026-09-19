@@ -6,6 +6,7 @@
  * place the user sees what was captured — and the only place they can refuse it.
  */
 
+import { t } from '@shared/i18n.js';
 import type { CipherOverview } from '@core/vault/cipherService.js';
 import type { PendingSave } from '@shared/storage.js';
 
@@ -38,13 +39,11 @@ export function SaveProposalBanner({
     <section class="proposal">
       <p class="proposal-title">
         {existing === null
-          ? `Save the credentials for ${capture.host}?`
-          : `Update the password for “${existing.name ?? capture.host}”?`}
+          ? t('proposalCreateTitle', capture.host)
+          : t('proposalUpdateTitle', existing.name ?? capture.host)}
       </p>
       <p class="proposal-detail">
-        {capture.username === ''
-          ? '(username not detected — fill it in after saving)'
-          : capture.username}
+        {capture.username === '' ? t('proposalNoUsername') : capture.username}
         {' — '}
         {/* Length capped: it teaches the user nothing and tells too much to
             anyone looking over their shoulder. */}
@@ -52,13 +51,13 @@ export function SaveProposalBanner({
       </p>
       <div class="proposal-actions">
         <button disabled={busy} onClick={onSave}>
-          Save
+          {t('proposalSave')}
         </button>
         <button class="quiet" onClick={onDismiss}>
-          Dismiss
+          {t('proposalDismiss')}
         </button>
-        <button class="quiet" title={`Never offer anything for ${capture.host}`} onClick={onNever}>
-          Never for this site
+        <button class="quiet" title={t('proposalNeverTitle', capture.host)} onClick={onNever}>
+          {t('proposalNever')}
         </button>
       </div>
     </section>

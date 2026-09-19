@@ -1,0 +1,431 @@
+{
+  "appName": {
+    "message": "Zwarden"
+  },
+  "appDescription": {
+    "message": "Open-source password manager, compatible with Vaultwarden / the Bitwarden API. Built to stay light."
+  },
+  "appSettingsTitle": {
+    "message": "Zwarden — Settings"
+  },
+  "cmdOpen": {
+    "message": "Open Zwarden"
+  },
+  "cmdGenerate": {
+    "message": "Generate a password and copy it"
+  },
+  "cmdLock": {
+    "message": "Lock the vault"
+  },
+  "actionSettings": {
+    "message": "Settings"
+  },
+  "actionLock": {
+    "message": "Lock"
+  },
+  "actionGenerate": {
+    "message": "Generate"
+  },
+  "actionSave": {
+    "message": "Save"
+  },
+  "actionCancel": {
+    "message": "Cancel"
+  },
+  "actionBack": {
+    "message": "← Back"
+  },
+  "actionClose": {
+    "message": "Close"
+  },
+  "actionUse": {
+    "message": "Use"
+  },
+  "actionCopy": {
+    "message": "Copy"
+  },
+  "actionCopied": {
+    "message": "Copied!"
+  },
+  "unlockServer": {
+    "message": "Server"
+  },
+  "unlockServerPlaceholder": {
+    "message": "https://vault.example.com"
+  },
+  "unlockEmail": {
+    "message": "Email"
+  },
+  "unlockMasterPassword": {
+    "message": "Master password"
+  },
+  "unlockSubmit": {
+    "message": "Unlock"
+  },
+  "unlockShowPassword": {
+    "message": "Show the password"
+  },
+  "unlockHidePassword": {
+    "message": "Hide the password"
+  },
+  "twoFaRequired": {
+    "message": "Two-factor authentication required."
+  },
+  "twoFaWebAuthnOnly": {
+    "message": "This account offers WebAuthn only, which is not supported yet. Enable the YubiKey's OTP mode, or TOTP on the server."
+  },
+  "twoFaMethod": {
+    "message": "Method"
+  },
+  "twoFaCode": {
+    "message": "Code"
+  },
+  "twoFaRemember": {
+    "message": "Remember this device"
+  },
+  "twoFaSubmit": {
+    "message": "Submit"
+  },
+  "twoFaProviderAuthenticator": {
+    "message": "Authenticator app (TOTP)"
+  },
+  "twoFaProviderEmail": {
+    "message": "Code received by email"
+  },
+  "twoFaProviderYubiKey": {
+    "message": "YubiKey (OTP mode — touch the key)"
+  },
+  "twoFaRefused": {
+    "message": "Second factor refused — try again."
+  },
+  "listSearch": {
+    "message": "Search $1 item(s)…"
+  },
+  "listEmpty": {
+    "message": "No items."
+  },
+  "listUnreadableFields": {
+    "message": "$1 unreadable field(s) — details"
+  },
+  "listFullLog": {
+    "message": "Full log: right-click the popup → “Inspect” → Console."
+  },
+  "listOpening": {
+    "message": "Opening…"
+  },
+  "itemNoName": {
+    "message": "(no name)"
+  },
+  "itemPasskeyBadge": {
+    "message": "passkey"
+  },
+  "itemCopyUsername": {
+    "message": "Copy: $1"
+  },
+  "itemUsernameCopied": {
+    "message": " — copied!"
+  },
+  "itemCopyPassword": {
+    "message": "Copy the password"
+  },
+  "itemPasswordCopied": {
+    "message": "Password copied!"
+  },
+  "itemShowPassword": {
+    "message": "Show the password"
+  },
+  "itemHidePassword": {
+    "message": "Hide the password"
+  },
+  "itemShowOtp": {
+    "message": "One-time code — shows and copies it"
+  },
+  "itemHideOtp": {
+    "message": "Hide the code"
+  },
+  "itemEdit": {
+    "message": "Edit the item"
+  },
+  "itemFill": {
+    "message": "Fill"
+  },
+  "itemFillTitle": {
+    "message": "Fill the active tab's form"
+  },
+  "itemChipFolder": {
+    "message": "Folder: $1"
+  },
+  "itemChipCollection": {
+    "message": "$1 — collection$2"
+  },
+  "itemChipReadOnly": {
+    "message": " (read-only)"
+  },
+  "itemChipFilter": {
+    "message": "$1 — click to filter"
+  },
+  "itemOrganisation": {
+    "message": "Organisation"
+  },
+  "otpCopy": {
+    "message": "Copy the code"
+  },
+  "otpCopied": {
+    "message": "copied!"
+  },
+  "editName": {
+    "message": "Name"
+  },
+  "editUsername": {
+    "message": "Username"
+  },
+  "editPassword": {
+    "message": "Password"
+  },
+  "editTotp": {
+    "message": "TOTP (key or otpauth://)"
+  },
+  "editUris": {
+    "message": "URIs (one per line)"
+  },
+  "editNotes": {
+    "message": "Notes"
+  },
+  "editGeneratePassword": {
+    "message": "Generate a password"
+  },
+  "editShow": {
+    "message": "Show"
+  },
+  "editHide": {
+    "message": "Hide"
+  },
+  "editPasskeyNote": {
+    "message": "Passkey preserved as-is — WebAuthn signing will arrive in a future version."
+  },
+  "genOutputTitle": {
+    "message": "Click to copy"
+  },
+  "genRegenerate": {
+    "message": "Regenerate"
+  },
+  "genLength": {
+    "message": "Length: $1"
+  },
+  "genAvoidAmbiguous": {
+    "message": "Avoid ambiguous characters (l 1 I O 0 o)"
+  },
+  "repromptTitle": {
+    "message": "Master password required"
+  },
+  "repromptDetail": {
+    "message": "“$1” is protected by a re-entry prompt."
+  },
+  "repromptThisItem": {
+    "message": "This item"
+  },
+  "repromptPlaceholder": {
+    "message": "Master password"
+  },
+  "repromptUnlock": {
+    "message": "Unlock"
+  },
+  "repromptVerifying": {
+    "message": "Verifying…"
+  },
+  "repromptWrongPassword": {
+    "message": "Incorrect password."
+  },
+  "proposalCreateTitle": {
+    "message": "Save the credentials for $1?"
+  },
+  "proposalUpdateTitle": {
+    "message": "Update the password for “$1”?"
+  },
+  "proposalNoUsername": {
+    "message": "(username not detected — fill it in after saving)"
+  },
+  "proposalSave": {
+    "message": "Save"
+  },
+  "proposalDismiss": {
+    "message": "Dismiss"
+  },
+  "proposalNever": {
+    "message": "Never for this site"
+  },
+  "proposalNeverTitle": {
+    "message": "Never offer anything for $1"
+  },
+  "statusDeriving": {
+    "message": "Deriving the key…"
+  },
+  "statusSyncing": {
+    "message": "Syncing…"
+  },
+  "statusEncrypting": {
+    "message": "Encrypting…"
+  },
+  "statusSaving": {
+    "message": "Saving…"
+  },
+  "statusOpeningVault": {
+    "message": "Opening the vault…"
+  },
+  "statusDecrypting": {
+    "message": "Decrypting $1 item(s)…"
+  },
+  "errorUnknown": {
+    "message": "Unknown error"
+  },
+  "errorTimeout": {
+    "message": "Server unreachable: timed out."
+  },
+  "errorServerUnreachable": {
+    "message": "Server unreachable — retry, or unlock again."
+  },
+  "errorSessionExpired": {
+    "message": "Session expired — lock, then unlock again."
+  },
+  "errorSessionNoRefresh": {
+    "message": "Session expired without a refresh token"
+  },
+  "errorItemNotFound": {
+    "message": "Item not found — resync, then try again."
+  },
+  "errorTabMismatch": {
+    "message": "The active tab no longer matches this item."
+  },
+  "settingsServerSection": {
+    "message": "Server"
+  },
+  "settingsInstanceUrl": {
+    "message": "Instance URL"
+  },
+  "settingsAccountEmail": {
+    "message": "Account email"
+  },
+  "settingsDeviceName": {
+    "message": "Device name (shown among the server's active sessions)"
+  },
+  "settingsNetworkTimeout": {
+    "message": "Network timeout (seconds, 5–120)"
+  },
+  "settingsSecuritySection": {
+    "message": "Security"
+  },
+  "settingsAutoLock": {
+    "message": "Auto-lock after inactivity"
+  },
+  "settingsAutoLockHint": {
+    "message": "“Inactivity” means: no tab, window or page change, and the popup closed. Simply browsing is therefore enough to keep the vault open. Locking may run up to a minute past the chosen delay. When the browser closes, the vault is locked regardless: the key only ever lives in memory."
+  },
+  "settingsLockOnSystemLock": {
+    "message": "Also lock when the computer's session locks"
+  },
+  "settingsLockOnSystemLockHint": {
+    "message": "Lock screen, sleep, “Win+L”: the vault locks immediately, whatever the delay above. Walking away from your machine happens more often than closing your browser."
+  },
+  "settingsClipboard": {
+    "message": "Wipe the clipboard after a copy"
+  },
+  "settingsClipboardHint": {
+    "message": "Two wipes back this up: a timer that honours the exact delay while the popup is open, and an alarm that survives its closing but that Chrome raises to thirty seconds minimum."
+  },
+  "settingsAutoLockOnClose": {
+    "message": "When the browser closes"
+  },
+  "settingsMinutes1": {
+    "message": "1 minute"
+  },
+  "settingsMinutes5": {
+    "message": "5 minutes"
+  },
+  "settingsMinutes15": {
+    "message": "15 minutes"
+  },
+  "settingsMinutes30": {
+    "message": "30 minutes"
+  },
+  "settingsHours1": {
+    "message": "1 hour"
+  },
+  "settingsHours4": {
+    "message": "4 hours"
+  },
+  "settingsSeconds10": {
+    "message": "10 seconds"
+  },
+  "settingsSeconds30": {
+    "message": "30 seconds"
+  },
+  "settingsMinute1": {
+    "message": "1 minute"
+  },
+  "settingsNever": {
+    "message": "Never"
+  },
+  "settingsSaveSection": {
+    "message": "Saving credentials"
+  },
+  "settingsOfferToSave": {
+    "message": "Offer to save credentials entered on an unknown site"
+  },
+  "settingsOfferToSaveHint": {
+    "message": "A detector watches sign-in forms and signals an entry with a badge on the icon; the offer appears when the popup opens. Nothing is added to the vault without a click, nothing is injected into the page, and nothing is sent anywhere but to the extension. Unticked, the detector is not injected at all — not a silent script, no script."
+  },
+  "settingsActionsSection": {
+    "message": "Actions"
+  },
+  "settingsLockNow": {
+    "message": "Lock the vault now"
+  },
+  "settingsForgetTwoFa": {
+    "message": "Forget 2FA exemptions"
+  },
+  "settingsRestoreExcluded": {
+    "message": "Restore excluded sites"
+  },
+  "settingsForgetOrdering": {
+    "message": "Forget the use ordering"
+  },
+  "settingsDeviceSection": {
+    "message": "Device"
+  },
+  "settingsDeviceIdLabel": {
+    "message": "Identifier sent to the server:"
+  },
+  "settingsRegenerateDevice": {
+    "message": "Regenerate the device identifier"
+  },
+  "settingsRegenerateConfirm": {
+    "message": "Regenerate the device identifier?\n\nThe server will see a new device: an extra session will appear in the list, a \"new device\" alert may be sent, and this device's 2FA exemptions will become invalid."
+  },
+  "settingsVersion": {
+    "message": "Version $1"
+  },
+  "settingsSaved": {
+    "message": "Settings saved."
+  },
+  "settingsVaultLocked": {
+    "message": "Vault locked."
+  },
+  "settingsNoTwoFa": {
+    "message": "No 2FA exemption to forget."
+  },
+  "settingsTwoFaForgotten": {
+    "message": "$1 2FA exemption(s) forgotten — the second factor will be asked for again."
+  },
+  "settingsNoExcluded": {
+    "message": "No excluded site."
+  },
+  "settingsExcludedRestored": {
+    "message": "$1 site(s) restored — saving will be offered there again."
+  },
+  "settingsOrderingForgotten": {
+    "message": "Use ordering forgotten — the list returns to the server order."
+  },
+  "settingsDeviceRegenerated": {
+    "message": "Identifier regenerated."
+  }
+}

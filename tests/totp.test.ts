@@ -138,6 +138,34 @@ describe('secondsRemaining', () => {
   });
 });
 
+/**
+ * The reason {@link OtpCode} receives its first code rather than computing it.
+ *
+ * The popup copies the code the moment the panel opens; the component would
+ * compute its own a few milliseconds later. Those few milliseconds astride a
+ * window boundary are enough for the two to fall in different windows — the user
+ * reads one code and pastes another, silently, and blames the site.
+ *
+ * The invariant is now structural (one computation, handed to both), and this
+ * test pins the property that made it necessary.
+ */
+describe('window boundary', () => {
+  const config = parseTotp('JBSWY3DPEHPK3PXP');
+
+  it('two computations 4 ms apart can fall in different windows', async () => {
+    const justBefore = 30_000 - 2;
+    const justAfter = justBefore + 4;
+
+    expect(await generateTotp(config, justBefore)).not.toBe(
+      await generateTotp(config, justAfter),
+    );
+  });
+
+  it('two computations inside the same window agree', async () => {
+    expect(await generateTotp(config, 1_000)).toBe(await generateTotp(config, 29_000));
+  });
+});
+
 describe('formatTotp', () => {
   it('splits the code into two readable halves', () => {
     expect(formatTotp('123456')).toBe('123 456');

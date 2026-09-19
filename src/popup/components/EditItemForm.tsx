@@ -13,6 +13,7 @@
 
 import type { JSX } from 'preact';
 
+import { t } from '@shared/i18n.js';
 import type { PasskeyView } from '@core/vault/cipherService.js';
 
 import { IconDice, IconEye } from './Icons.js';
@@ -70,13 +71,13 @@ export function EditItemForm({
       <header>
         <h1>Zwarden</h1>
         <button class="quiet" onClick={onCancel}>
-          ← Cancel
+          {t('actionBack')}
         </button>
       </header>
       <main>
         <form onSubmit={onSubmit}>
           <label>
-            Name
+            {t('editName')}
             <input
               type="text"
               value={form.name}
@@ -86,7 +87,7 @@ export function EditItemForm({
           </label>
           {isLogin && (
             <label>
-              Username
+              {t('editUsername')}
               <input
                 type="text"
                 value={form.username}
@@ -96,7 +97,7 @@ export function EditItemForm({
           )}
           {isLogin && (
             <label>
-              Password
+              {t('editPassword')}
               <div class="password-field">
                 <input
                   type={showPassword ? 'text' : 'password'}
@@ -106,7 +107,7 @@ export function EditItemForm({
                 <button
                   type="button"
                   class="eye"
-                  title={showPassword ? 'Hide' : 'Show'}
+                  title={showPassword ? t('editHide') : t('editShow')}
                   onClick={onToggleShowPassword}
                 >
                   <IconEye struck={showPassword} />
@@ -114,7 +115,7 @@ export function EditItemForm({
                 <button
                   type="button"
                   class="eye dice"
-                  title="Generate a password"
+                  title={t('editGeneratePassword')}
                   onClick={onOpenGenerator}
                 >
                   <IconDice />
@@ -127,7 +128,7 @@ export function EditItemForm({
           {generator}
           {isLogin && (
             <label>
-              TOTP (key or otpauth://)
+              {t('editTotp')}
               <input
                 type="text"
                 value={form.totp}
@@ -137,7 +138,7 @@ export function EditItemForm({
           )}
           {isLogin && (
             <label>
-              URIs (one per line)
+              {t('editUris')}
               <textarea
                 rows={2}
                 value={form.uris}
@@ -146,7 +147,7 @@ export function EditItemForm({
             </label>
           )}
           <label>
-            Notes
+            {t('editNotes')}
             <textarea
               rows={3}
               value={form.notes}
@@ -157,17 +158,15 @@ export function EditItemForm({
             <div class="passkeys-info">
               {passkeys.map((pk, i) => (
                 <p key={i}>
-                  <span class="badge">passkey</span> {pk.rpId ?? 'unknown site'}
+                  <span class="badge">{t('itemPasskeyBadge')}</span> {pk.rpId ?? '?'}
                   {pk.userName !== null ? ` — ${pk.userName}` : ''}
                 </p>
               ))}
-              <p class="hint-diag">
-                Passkey preserved as-is — WebAuthn signing will arrive in a future version.
-              </p>
+              <p class="hint-diag">{t('editPasskeyNote')}</p>
             </div>
           )}
           <button type="submit" disabled={busy !== null}>
-            Save
+            {t('actionSave')}
           </button>
         </form>
         {busy !== null && <p class="status">{busy}</p>}

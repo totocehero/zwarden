@@ -1,5 +1,5 @@
 /**
- * @file Offscreen document: the service worker's access to the clipboard.
+ * @file Offscreen document: the service worker's DOM.
  *
  * ## Why this document exists
  *
@@ -22,10 +22,18 @@
  * `execCommand('copy')` does nothing with an empty selection. The wipe therefore
  * writes a single space. The useful effect is the same — the secret is no longer
  * in the clipboard — but the right word is "overwritten".
+ *
+ * ## Second role: reading the colour scheme
+ *
+ * `matchMedia` needs a DOM too, and the worker needs the answer to pick the
+ * toolbar icon. Chrome provides the `MATCH_MEDIA` offscreen reason for exactly
+ * this, so the same document answers both questions and is closed straight
+ * after.
  */
 
-/** Type of the messages accepted, shared with the service worker. */
-const MESSAGE_TYPE = 'zwarden-clipboard';
+/** Message types accepted, shared with the service worker. */
+const CLIPBOARD_MESSAGE = 'zwarden-clipboard';
+const COLOR_SCHEME_MESSAGE = 'zwarden-color-scheme';
 
 interface ClipboardMessage {
   readonly type: string;
@@ -54,11 +62,17 @@ async function write(text: string): Promise<void> {
 }
 
 chrome.runtime.onMessage.addListener((message: unknown, _sender, respond) => {
-  if (
-    typeof message !== 'object' ||
-    message === null ||
-    (message as { type?: unknown }).type !== MESSAGE_TYPE
-  ) {
+  const type =
+    typeof message === 'object' && message !== null
+      ? (message as { type?: unknown }).type
+      : undefined;
+
+  if (type === COLOR_SCHEME_MESSAGE) {
+    respond(matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    return false;
+  }
+
+  if (type !== CLIPBOARD_MESSAGE) {
     return false;
   }
   const { text } = message as ClipboardMessage;

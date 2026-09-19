@@ -1,0 +1,431 @@
+{
+  "appName": {
+    "message": "Zwarden"
+  },
+  "appDescription": {
+    "message": "Gestionnaire de mots de passe open source, compatible Vaultwarden / API Bitwarden. Conçu pour la légèreté."
+  },
+  "appSettingsTitle": {
+    "message": "Zwarden — Paramètres"
+  },
+  "cmdOpen": {
+    "message": "Ouvrir Zwarden"
+  },
+  "cmdGenerate": {
+    "message": "Engendrer un mot de passe et le copier"
+  },
+  "cmdLock": {
+    "message": "Verrouiller le coffre"
+  },
+  "actionSettings": {
+    "message": "Paramètres"
+  },
+  "actionLock": {
+    "message": "Verrouiller"
+  },
+  "actionGenerate": {
+    "message": "Générer"
+  },
+  "actionSave": {
+    "message": "Enregistrer"
+  },
+  "actionCancel": {
+    "message": "Annuler"
+  },
+  "actionBack": {
+    "message": "← Retour"
+  },
+  "actionClose": {
+    "message": "Fermer"
+  },
+  "actionUse": {
+    "message": "Utiliser"
+  },
+  "actionCopy": {
+    "message": "Copier"
+  },
+  "actionCopied": {
+    "message": "Copié !"
+  },
+  "unlockServer": {
+    "message": "Serveur"
+  },
+  "unlockServerPlaceholder": {
+    "message": "https://coffre.exemple.fr"
+  },
+  "unlockEmail": {
+    "message": "E-mail"
+  },
+  "unlockMasterPassword": {
+    "message": "Mot de passe maître"
+  },
+  "unlockSubmit": {
+    "message": "Déverrouiller"
+  },
+  "unlockShowPassword": {
+    "message": "Afficher le mot de passe"
+  },
+  "unlockHidePassword": {
+    "message": "Masquer le mot de passe"
+  },
+  "twoFaRequired": {
+    "message": "Authentification à deux facteurs requise."
+  },
+  "twoFaWebAuthnOnly": {
+    "message": "Seul WebAuthn est proposé par ce compte, et il n’est pas encore pris en charge. Activer le mode OTP de la YubiKey ou le TOTP sur le serveur."
+  },
+  "twoFaMethod": {
+    "message": "Méthode"
+  },
+  "twoFaCode": {
+    "message": "Code"
+  },
+  "twoFaRemember": {
+    "message": "Se souvenir de cet appareil"
+  },
+  "twoFaSubmit": {
+    "message": "Valider"
+  },
+  "twoFaProviderAuthenticator": {
+    "message": "Application d’authentification (TOTP)"
+  },
+  "twoFaProviderEmail": {
+    "message": "Code reçu par e-mail"
+  },
+  "twoFaProviderYubiKey": {
+    "message": "YubiKey (mode OTP — toucher la clé)"
+  },
+  "twoFaRefused": {
+    "message": "Second facteur refusé — réessayer."
+  },
+  "listSearch": {
+    "message": "Rechercher parmi $1 item(s)…"
+  },
+  "listEmpty": {
+    "message": "Aucun item."
+  },
+  "listUnreadableFields": {
+    "message": "$1 champ(s) illisible(s) — détails"
+  },
+  "listFullLog": {
+    "message": "Journal complet : clic droit sur la popup → « Inspecter » → Console."
+  },
+  "listOpening": {
+    "message": "Ouverture…"
+  },
+  "itemNoName": {
+    "message": "(sans nom)"
+  },
+  "itemPasskeyBadge": {
+    "message": "passkey"
+  },
+  "itemCopyUsername": {
+    "message": "Copier : $1"
+  },
+  "itemUsernameCopied": {
+    "message": " — copié !"
+  },
+  "itemCopyPassword": {
+    "message": "Copier le mot de passe"
+  },
+  "itemPasswordCopied": {
+    "message": "Mot de passe copié !"
+  },
+  "itemShowPassword": {
+    "message": "Voir le mot de passe"
+  },
+  "itemHidePassword": {
+    "message": "Masquer le mot de passe"
+  },
+  "itemShowOtp": {
+    "message": "Code à usage unique — l’affiche et le copie"
+  },
+  "itemHideOtp": {
+    "message": "Masquer le code"
+  },
+  "itemEdit": {
+    "message": "Modifier l’item"
+  },
+  "itemFill": {
+    "message": "Remplir"
+  },
+  "itemFillTitle": {
+    "message": "Remplir le formulaire de l’onglet actif"
+  },
+  "itemChipFolder": {
+    "message": "Dossier : $1"
+  },
+  "itemChipCollection": {
+    "message": "$1 — collection$2"
+  },
+  "itemChipReadOnly": {
+    "message": " (lecture seule)"
+  },
+  "itemChipFilter": {
+    "message": "$1 — cliquer pour filtrer"
+  },
+  "itemOrganisation": {
+    "message": "Organisation"
+  },
+  "otpCopy": {
+    "message": "Copier le code"
+  },
+  "otpCopied": {
+    "message": "copié !"
+  },
+  "editName": {
+    "message": "Nom"
+  },
+  "editUsername": {
+    "message": "Identifiant"
+  },
+  "editPassword": {
+    "message": "Mot de passe"
+  },
+  "editTotp": {
+    "message": "TOTP (clé ou otpauth://)"
+  },
+  "editUris": {
+    "message": "URIs (une par ligne)"
+  },
+  "editNotes": {
+    "message": "Notes"
+  },
+  "editGeneratePassword": {
+    "message": "Générer un mot de passe"
+  },
+  "editShow": {
+    "message": "Afficher"
+  },
+  "editHide": {
+    "message": "Masquer"
+  },
+  "editPasskeyNote": {
+    "message": "Passkey conservée telle quelle — la signature WebAuthn arrivera dans une prochaine version."
+  },
+  "genOutputTitle": {
+    "message": "Cliquer pour copier"
+  },
+  "genRegenerate": {
+    "message": "Régénérer"
+  },
+  "genLength": {
+    "message": "Longueur : $1"
+  },
+  "genAvoidAmbiguous": {
+    "message": "Éviter l’ambigu (l 1 I O 0 o)"
+  },
+  "repromptTitle": {
+    "message": "Mot de passe maître requis"
+  },
+  "repromptDetail": {
+    "message": "« $1 » est protégé par une nouvelle saisie."
+  },
+  "repromptThisItem": {
+    "message": "Cet item"
+  },
+  "repromptPlaceholder": {
+    "message": "Mot de passe maître"
+  },
+  "repromptUnlock": {
+    "message": "Déverrouiller"
+  },
+  "repromptVerifying": {
+    "message": "Vérification…"
+  },
+  "repromptWrongPassword": {
+    "message": "Mot de passe incorrect."
+  },
+  "proposalCreateTitle": {
+    "message": "Enregistrer les identifiants pour $1 ?"
+  },
+  "proposalUpdateTitle": {
+    "message": "Mettre à jour le mot de passe de « $1 » ?"
+  },
+  "proposalNoUsername": {
+    "message": "(identifiant non détecté — à compléter après enregistrement)"
+  },
+  "proposalSave": {
+    "message": "Enregistrer"
+  },
+  "proposalDismiss": {
+    "message": "Ignorer"
+  },
+  "proposalNever": {
+    "message": "Ne plus proposer ici"
+  },
+  "proposalNeverTitle": {
+    "message": "Ne plus rien proposer pour $1"
+  },
+  "statusDeriving": {
+    "message": "Dérivation de la clé…"
+  },
+  "statusSyncing": {
+    "message": "Synchronisation…"
+  },
+  "statusEncrypting": {
+    "message": "Chiffrement…"
+  },
+  "statusSaving": {
+    "message": "Enregistrement…"
+  },
+  "statusOpeningVault": {
+    "message": "Ouverture du coffre…"
+  },
+  "statusDecrypting": {
+    "message": "Déchiffrement de $1 item(s)…"
+  },
+  "errorUnknown": {
+    "message": "Erreur inconnue"
+  },
+  "errorTimeout": {
+    "message": "Serveur injoignable : délai dépassé."
+  },
+  "errorServerUnreachable": {
+    "message": "Serveur injoignable — réessayer, ou déverrouiller à nouveau."
+  },
+  "errorSessionExpired": {
+    "message": "Session expirée — verrouiller puis déverrouiller."
+  },
+  "errorSessionNoRefresh": {
+    "message": "Session expirée sans jeton de rafraîchissement"
+  },
+  "errorItemNotFound": {
+    "message": "Item introuvable — resynchroniser puis réessayer."
+  },
+  "errorTabMismatch": {
+    "message": "L’onglet actif ne correspond plus à cet item."
+  },
+  "settingsServerSection": {
+    "message": "Serveur"
+  },
+  "settingsInstanceUrl": {
+    "message": "URL de l’instance"
+  },
+  "settingsAccountEmail": {
+    "message": "E-mail du compte"
+  },
+  "settingsDeviceName": {
+    "message": "Nom de l’appareil (affiché dans les sessions actives du serveur)"
+  },
+  "settingsNetworkTimeout": {
+    "message": "Délai réseau (secondes, 5–120)"
+  },
+  "settingsSecuritySection": {
+    "message": "Sécurité"
+  },
+  "settingsAutoLock": {
+    "message": "Verrouillage automatique après inactivité"
+  },
+  "settingsAutoLockHint": {
+    "message": "« Inactivité » : aucun changement d’onglet, de fenêtre ni de page, et popup fermée. Naviguer suffit donc à garder le coffre ouvert. Le verrouillage peut tarder d’une minute sur le délai choisi. À la fermeture du navigateur, le coffre est de toute façon verrouillé : la clé ne vit qu’en mémoire."
+  },
+  "settingsLockOnSystemLock": {
+    "message": "Verrouiller aussi quand la session de l’ordinateur se verrouille"
+  },
+  "settingsLockOnSystemLockHint": {
+    "message": "Écran de verrouillage, veille, « Win+L » : le coffre se verrouille immédiatement, quel que soit le délai ci-dessus. S’éloigner de sa machine est plus fréquent que fermer son navigateur."
+  },
+  "settingsClipboard": {
+    "message": "Effacement du presse-papiers après une copie"
+  },
+  "settingsClipboardHint": {
+    "message": "Deux effacements s’en chargent : un minuteur qui respecte le délai exact tant que la popup est ouverte, et une alarme qui lui survit mais que Chrome ramène à trente secondes minimum."
+  },
+  "settingsAutoLockOnClose": {
+    "message": "À la fermeture du navigateur"
+  },
+  "settingsMinutes1": {
+    "message": "1 minute"
+  },
+  "settingsMinutes5": {
+    "message": "5 minutes"
+  },
+  "settingsMinutes15": {
+    "message": "15 minutes"
+  },
+  "settingsMinutes30": {
+    "message": "30 minutes"
+  },
+  "settingsHours1": {
+    "message": "1 heure"
+  },
+  "settingsHours4": {
+    "message": "4 heures"
+  },
+  "settingsSeconds10": {
+    "message": "10 secondes"
+  },
+  "settingsSeconds30": {
+    "message": "30 secondes"
+  },
+  "settingsMinute1": {
+    "message": "1 minute"
+  },
+  "settingsNever": {
+    "message": "Jamais"
+  },
+  "settingsSaveSection": {
+    "message": "Enregistrement des identifiants"
+  },
+  "settingsOfferToSave": {
+    "message": "Proposer d’enregistrer un identifiant saisi sur un site inconnu"
+  },
+  "settingsOfferToSaveHint": {
+    "message": "Un détecteur observe les formulaires de connexion et signale une saisie par une pastille sur l’icône ; la proposition s’affiche à l’ouverture de la popup. Rien n’est ajouté au coffre sans un clic, rien n’est injecté dans la page, et rien n’est envoyé ailleurs qu’à l’extension. Décoché, le détecteur n’est pas injecté du tout — pas un script silencieux, aucun script."
+  },
+  "settingsActionsSection": {
+    "message": "Actions"
+  },
+  "settingsLockNow": {
+    "message": "Verrouiller le coffre maintenant"
+  },
+  "settingsForgetTwoFa": {
+    "message": "Oublier les dispenses 2FA"
+  },
+  "settingsRestoreExcluded": {
+    "message": "Réintégrer les sites exclus"
+  },
+  "settingsForgetOrdering": {
+    "message": "Oublier le classement d’usage"
+  },
+  "settingsDeviceSection": {
+    "message": "Appareil"
+  },
+  "settingsDeviceIdLabel": {
+    "message": "Identifiant transmis au serveur :"
+  },
+  "settingsRegenerateDevice": {
+    "message": "Régénérer l’identifiant d’appareil"
+  },
+  "settingsRegenerateConfirm": {
+    "message": "Régénérer l’identifiant d’appareil ?\n\nLe serveur verra un nouvel appareil : une session supplémentaire apparaîtra dans la liste, une alerte « nouvel appareil » peut être envoyée, et les dispenses 2FA de cet appareil deviendront invalides."
+  },
+  "settingsVersion": {
+    "message": "Version $1"
+  },
+  "settingsSaved": {
+    "message": "Paramètres enregistrés."
+  },
+  "settingsVaultLocked": {
+    "message": "Coffre verrouillé."
+  },
+  "settingsNoTwoFa": {
+    "message": "Aucune dispense 2FA à oublier."
+  },
+  "settingsTwoFaForgotten": {
+    "message": "$1 dispense(s) 2FA oubliée(s) — le second facteur sera redemandé."
+  },
+  "settingsNoExcluded": {
+    "message": "Aucun site exclu."
+  },
+  "settingsExcludedRestored": {
+    "message": "$1 site(s) réintégré(s) — l’enregistrement y sera de nouveau proposé."
+  },
+  "settingsOrderingForgotten": {
+    "message": "Classement d’usage oublié — la liste reprend l’ordre du serveur."
+  },
+  "settingsDeviceRegenerated": {
+    "message": "Identifiant régénéré."
+  }
+}

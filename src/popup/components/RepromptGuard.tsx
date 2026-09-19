@@ -9,6 +9,7 @@
  * `docs/CRYPTO.md` §7).
  */
 
+import { t } from '@shared/i18n.js';
 /** An action suspended until the master password is entered again. */
 export interface RepromptState<T> {
   /** What the guard protects. Only its name is displayed. */
@@ -35,26 +36,24 @@ export function RepromptGuard<T>({
   return (
     <div class="overlay">
       <form class="reprompt" onSubmit={onConfirm}>
-        <p class="reprompt-title">Master password required</p>
-        <p class="reprompt-detail">
-          “{state.item.name ?? 'This item'}” is protected by a re-entry prompt.
-        </p>
+        <p class="reprompt-title">{t('repromptTitle')}</p>
+        <p class="reprompt-detail">{t('repromptDetail', state.item.name ?? t('repromptThisItem'))}</p>
         <input
           type="password"
           autofocus
           autocomplete="off"
           value={state.password}
           disabled={state.busy}
-          placeholder="Master password"
+          placeholder={t('repromptPlaceholder')}
           onInput={(e) => onPassword(e.currentTarget.value)}
         />
         {state.error !== null && <p class="reprompt-error">{state.error}</p>}
         <div class="reprompt-actions">
           <button type="submit" disabled={state.busy || state.password === ''}>
-            {state.busy ? 'Verifying…' : 'Unlock'}
+            {state.busy ? t('repromptVerifying') : t('repromptUnlock')}
           </button>
           <button type="button" class="quiet" disabled={state.busy} onClick={onCancel}>
-            Cancel
+            {t('actionCancel')}
           </button>
         </div>
       </form>

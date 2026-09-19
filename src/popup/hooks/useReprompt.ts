@@ -12,6 +12,7 @@
  * controls the network the power to disarm it.
  */
 
+import { t } from '@shared/i18n.js';
 import { useState } from 'preact/hooks';
 
 import { deriveMasterKey, verifyLocalPasswordHash } from '@core/crypto/kdf.js';
@@ -52,7 +53,7 @@ export function useReprompt(messageFor: (error: unknown) => string): Reprompt {
   async function verify(candidate: string): Promise<boolean> {
     const stored = await loadStoredSession();
     if (stored === null) {
-      throw new Error('Session expired — lock, then unlock again.');
+      throw new Error(t('errorSessionExpired'));
     }
     const masterKey = await deriveMasterKey(candidate, stored.email, stored.kdfConfig);
     try {
@@ -89,7 +90,7 @@ export function useReprompt(messageFor: (error: unknown) => string): Reprompt {
       setState({ ...pending, busy: true, error: null });
       try {
         if (!(await verify(pending.password))) {
-          setState({ ...pending, busy: false, password: '', error: 'Incorrect password.' });
+          setState({ ...pending, busy: false, password: '', error: t('repromptWrongPassword') });
           return;
         }
         setState(null);

@@ -33,6 +33,8 @@
  * yet in the service worker.
  */
 
+import { t } from '@shared/i18n.js';
+import { followPageColorScheme } from '@shared/theme.js';
 import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
@@ -119,6 +121,12 @@ interface OpenVault {
 interface OtpView {
   readonly id: string;
   readonly config: TotpConfig;
+  /**
+   * The code computed when the panel opened — the very one put on the
+   * clipboard. Handed to {@link OtpCode} so that what is displayed and what was
+   * copied cannot differ. See that component's header.
+   */
+  readonly code: string;
 }
 
 /** A session ready to write: API client and valid tokens. */
@@ -134,18 +142,20 @@ interface AuthorizedSession {
 function groupErrors(errors: readonly unknown[]): ReadonlyArray<readonly [string, number]> {
   const grouped = new Map<string, number>();
   for (const error of errors) {
-    const name = error instanceof Error ? error.name : 'Unknown error';
+    const name = error instanceof Error ? error.name : t('errorUnknown');
     grouped.set(name, (grouped.get(name) ?? 0) + 1);
   }
   return [...grouped.entries()].sort((a, b) => b[1] - a[1]);
 }
 
 /** Providers whose code the popup knows how to collect. */
-const PROVIDER_LABELS: Readonly<Record<string, string>> = {
-  [String(TwoFactorProvider.Authenticator)]: 'Authenticator app (TOTP)',
-  [String(TwoFactorProvider.Email)]: 'Code received by email',
-  [String(TwoFactorProvider.YubiKey)]: 'YubiKey (OTP mode — touch the key)',
-};
+function providerLabels(): Readonly<Record<string, string>> {
+  return {
+    [String(TwoFactorProvider.Authenticator)]: t('twoFaProviderAuthenticator'),
+    [String(TwoFactorProvider.Email)]: t('twoFaProviderEmail'),
+    [String(TwoFactorProvider.YubiKey)]: t('twoFaProviderYubiKey'),
+  };
+}
 
 /** The active tab, if it points at a web page. */
 async function activeWebTab(): Promise<{ tabId: number; url: URL } | null> {
@@ -224,7 +234,7 @@ const ACTIVITY_PING_MS = 30_000;
 /** The error message to display. Stable codes take precedence over messages. */
 function messageFor(err: unknown): string {
   if (err instanceof DOMException && err.name === 'TimeoutError') {
-    return 'Server unreachable: timed out.';
+    return t('errorTimeout');
   }
   if (err instanceof Error) {
     return err.message;
@@ -280,6 +290,12 @@ function App() {
   const [twoFaChoice, setTwoFaChoice] = useState('');
   const [twoFaCode, setTwoFaCode] = useState('');
   const [rememberDevice, setRememberDevice] = useState(true);
+
+  /**
+   * Keeps the toolbar icon matched to the theme for as long as the popup is
+   * open — which is also how a system theme change mid-session gets picked up.
+   */
+  useEffect(followPageColorScheme, []);
 
   useEffect(() => {
     void (async () => {
@@ -391,7 +407,7 @@ function App() {
     let expiresAt = stored.expiresAt;
     if (Date.now() > expiresAt - 60_000) {
       if (refreshToken === null) {
-        throw new ApiError('Session expired without a refresh token', 401, '');
+        throw new ApiError(t('errorSessionNoRefresh'), 401, '');
       }
       const renewed = await client.refreshToken(refreshToken);
       accessToken = renewed.accessToken;
@@ -400,7 +416,7 @@ function App() {
     }
 
     if (!displayed) {
-      setBusy('Opening the vault…');
+      setBusy(t('statusOpeningVault'));
     }
     const sync = await client.sync(accessToken);
     await saveStoredSession({
@@ -435,7 +451,7 @@ function App() {
       return;
     }
     if (!displayed) {
-      setError('Server unreachable — retry, or unlock again.');
+      setError(t('errorServerUnreachable'));
     }
   }
 
@@ -456,7 +472,7 @@ function App() {
     };
 
     if (announce) {
-      setBusy(`Decrypting ${ciphers.length} item(s)…`);
+      setBusy(t('statusDecrypting', String(ciphers.length)));
     }
     const keys = await buildVaultKeys(sync.profile, userKey, onDecryptError);
     // Items whose revision date has not moved since the previous display are
@@ -498,7 +514,7 @@ function App() {
    */
   async function attemptUnlock(twoFactor?: TwoFactorSubmission): Promise<void> {
     setError(null);
-    setBusy('Deriving the key…');
+    setBusy(t('statusDeriving'));
 
     // Persisted from the attempt, not only on success: a password or
     // second-factor failure must not force the server and the email to be typed
@@ -537,7 +553,7 @@ function App() {
       await saveRememberToken(serverUrl, email, result.twoFactorRememberToken);
     }
 
-    setBusy('Syncing…');
+    setBusy(t('statusSyncing'));
     const sync = await client.sync(result.session.accessToken);
 
     // The session survives the popup closing, until the browser closes, the
@@ -586,11 +602,11 @@ function App() {
     if (submission?.provider === TwoFactorProvider.Remember) {
       await clearRememberToken(serverUrl, email);
     }
-    const available = err.providers.filter((p) => p in PROVIDER_LABELS);
+    const available = err.providers.filter((p) => p in providerLabels());
     setTwoFaProviders(err.providers);
     setTwoFaChoice(available[0] ?? '');
     if (twoFactor !== undefined) {
-      setError('Second factor refused — try again.');
+      setError(t('twoFaRefused'));
     }
   }
 
@@ -726,7 +742,7 @@ function App() {
     const { capture, existing } = proposal;
 
     setError(null);
-    setBusy('Encrypting…');
+    setBusy(t('statusEncrypting'));
     try {
       const auth = await authorize();
       if (existing === null) {
@@ -766,7 +782,7 @@ function App() {
       },
       open.userKey,
     );
-    setBusy('Saving…');
+    setBusy(t('statusSaving'));
     await auth.client.createCipher(auth.accessToken, payload);
   }
 
@@ -786,7 +802,7 @@ function App() {
   ): Promise<void> {
     const cipher = open.raw.get(existing.id);
     if (cipher === undefined) {
-      throw new Error('Item not found — resync, then try again.');
+      throw new Error(t('errorItemNotFound'));
     }
     // An `onError` that rethrows: on a write, an unreadable field must stop the
     // operation, not let it overwrite what it could not read.
@@ -806,7 +822,7 @@ function App() {
       open.keys,
       true,
     );
-    setBusy('Saving…');
+    setBusy(t('statusSaving'));
     await auth.client.updateCipher(auth.accessToken, existing.id, payload);
   }
 
@@ -837,13 +853,17 @@ function App() {
     }
     try {
       const config = parseTotp(secret);
-      setOtp({ id: item.id, config });
+      // Computed **once**: the same value is displayed and copied. Two separate
+      // computations, a few milliseconds apart, can straddle a window boundary
+      // and land in different windows — the user then reads one code and pastes
+      // another.
+      const code = await generateTotp(config);
+      setOtp({ id: item.id, config, code });
       void noteUsage(item);
-      // Immediate copy: a six-digit code is never looked at for pleasure, and
-      // it will have expired before one finishes copying it by hand. The
-      // computation is redone here rather than demanded of the component — that
-      // would be its only reason to lift its state up.
-      await copyOtp(await generateTotp(config));
+      // The copy is immediate because a six-digit code is never looked at for
+      // pleasure: one wants it in the clipboard, and it will have expired before
+      // one finishes copying it by hand.
+      await copyOtp(code);
     } catch (err) {
       setError(messageFor(err));
     }
@@ -953,7 +973,7 @@ function App() {
   async function onFill(item: CipherOverview): Promise<void> {
     const tab = await activeWebTab();
     if (tab === null || !matchesOrigin(item.uris, tab.url.origin)) {
-      setError('The active tab no longer matches this item.');
+      setError(t('errorTabMismatch'));
       return;
     }
     // Origin first, guard second: asking for a password only to then refuse the
@@ -1018,7 +1038,7 @@ function App() {
   async function authorize(): Promise<AuthorizedSession> {
     const stored = await loadStoredSession();
     if (stored === null) {
-      throw new Error('Session expired — lock, then unlock again.');
+      throw new Error(t('errorSessionExpired'));
     }
     const client = makeClient(settings, stored.serverUrl, await getDeviceId());
 
@@ -1044,7 +1064,7 @@ function App() {
    * it, the popup would still be showing the state from before the write.
    */
   async function refreshAfterWrite(auth: AuthorizedSession, userKey: SymmetricCryptoKey): Promise<void> {
-    setBusy('Syncing…');
+    setBusy(t('statusSyncing'));
     const sync = await auth.client.sync(auth.accessToken);
     await saveStoredSession({
       userKeyB64: auth.stored.userKeyB64,
@@ -1072,7 +1092,7 @@ function App() {
     }
 
     setError(null);
-    setBusy('Encrypting…');
+    setBusy(t('statusEncrypting'));
     try {
       const auth = await authorize();
 
@@ -1090,7 +1110,7 @@ function App() {
         editForm.password !== editOriginalPassword,
       );
 
-      setBusy('Saving…');
+      setBusy(t('statusSaving'));
       await auth.client.updateCipher(auth.accessToken, editing.id, payload);
       await refreshAfterWrite(auth, vault.userKey);
 
@@ -1129,7 +1149,7 @@ function App() {
           <h1>Zwarden</h1>
         </header>
         <main>
-          <p class="status">{busy ?? 'Opening…'}</p>
+          <p class="status">{busy ?? t('listOpening')}</p>
         </main>
       </div>
     );
@@ -1139,8 +1159,8 @@ function App() {
   if (vault === null && twoFaProviders !== null) {
     return (
       <TwoFactorScreen
-        available={twoFaProviders.filter((p) => p in PROVIDER_LABELS)}
-        labels={PROVIDER_LABELS}
+        available={twoFaProviders.filter((p) => p in providerLabels())}
+        labels={providerLabels()}
         choice={twoFaChoice}
         code={twoFaCode}
         remember={rememberDevice}
@@ -1225,16 +1245,16 @@ function App() {
         <div>
           <button
             class="quiet"
-            title="Generate a password"
+            title={t('editGeneratePassword')}
             onClick={() => void generator.open('standalone')}
           >
-            Generate
+            {t('actionGenerate')}
           </button>
           <button class="quiet" onClick={openOptions}>
-            Settings
+            {t('actionSettings')}
           </button>
           <button class="quiet" onClick={onLock}>
-            Lock
+            {t('actionLock')}
           </button>
         </div>
       </header>
@@ -1260,13 +1280,15 @@ function App() {
         <input
           class="search"
           type="search"
-          placeholder={`Search ${vault.items.length} item(s)…`}
+          placeholder={t('listSearch', String(vault.items.length))}
           value={filter}
           onInput={(e) => setFilter(e.currentTarget.value)}
         />
         {vault.errors.length > 0 && (
           <details class="diagnostic">
-            <summary class="error">{vault.errors.length} unreadable field(s) — details</summary>
+            <summary class="error">
+              {t('listUnreadableFields', String(vault.errors.length))}
+            </summary>
             <ul>
               {groupErrors(vault.errors).map(([name, count]) => (
                 <li key={name}>
@@ -1274,14 +1296,12 @@ function App() {
                 </li>
               ))}
             </ul>
-            <p class="hint-diag">
-              Full log: right-click the popup → “Inspect” → Console.
-            </p>
+            <p class="hint-diag">{t('listFullLog')}</p>
           </details>
         )}
         {error !== null && <p class="error">{error}</p>}
         {visible.length === 0 ? (
-          <p class="empty">No items.</p>
+          <p class="empty">{t('listEmpty')}</p>
         ) : (
           <ul class="items">
             {visible.map((item) => (
@@ -1292,7 +1312,7 @@ function App() {
                 passwordCopied={copiedId === item.id}
                 usernameCopied={copiedUserId === item.id}
                 revealed={revealed?.id === item.id ? revealed.password : null}
-                otpConfig={otp?.id === item.id ? otp.config : null}
+                otp={otp?.id === item.id ? otp : null}
                 otpCopied={copiedOtp}
                 fillable={tabOrigin !== null && matchesOrigin(item.uris, tabOrigin)}
                 onCopyUsername={() => void onCopyUsername(item)}

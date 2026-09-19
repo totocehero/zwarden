@@ -7,6 +7,7 @@
  * logic (`docs/EXTENSION.md` §3).
  */
 
+import { t } from '@shared/i18n.js';
 import { type PasswordOptions, MAX_LENGTH, MIN_LENGTH } from '@core/generator/password.js';
 
 /** The generator panel's state: its options, its output, and its destination. */
@@ -44,27 +45,27 @@ export function GeneratorPanel({
 
   return (
     <section class="generator">
-      <div class="generator-output" title="Click to copy" onClick={onCopy}>
+      <div class="generator-output" title={t('genOutputTitle')} onClick={onCopy}>
         {password === '' ? '—' : password}
       </div>
       <div class="generator-actions">
         <button type="button" onClick={onRegenerate} disabled={password === ''}>
-          Regenerate
+          {t('genRegenerate')}
         </button>
         <button type="button" class="secondary" onClick={onCopy} disabled={password === ''}>
-          {copied ? 'Copied!' : 'Copy'}
+          {copied ? t('actionCopied') : t('actionCopy')}
         </button>
         {state.target === 'edit' && (
           <button type="button" class="secondary" onClick={onUse} disabled={password === ''}>
-            Use
+            {t('actionUse')}
           </button>
         )}
         <button type="button" class="quiet" onClick={onClose}>
-          Close
+          {t('actionClose')}
         </button>
       </div>
       <label class="generator-length">
-        Length: {options.length}
+        {t('genLength', String(options.length))}
         <input
           type="range"
           min={MIN_LENGTH}
@@ -90,7 +91,7 @@ export function GeneratorPanel({
             checked={options.avoidAmbiguous}
             onInput={(e) => onPatch({ avoidAmbiguous: e.currentTarget.checked })}
           />
-          Avoid ambiguous characters (l 1 I O 0 o)
+          {t('genAvoidAmbiguous')}
         </label>
       </div>
     </section>

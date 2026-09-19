@@ -45,6 +45,7 @@
  */
 
 import { generatePassword } from '@core/generator/password.js';
+import { applyToolbarIcon, variantFor } from '@shared/theme.js';
 import {
   AUTOLOCK_ALARM_NAME,
   CLIPBOARD_ALARM_NAME,
@@ -160,6 +161,7 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
  * heartbeat running on a locked vault.
  */
 async function resync(): Promise<void> {
+  await syncToolbarIcon();
   await applyDetectorRegistration();
   if ((await loadStoredSession()) === null) {
     await lockVault();
@@ -183,8 +185,9 @@ export {};
 /** Path of the offscreen document, relative to the root of `dist/`. */
 const OFFSCREEN_PATH = 'offscreen.html';
 
-/** Type of the messages addressed to the offscreen document. */
+/** Types of the messages addressed to the offscreen document. */
 const CLIPBOARD_MESSAGE = 'zwarden-clipboard';
+const COLOR_SCHEME_MESSAGE = 'zwarden-color-scheme';
 
 /**
  * Writes to the clipboard from the service worker.
@@ -200,23 +203,40 @@ const CLIPBOARD_MESSAGE = 'zwarden-clipboard';
  * @param text Text to place in the clipboard. Empty = wipe.
  */
 async function writeClipboard(text: string): Promise<void> {
+  await withOffscreen(async () => {
+    await chrome.runtime.sendMessage({ type: CLIPBOARD_MESSAGE, text });
+  });
+}
+
+/**
+ * Opens the offscreen document, runs `use`, and closes it again.
+ *
+ * Both reasons are declared at creation because a single offscreen document is
+ * allowed per extension: asking for one reason now and the other later would
+ * mean tearing down and recreating it.
+ *
+ * Silent on failure, and deliberately so: the `offscreen` API may be missing
+ * (another browser, an older version), in which case the caller keeps whatever
+ * fallback it has — never less than before.
+ */
+async function withOffscreen(use: () => Promise<void>): Promise<void> {
   if (typeof chrome.offscreen === 'undefined') {
     return;
   }
   try {
     await chrome.offscreen.createDocument({
       url: OFFSCREEN_PATH,
-      reasons: [chrome.offscreen.Reason.CLIPBOARD],
-      justification: 'Deferred clipboard wipe after copying a secret from the vault.',
+      reasons: [chrome.offscreen.Reason.CLIPBOARD, chrome.offscreen.Reason.MATCH_MEDIA],
+      justification:
+        'Deferred clipboard wipe after copying a secret, and reading the colour scheme ' +
+        'to pick the toolbar icon.',
     });
   } catch {
-    // Already open: only one offscreen document is allowed per extension, and it
-    // is exactly the one we need.
+    // Already open: it is exactly the document we need.
   }
 
   try {
-    // Awaited: the document must have confirmed before we close it.
-    await chrome.runtime.sendMessage({ type: CLIPBOARD_MESSAGE, text });
+    await use();
   } catch {
     // Document absent or already closed: nothing to recover from.
   } finally {
@@ -226,6 +246,29 @@ async function writeClipboard(text: string): Promise<void> {
       // Already closed.
     }
   }
+}
+
+// --- Toolbar icon ------------------------------------------------------------
+
+/**
+ * Matches the toolbar icon to the browser's theme.
+ *
+ * The icon is a white padlock: on a light toolbar it is invisible, and the user
+ * concludes the extension failed to install. A service worker has no DOM, hence
+ * no `matchMedia` — the offscreen document answers for it.
+ *
+ * Run at start-up and on install. An icon set through `setIcon` does not survive
+ * the extension reloading, which is exactly when those two events fire.
+ * Extension pages settle it again when they open, which covers the user changing
+ * their system theme mid-session.
+ */
+async function syncToolbarIcon(): Promise<void> {
+  await withOffscreen(async () => {
+    const scheme: unknown = await chrome.runtime.sendMessage({ type: COLOR_SCHEME_MESSAGE });
+    if (scheme === 'dark' || scheme === 'light') {
+      await applyToolbarIcon(variantFor(scheme === 'dark'));
+    }
+  });
 }
 
 // --- Keyboard shortcuts ------------------------------------------------------
