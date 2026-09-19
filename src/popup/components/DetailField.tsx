@@ -75,7 +75,7 @@ export function DetailField({
         </button>
       )}
       <button
-        class={`icon${copied ? ' copie-ok' : ''}`}
+        class={`icon${copied ? ' copied-ok' : ''}`}
         type="button"
         title={copied ? t('itemFieldCopied', label) : t('itemCopyField', label)}
         onClick={onCopy}
@@ -116,7 +116,7 @@ export function DetailBlock({
         ))}
       </div>
       <button
-        class={`icon${copied ? ' copie-ok' : ''}`}
+        class={`icon${copied ? ' copied-ok' : ''}`}
         type="button"
         title={copied ? t('itemFieldCopied', label) : t('itemCopyField', label)}
         onClick={onCopy}

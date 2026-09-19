@@ -73,7 +73,7 @@ function baseKeyFor(
   }
   const key = keyForCipher(cipher, keys);
   if (key === null) {
-    onError(new MissingOrgKeyError(readField<string>(cipher, 'organizationId') ?? 'inconnue'));
+    onError(new MissingOrgKeyError(readField<string>(cipher, 'organizationId') ?? 'unknown'));
   }
   return key;
 }
@@ -200,7 +200,7 @@ export function reuseByRevision(
   previous: readonly CipherOverview[],
   previousRaw: ReadonlyMap<string, CipherResponse>,
 ): (cipher: CipherResponse) => CipherOverview | undefined {
-  const parId = new Map(previous.map((item) => [item.id, item]));
+  const byId = new Map(previous.map((item) => [item.id, item]));
 
   return (cipher) => {
     const id = readField<string>(cipher, 'id');
@@ -208,11 +208,11 @@ export function reuseByRevision(
       return undefined;
     }
     const revision = readField<string>(cipher, 'revisionDate');
-    const ancien = previousRaw.get(id);
-    if (revision == null || ancien === undefined) {
+    const previousCipher = previousRaw.get(id);
+    if (revision == null || previousCipher === undefined) {
       return undefined;
     }
-    return revision === readField<string>(ancien, 'revisionDate') ? parId.get(id) : undefined;
+    return revision === readField<string>(previousCipher, 'revisionDate') ? byId.get(id) : undefined;
   };
 }
 
@@ -782,7 +782,7 @@ function requireBaseKey(cipher: CipherResponse, keys: CipherKeys): SymmetricCryp
   }
   const resolved = keyForCipher(cipher, keys);
   if (resolved === null) {
-    throw new MissingOrgKeyError(readField<string>(cipher, 'organizationId') ?? 'inconnue');
+    throw new MissingOrgKeyError(readField<string>(cipher, 'organizationId') ?? 'unknown');
   }
   return resolved;
 }

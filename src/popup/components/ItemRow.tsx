@@ -208,7 +208,7 @@ export function ItemRow({
         </button>
         {(item.type === 1 || primaryLabel !== null) && (
           <button
-            class={`icon${passwordCopied ? ' copie-ok' : ''}`}
+            class={`icon${passwordCopied ? ' copied-ok' : ''}`}
             title={
               primaryLabel === null
                 ? passwordCopied

@@ -242,11 +242,11 @@ describe.skipIf(!configured)('Vaultwarden interoperability', () => {
     // The vault layer's service handles the per-item key and the case
     // tolerance; that is the path the extension will actually use.
     let failures = 0;
-    const vues = await decryptCipherList(ciphers, userKey, () => {
+    const views = await decryptCipherList(ciphers, userKey, () => {
       failures++;
     });
 
-    for (const view of vues) {
+    for (const view of views) {
       if (view.name !== null) {
         // Only the length is logged: the content stays secret.
         console.log(
@@ -255,7 +255,7 @@ describe.skipIf(!configured)('Vaultwarden interoperability', () => {
       }
     }
 
-    const decryptedCount = vues.filter((v) => v.name !== null).length;
+    const decryptedCount = views.filter((v) => v.name !== null).length;
     console.log(`  ${decryptedCount} decrypted, ${failures} failure(s)`);
     expect(failures).toBe(0);
     expect(decryptedCount).toBe(ciphers.length);

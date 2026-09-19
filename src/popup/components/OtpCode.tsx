@@ -39,7 +39,7 @@ export function OtpRing({ remaining, period }: { remaining: number; period: numb
 
   return (
     <svg
-      class={`ring${urgent ? ' anneau-urgent' : ''}`}
+      class={`ring${urgent ? ' ring-urgent' : ''}`}
       width="22"
       height="22"
       viewBox="0 0 22 22"

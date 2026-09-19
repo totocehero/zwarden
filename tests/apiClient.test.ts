@@ -269,12 +269,12 @@ describe('login', () => {
 
   it('translates a captcha requirement', async () => {
     const client = clientWith(() =>
-      jsonResponse(400, { error: 'invalid_grant', HCaptcha_SiteKey: 'cle-site-hcaptcha' }),
+      jsonResponse(400, { error: 'invalid_grant', HCaptcha_SiteKey: 'hcaptcha-site-key' }),
     );
 
     const error = await client.login('a@b.c', HASH).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(CaptchaRequiredError);
-    expect((error as CaptchaRequiredError).siteKey).toBe('cle-site-hcaptcha');
+    expect((error as CaptchaRequiredError).siteKey).toBe('hcaptcha-site-key');
     expect((error as CaptchaRequiredError).code).toBe('captcha-required');
   });
 

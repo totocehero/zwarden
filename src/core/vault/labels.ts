@@ -138,7 +138,7 @@ async function decryptCollections(
 
     const key = organizationId === null ? userKey : orgKeys.get(organizationId);
     if (key === undefined) {
-      onError(new MissingOrgKeyError(organizationId ?? 'inconnue'));
+      onError(new MissingOrgKeyError(organizationId ?? 'unknown'));
       continue;
     }
 

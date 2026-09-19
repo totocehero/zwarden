@@ -66,13 +66,13 @@ describe('cipherService', () => {
     return {
       id: 'item-1',
       type: 1,
-      name: await enc('Ma banque', key),
+      name: await enc('My bank', key),
       notes: await enc('private notes', key),
       login: {
-        username: await enc('alice@exemple.fr', key),
+        username: await enc('alice@example.org', key),
         password: await enc('strong-password', key),
         totp: await enc('otpauth://totp/x', key),
-        uris: [{ uri: await enc('https://banque.exemple.fr', key) }],
+        uris: [{ uri: await enc('https://bank.example.org', key) }],
       },
       organizationId: null,
     };
@@ -80,18 +80,18 @@ describe('cipherService', () => {
 
   it('decrypts the list view (camelCase)', async () => {
     const errors: unknown[] = [];
-    const vue = await decryptCipherOverview(await makeCipher(userKey), userKey, (e) =>
+    const view = await decryptCipherOverview(await makeCipher(userKey), userKey, (e) =>
       errors.push(e),
     );
 
-    expect(vue).toEqual({
+    expect(view).toEqual({
       id: 'item-1',
       type: 1,
-      name: 'Ma banque',
-      username: 'alice@exemple.fr',
+      name: 'My bank',
+      username: 'alice@example.org',
       // A login identifies itself by its username: no subtitle to add.
       subtitle: null,
-      uris: ['https://banque.exemple.fr'],
+      uris: ['https://bank.example.org'],
       hasPasskey: false,
       // The test item carries a TOTP: detected without being decrypted.
       hasTotp: true,
@@ -129,7 +129,7 @@ describe('cipherService', () => {
     );
 
     expect(details).toEqual({
-      username: 'alice@exemple.fr',
+      username: 'alice@example.org',
       password: 'strong-password',
       totp: 'otpauth://totp/x',
       notes: 'private notes',
@@ -163,8 +163,8 @@ describe('cipherService', () => {
     };
 
     const errors: unknown[] = [];
-    const vue = await decryptCipherOverview(cipher, userKey, (e) => errors.push(e));
-    expect(vue.hasPasskey).toBe(true);
+    const view = await decryptCipherOverview(cipher, userKey, (e) => errors.push(e));
+    expect(view.hasPasskey).toBe(true);
 
     const details = await decryptCipherDetails(cipher, userKey, (e) => errors.push(e));
     expect(details.passkeys).toEqual([{ rpId: 'npmjs.com', userName: 'fredc' }]);
@@ -183,18 +183,18 @@ describe('cipherService', () => {
       Login: {
         Username: await enc('bob', userKey),
         Password: await enc('secret', userKey),
-        Uris: [{ Uri: await enc('https://exemple.fr', userKey) }],
+        Uris: [{ Uri: await enc('https://example.org', userKey) }],
       },
     } as unknown as CipherResponse;
 
     const errors: unknown[] = [];
     const onError = (e: unknown) => errors.push(e);
 
-    const vue = await decryptCipherOverview(pascal, userKey, onError);
-    expect(vue.id).toBe('item-pascal');
-    expect(vue.name).toBe('Titre');
-    expect(vue.username).toBe('bob');
-    expect(vue.uris).toEqual(['https://exemple.fr']);
+    const view = await decryptCipherOverview(pascal, userKey, onError);
+    expect(view.id).toBe('item-pascal');
+    expect(view.name).toBe('Titre');
+    expect(view.username).toBe('bob');
+    expect(view.uris).toEqual(['https://example.org']);
 
     const details = await decryptCipherDetails(pascal, userKey, onError);
     expect(details.username).toBe('bob');
@@ -210,10 +210,10 @@ describe('cipherService', () => {
     };
 
     const errors: unknown[] = [];
-    const vue = await decryptCipherOverview(cipher, userKey, (e) => errors.push(e));
+    const view = await decryptCipherOverview(cipher, userKey, (e) => errors.push(e));
     const details = await decryptCipherDetails(cipher, userKey, (e) => errors.push(e));
 
-    expect(vue.name).toBe('Ma banque');
+    expect(view.name).toBe('My bank');
     expect(details.password).toBe('strong-password');
     expect(errors).toHaveLength(0);
 
@@ -235,10 +235,10 @@ describe('cipherService', () => {
     };
 
     const errors: unknown[] = [];
-    const vue = await decryptCipherOverview(cipher, userKey, (e) => errors.push(e));
+    const view = await decryptCipherOverview(cipher, userKey, (e) => errors.push(e));
 
-    expect(vue.name).toBeNull();
-    expect(vue.uris).toEqual([]);
+    expect(view.name).toBeNull();
+    expect(view.uris).toEqual([]);
     expect(errors).toHaveLength(1);
     expect(errors[0]).toBeInstanceOf(MacMismatchError);
   });
@@ -250,10 +250,10 @@ describe('cipherService', () => {
     };
 
     const errors: unknown[] = [];
-    const vue = await decryptCipherOverview(cipher, userKey, (e) => errors.push(e));
+    const view = await decryptCipherOverview(cipher, userKey, (e) => errors.push(e));
 
-    expect(vue.name).toBeNull();
-    expect(vue.uris).toEqual(['https://banque.exemple.fr']);
+    expect(view.name).toBeNull();
+    expect(view.uris).toEqual(['https://bank.example.org']);
     expect(errors).toHaveLength(1);
   });
 
@@ -271,13 +271,13 @@ describe('cipherService', () => {
     ciphers[7] = { ...ciphers[7]!, name: 'corrompu' };
 
     const errors: unknown[] = [];
-    const vues = await decryptCipherList(ciphers, userKey, (e) => errors.push(e), 3);
+    const views = await decryptCipherList(ciphers, userKey, (e) => errors.push(e), 3);
 
-    expect(vues).toHaveLength(20);
-    expect(vues.map((v) => v.id)).toEqual(ciphers.map((c) => c.id));
-    expect(vues[0]!.name).toBe('nom-0');
-    expect(vues[7]!.name).toBeNull();
-    expect(vues[19]!.name).toBe('nom-19');
+    expect(views).toHaveLength(20);
+    expect(views.map((v) => v.id)).toEqual(ciphers.map((c) => c.id));
+    expect(views[0]!.name).toBe('nom-0');
+    expect(views[7]!.name).toBeNull();
+    expect(views[19]!.name).toBe('nom-19');
     expect(errors).toHaveLength(1);
   });
 
@@ -302,24 +302,24 @@ describe('item update (buildCipherUpdatePayload)', () => {
     return {
       id: 'item-1',
       type: 1,
-      name: await enc('Ancien nom', key),
-      notes: await enc('anciennes notes', key),
+      name: await enc('Old name', key),
+      notes: await enc('old notes', key),
       login: {
-        username: await enc('ancien@exemple.fr', key),
-        password: await enc('ancien-mdp', key),
-        uris: [{ uri: await enc('https://ancien.fr', key) }],
+        username: await enc('old@example.org', key),
+        password: await enc('old-password', key),
+        uris: [{ uri: await enc('https://old.example.org', key) }],
       },
       organizationId: null,
     };
   }
 
   const EDIT = {
-    name: 'Nouveau nom',
-    username: 'nouveau@exemple.fr',
-    password: 'nouveau-mdp',
+    name: 'New name',
+    username: 'new@example.org',
+    password: 'new-password',
     totp: '',
-    notes: 'nouvelles notes',
-    uris: ['https://nouveau.fr', '  '],
+    notes: 'new notes',
+    uris: ['https://new.example.org', '  '],
   };
 
   async function dec(value: unknown, key: SymmetricCryptoKey): Promise<string | null> {
@@ -329,76 +329,76 @@ describe('item update (buildCipherUpdatePayload)', () => {
   }
 
   it('re-encrypts the edited fields and preserves the others', async () => {
-    const brut = {
+    const stored = {
       ...(await rawCipher(userKey)),
-      folderId: 'dossier-1',
+      folderId: 'folder-1',
       favorite: true,
       reprompt: 1,
-      fields: [{ name: 'champ-perso' }],
+      fields: [{ name: 'champ-personal' }],
     } as unknown as CipherResponse;
 
-    const payload = await buildCipherUpdatePayload(brut, EDIT, userKey, false);
+    const payload = await buildCipherUpdatePayload(stored, EDIT, userKey, false);
 
-    expect(await dec(payload['name'], userKey)).toBe('Nouveau nom');
-    expect(await dec(payload['notes'], userKey)).toBe('nouvelles notes');
+    expect(await dec(payload['name'], userKey)).toBe('New name');
+    expect(await dec(payload['notes'], userKey)).toBe('new notes');
 
     const login = payload['login'] as Record<string, unknown>;
-    expect(await dec(login['username'], userKey)).toBe('nouveau@exemple.fr');
-    expect(await dec(login['password'], userKey)).toBe('nouveau-mdp');
+    expect(await dec(login['username'], userKey)).toBe('new@example.org');
+    expect(await dec(login['password'], userKey)).toBe('new-password');
     expect(login['totp']).toBeNull();
 
     const uris = login['uris'] as ReadonlyArray<Record<string, unknown>>;
     expect(uris).toHaveLength(1); // the blank line is dropped
-    expect(await dec(uris[0]!['uri'], userKey)).toBe('https://nouveau.fr');
+    expect(await dec(uris[0]!['uri'], userKey)).toBe('https://new.example.org');
 
     // Unedited fields: carried over as-is.
     expect(payload['type']).toBe(1);
-    expect(payload['folderId']).toBe('dossier-1');
+    expect(payload['folderId']).toBe('folder-1');
     expect(payload['favorite']).toBe(true);
     expect(payload['reprompt']).toBe(1);
-    expect(payload['fields']).toEqual([{ name: 'champ-perso' }]);
+    expect(payload['fields']).toEqual([{ name: 'champ-personal' }]);
     expect(payload['organizationId']).toBeNull();
   });
 
   it('keeps the item key and encrypts with it', async () => {
     const itemKey = SymmetricCryptoKey.generate();
     const wrapped = (await encryptBytes(itemKey.key, userKey)).toString();
-    const brut: CipherResponse = { ...(await rawCipher(itemKey)), key: wrapped };
+    const stored: CipherResponse = { ...(await rawCipher(itemKey)), key: wrapped };
 
-    const payload = await buildCipherUpdatePayload(brut, EDIT, userKey, false);
+    const payload = await buildCipherUpdatePayload(stored, EDIT, userKey, false);
 
     expect(payload['key']).toBe(wrapped);
     // The fields decrypt with the item's key, not the vault's.
-    expect(await dec(payload['name'], itemKey)).toBe('Nouveau nom');
+    expect(await dec(payload['name'], itemKey)).toBe('New name');
   });
 
   it('records the old password, still encrypted, in the history', async () => {
-    const brut = await rawCipher(userKey);
-    const payload = await buildCipherUpdatePayload(brut, EDIT, userKey, true);
+    const stored = await rawCipher(userKey);
+    const payload = await buildCipherUpdatePayload(stored, EDIT, userKey, true);
 
-    const histo = payload['passwordHistory'] as ReadonlyArray<Record<string, unknown>>;
-    expect(histo).toHaveLength(1);
-    expect(histo[0]!['password']).toBe(brut.login!.password);
-    expect(await dec(histo[0]!['password'], userKey)).toBe('ancien-mdp');
+    const history = payload['passwordHistory'] as ReadonlyArray<Record<string, unknown>>;
+    expect(history).toHaveLength(1);
+    expect(history[0]!['password']).toBe(stored.login!.password);
+    expect(await dec(history[0]!['password'], userKey)).toBe('old-password');
   });
 
   it('caps the history at 5 entries', async () => {
-    const existant = Array.from({ length: 6 }, (_, i) => ({ password: `h${i}`, lastUsedDate: 'd' }));
-    const brut = { ...(await rawCipher(userKey)), passwordHistory: existant } as unknown as CipherResponse;
+    const existing = Array.from({ length: 6 }, (_, i) => ({ password: `h${i}`, lastUsedDate: 'd' }));
+    const stored = { ...(await rawCipher(userKey)), passwordHistory: existing } as unknown as CipherResponse;
 
-    const payload = await buildCipherUpdatePayload(brut, EDIT, userKey, true);
+    const payload = await buildCipherUpdatePayload(stored, EDIT, userKey, true);
     expect(payload['passwordHistory'] as unknown[]).toHaveLength(5);
   });
 
   it('organisation item: encrypts with the organisation key', async () => {
     const orgKey = SymmetricCryptoKey.generate();
     const keys = { userKey, orgKeys: new Map([['org-9', orgKey]]) };
-    const brut: CipherResponse = { ...(await rawCipher(orgKey)), organizationId: 'org-9' };
+    const stored: CipherResponse = { ...(await rawCipher(orgKey)), organizationId: 'org-9' };
 
-    const payload = await buildCipherUpdatePayload(brut, EDIT, keys, false);
+    const payload = await buildCipherUpdatePayload(stored, EDIT, keys, false);
 
     expect(payload['organizationId']).toBe('org-9');
-    expect(await dec(payload['name'], orgKey)).toBe('Nouveau nom');
+    expect(await dec(payload['name'], orgKey)).toBe('New name');
   });
 
   /**
@@ -430,12 +430,12 @@ describe('item update (buildCipherUpdatePayload)', () => {
   it('preserves passkeys as-is during an edit', async () => {
     const base = await rawCipher(userKey);
     const passkeys = [{ rpId: await enc('npmjs.com', userKey), keyValue: await enc('pk', userKey) }];
-    const brut: CipherResponse = {
+    const stored: CipherResponse = {
       ...base,
       login: { ...base.login, fido2Credentials: passkeys },
     };
 
-    const payload = await buildCipherUpdatePayload(brut, EDIT, userKey, false);
+    const payload = await buildCipherUpdatePayload(stored, EDIT, userKey, false);
     const login = payload['login'] as Record<string, unknown>;
 
     // Carried over identically, with no re-encryption and no loss.
@@ -497,40 +497,40 @@ describe('organisation keyring', () => {
       id: 'shared',
       type: 1,
       organizationId: 'org-1',
-      name: await enc('Compte shared', orgKey),
-      login: { username: await enc('equipe@exemple.fr', orgKey) },
+      name: await enc('Shared account', orgKey),
+      login: { username: await enc('team@example.org', orgKey) },
     };
-    const perso: CipherResponse = {
-      id: 'perso',
+    const personal: CipherResponse = {
+      id: 'personal',
       type: 1,
-      name: await enc('Compte perso', userKey),
+      name: await enc('Personal account', userKey),
       login: null,
     };
 
-    const vues = await decryptCipherList([shared, perso], keys, (e) => errors.push(e));
+    const views = await decryptCipherList([shared, personal], keys, (e) => errors.push(e));
 
     expect(errors).toHaveLength(0);
-    expect(vues[0]!.name).toBe('Compte shared');
-    expect(vues[0]!.username).toBe('equipe@exemple.fr');
-    expect(vues[1]!.name).toBe('Compte perso');
+    expect(views[0]!.name).toBe('Shared account');
+    expect(views[0]!.username).toBe('team@example.org');
+    expect(views[1]!.name).toBe('Personal account');
   });
 
   it('reports MissingOrgKeyError for an unknown organisation', async () => {
     const keys = await buildVaultKeys(profile, userKey, () => undefined);
-    const orphelin: CipherResponse = {
-      id: 'orphelin',
+    const orphan: CipherResponse = {
+      id: 'orphan',
       type: 1,
-      organizationId: 'org-inconnue',
+      organizationId: 'org-unknown',
       name: await enc('Invisible', orgKey),
     };
 
     const errors: unknown[] = [];
-    const vue = await decryptCipherOverview(orphelin, keys, (e) => errors.push(e));
+    const view = await decryptCipherOverview(orphan, keys, (e) => errors.push(e));
 
-    expect(vue.name).toBeNull();
+    expect(view.name).toBeNull();
     expect(errors).toHaveLength(1);
     expect(errors[0]).toBeInstanceOf(MissingOrgKeyError);
-    expect((errors[0] as MissingOrgKeyError).organizationId).toBe('org-inconnue');
+    expect((errors[0] as MissingOrgKeyError).organizationId).toBe('org-unknown');
   });
 
   it('a profile with no organisation never touches RSA', async () => {
@@ -572,11 +572,11 @@ describe('labels: folders and collections', () => {
         organizations: [{ id: 'org-1', name: 'Famille' }],
       },
       folders: [
-        { id: 'f-1', name: await enc('Travail', userKey) },
-        { id: 'f-2', name: await enc('Perso', userKey) },
+        { id: 'f-1', name: await enc('Work', userKey) },
+        { id: 'f-2', name: await enc('Personal', userKey) },
       ],
       collections: [
-        { id: 'c-1', organizationId: 'org-1', name: await enc('Banque', orgKey), readOnly: false },
+        { id: 'c-1', organizationId: 'org-1', name: await enc('Bank', orgKey), readOnly: false },
         { id: 'c-2', organizationId: 'org-1', name: await enc('Archives', orgKey), readOnly: true },
       ],
     };
@@ -585,10 +585,10 @@ describe('labels: folders and collections', () => {
     const labels = await decryptLabels(sync, keys, (e) => errors.push(e));
 
     expect(errors).toHaveLength(0);
-    expect(labels.folders.get('f-1')).toBe('Travail');
-    expect(labels.folders.get('f-2')).toBe('Perso');
+    expect(labels.folders.get('f-1')).toBe('Work');
+    expect(labels.folders.get('f-2')).toBe('Personal');
     expect(labels.collections.get('c-1')).toEqual({
-      name: 'Banque',
+      name: 'Bank',
       organizationId: 'org-1',
       readOnly: false,
     });
@@ -600,7 +600,7 @@ describe('labels: folders and collections', () => {
     const errors: unknown[] = [];
     const sync: SyncResponse = {
       collections: [
-        { id: 'c-x', organizationId: 'org-inconnue', name: await enc('Invisible', orgKey) },
+        { id: 'c-x', organizationId: 'org-unknown', name: await enc('Invisible', orgKey) },
       ],
     };
 
@@ -629,40 +629,40 @@ describe('labels: folders and collections', () => {
       collectionIds: ['c-1', 'c-2'],
     };
 
-    const vue = await decryptCipherOverview(cipher, userKey, (e) => {
+    const view = await decryptCipherOverview(cipher, userKey, (e) => {
       throw e;
     });
-    expect(vue.folderId).toBe('f-1');
-    expect(vue.collectionIds).toEqual(['c-1', 'c-2']);
+    expect(view.folderId).toBe('f-1');
+    expect(view.collectionIds).toEqual(['c-1', 'c-2']);
   });
 });
 
 describe('reuseByRevision', () => {
-  const apercu = (id: string, name: string): CipherOverview =>
+  const overview = (id: string, name: string): CipherOverview =>
     ({ id, name }) as CipherOverview;
-  const chiffre = (id: string, revisionDate: string): CipherResponse =>
+  const encrypted = (id: string, revisionDate: string): CipherResponse =>
     ({ id, revisionDate }) as unknown as CipherResponse;
 
   it('reuses the overview when the revision has not changed', () => {
     const reuse = reuseByRevision(
-      [apercu('i1', 'Ma banque')],
-      new Map([['i1', chiffre('i1', '2026-09-01T10:00:00Z')]]),
+      [overview('i1', 'My bank')],
+      new Map([['i1', encrypted('i1', '2026-09-01T10:00:00Z')]]),
     );
-    expect(reuse(chiffre('i1', '2026-09-01T10:00:00Z'))?.name).toBe('Ma banque');
+    expect(reuse(encrypted('i1', '2026-09-01T10:00:00Z'))?.name).toBe('My bank');
   });
 
   /** Edited here or from another device: it must be re-decrypted. */
   it('refuses to reuse when the revision has changed', () => {
     const reuse = reuseByRevision(
-      [apercu('i1', 'Ma banque')],
-      new Map([['i1', chiffre('i1', '2026-09-01T10:00:00Z')]]),
+      [overview('i1', 'My bank')],
+      new Map([['i1', encrypted('i1', '2026-09-01T10:00:00Z')]]),
     );
-    expect(reuse(chiffre('i1', '2026-09-02T11:00:00Z'))).toBeUndefined();
+    expect(reuse(encrypted('i1', '2026-09-02T11:00:00Z'))).toBeUndefined();
   });
 
   it('reuses nothing for an unknown item', () => {
     const reuse = reuseByRevision([], new Map());
-    expect(reuse(chiffre('i9', '2026-09-01T10:00:00Z'))).toBeUndefined();
+    expect(reuse(encrypted('i9', '2026-09-01T10:00:00Z'))).toBeUndefined();
   });
 
   /**
@@ -671,8 +671,8 @@ describe('reuseByRevision', () => {
    */
   it('reuses nothing without a revision date', () => {
     const reuse = reuseByRevision(
-      [apercu('i1', 'Ma banque')],
-      new Map([['i1', chiffre('i1', '2026-09-01T10:00:00Z')]]),
+      [overview('i1', 'My bank')],
+      new Map([['i1', encrypted('i1', '2026-09-01T10:00:00Z')]]),
     );
     expect(reuse({ id: 'i1' } as unknown as CipherResponse)).toBeUndefined();
   });
@@ -680,15 +680,15 @@ describe('reuseByRevision', () => {
 
 describe('origin matching (uriMatch)', () => {
   it('normalises to the strict origin', () => {
-    expect(uriOrigin('https://exemple.fr/chemin/login?x=1')).toBe('https://exemple.fr');
-    expect(uriOrigin('https://exemple.fr:8443/x')).toBe('https://exemple.fr:8443');
-    expect(uriOrigin('exemple.fr')).toBe('https://exemple.fr');
-    expect(uriOrigin('  exemple.fr/login  ')).toBe('https://exemple.fr');
+    expect(uriOrigin('https://example.org/chemin/login?x=1')).toBe('https://example.org');
+    expect(uriOrigin('https://example.org:8443/x')).toBe('https://example.org:8443');
+    expect(uriOrigin('example.org')).toBe('https://example.org');
+    expect(uriOrigin('  example.org/login  ')).toBe('https://example.org');
   });
 
   it('rejects unusable URIs', () => {
     expect(uriOrigin('')).toBeNull();
-    expect(uriOrigin('androidapp://com.exemple')).toBeNull();
+    expect(uriOrigin('androidapp://com.example')).toBeNull();
   });
 
   /**
@@ -697,8 +697,8 @@ describe('origin matching (uriMatch)', () => {
    * candidate made all such URIs fail, silently.
    */
   it('accepts a host and a port with no scheme', () => {
-    expect(uriOrigin('exemple.fr:8080')).toBe('https://exemple.fr:8080');
-    expect(uriOrigin('exemple.fr:8080/connexion')).toBe('https://exemple.fr:8080');
+    expect(uriOrigin('example.org:8080')).toBe('https://example.org:8080');
+    expect(uriOrigin('example.org:8080/connexion')).toBe('https://example.org:8080');
     expect(uriOrigin('localhost:8080')).toBe('https://localhost:8080');
   });
 
@@ -710,27 +710,27 @@ describe('origin matching (uriMatch)', () => {
    * bank.
    */
   it('does not fabricate an origin from an opaque scheme', () => {
-    expect(uriOrigin('mailto:alice@banque.fr')).toBeNull();
-    expect(uriOrigin('ssh://git@exemple.fr')).toBeNull();
+    expect(uriOrigin('mailto:alice@bank.example')).toBeNull();
+    expect(uriOrigin('ssh://git@example.org')).toBeNull();
     expect(uriOrigin('tel:+33123456789')).toBeNull();
-    expect(matchesOrigin(['mailto:alice@banque.fr'], 'https://banque.fr')).toBe(false);
+    expect(matchesOrigin(['mailto:alice@bank.example'], 'https://bank.example')).toBe(false);
   });
 
   it('matches exactly, never by substring', () => {
-    expect(matchesOrigin(['https://exemple.fr/login'], 'https://exemple.fr')).toBe(true);
+    expect(matchesOrigin(['https://example.org/login'], 'https://example.org')).toBe(true);
     // The attack the strict-origin rule neutralises:
-    expect(matchesOrigin(['https://banque.fr'], 'https://banque.fr.attaquant.com')).toBe(false);
+    expect(matchesOrigin(['https://bank.example'], 'https://bank.example.attacker.example')).toBe(false);
     // A subdomain is not the origin.
-    expect(matchesOrigin(['https://exemple.fr'], 'https://mail.exemple.fr')).toBe(false);
+    expect(matchesOrigin(['https://example.org'], 'https://mail.example.org')).toBe(false);
     // A different port is not the origin.
-    expect(matchesOrigin(['https://exemple.fr'], 'https://exemple.fr:8443')).toBe(false);
+    expect(matchesOrigin(['https://example.org'], 'https://example.org:8443')).toBe(false);
     // HTTP is not HTTPS.
-    expect(matchesOrigin(['https://exemple.fr'], 'http://exemple.fr')).toBe(false);
+    expect(matchesOrigin(['https://example.org'], 'http://example.org')).toBe(false);
   });
 });
 
 describe('unlock (the unlock orchestrator)', () => {
-  const EMAIL = 'test@exemple.fr';
+  const EMAIL = 'test@example.org';
   const PASSWORD = 'master password';
   const KDF_CONFIG: KdfConfig = { type: KdfType.PBKDF2_SHA256, iterations: 100_000 };
 
@@ -755,7 +755,7 @@ describe('unlock (the unlock orchestrator)', () => {
     omitKey?: boolean;
     protectedKeyOverride?: string;
     calls?: string[];
-    /** Exige `twoFactorToken=code-123` avec le fournisseur 3, comme un compte YubiKey. */
+    /** Demands `twoFactorToken=code-123` with provider 3, as a YubiKey account does. */
     requireTwoFactor?: boolean;
   }): typeof fetch {
     return async (input, init) => {
@@ -965,7 +965,7 @@ describe('cards and identities', () => {
     return {
       id: 'card-1',
       type: 3,
-      name: await enc('Carte bleue', key),
+      name: await enc('Bank card', key),
       card: await encSection(CARD),
       organizationId: null,
     } as unknown as CipherResponse;
@@ -975,7 +975,7 @@ describe('cards and identities', () => {
     return {
       id: 'id-1',
       type: 4,
-      name: await enc('Papiers', key),
+      name: await enc('Papers', key),
       identity: await encSection(IDENTITY),
       organizationId: null,
     } as unknown as CipherResponse;
@@ -1030,7 +1030,7 @@ describe('cards and identities', () => {
   });
 
   const EDIT = {
-    name: 'Carte bleue',
+    name: 'Bank card',
     username: '',
     password: '',
     totp: '',
