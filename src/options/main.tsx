@@ -13,23 +13,26 @@ import { useEffect, useState } from 'preact/hooks';
 import {
   type AppSettings,
   DEFAULT_SETTINGS,
-  cancelAutoLock,
   clearAllRememberTokens,
-  clearStoredSession,
+  clearLastUsed,
+  clearNeverSaveHosts,
   getDeviceId,
   loadSettings,
+  lockVault,
   regenerateDeviceId,
   saveSettings,
+  startAutoLockWatch,
 } from '@shared/storage.js';
 
 /** Valeurs proposées pour le verrouillage automatique, en minutes. */
 const AUTOLOCK_CHOICES: ReadonlyArray<readonly [number, string]> = [
+  [0, 'À la fermeture du navigateur'],
   [1, '1 minute'],
   [5, '5 minutes'],
   [15, '15 minutes'],
   [30, '30 minutes'],
   [60, '1 heure'],
-  [0, 'Jamais (fermeture du navigateur)'],
+  [240, '4 heures'],
 ];
 
 /** Valeurs proposées pour l'effacement du presse-papiers, en secondes. */
@@ -74,13 +77,29 @@ function App() {
     const propre = { ...settings, timeoutSeconds };
     setSettings(propre);
     await saveSettings(propre);
+    // Le nouveau délai s'applique au coffre déjà déverrouillé, sans attendre
+    // la prochaine ouverture de popup.
+    await startAutoLockWatch(propre.autoLockMinutes);
     flash('Paramètres enregistrés.');
   }
 
   async function onLockNow(): Promise<void> {
-    await clearStoredSession();
-    cancelAutoLock();
+    await lockVault();
     flash('Coffre verrouillé.');
+  }
+
+  async function onForgetNeverSave(): Promise<void> {
+    const n = await clearNeverSaveHosts();
+    flash(
+      n === 0
+        ? 'Aucun site exclu.'
+        : `${n} site(s) réintégré(s) — l’enregistrement y sera de nouveau proposé.`,
+    );
+  }
+
+  async function onForgetLastUsed(): Promise<void> {
+    await clearLastUsed();
+    flash('Classement d’usage oublié — la liste reprend l’ordre du serveur.');
   }
 
   async function onForgetTwoFa(): Promise<void> {
@@ -174,8 +193,23 @@ function App() {
               </select>
             </label>
             <p class="aide">
-              « Inactivité » : popup non rouverte. À la fermeture du navigateur, le coffre est
-              toujours verrouillé, quel que soit ce réglage.
+              « Inactivité » : aucun changement d’onglet, de fenêtre ni de page, et popup fermée.
+              Naviguer suffit donc à garder le coffre ouvert. Le verrouillage peut tarder d’une
+              minute sur le délai choisi. À la fermeture du navigateur, le coffre est de toute
+              façon verrouillé : la clé ne vit qu’en mémoire.
+            </p>
+            <label class="ligne">
+              <input
+                type="checkbox"
+                checked={settings.lockOnSystemLock}
+                onInput={(e) => patch({ lockOnSystemLock: e.currentTarget.checked })}
+              />
+              Verrouiller aussi quand la session de l’ordinateur se verrouille
+            </label>
+            <p class="aide">
+              Écran de verrouillage, veille, « Win+L » : le coffre se verrouille immédiatement,
+              quel que soit le délai ci-dessus. S’éloigner de sa machine est plus fréquent que
+              fermer son navigateur.
             </p>
             <label>
               Effacement du presse-papiers après une copie
@@ -197,6 +231,27 @@ function App() {
           </div>
         </section>
 
+        <section>
+          <h2>Enregistrement des identifiants</h2>
+          <div class="champs">
+            <label class="ligne">
+              <input
+                type="checkbox"
+                checked={settings.offerToSave}
+                onInput={(e) => patch({ offerToSave: e.currentTarget.checked })}
+              />
+              Proposer d’enregistrer un identifiant saisi sur un site inconnu
+            </label>
+            <p class="aide">
+              Un détecteur observe les formulaires de connexion et signale une saisie par une
+              pastille sur l’icône ; la proposition s’affiche à l’ouverture de la popup. Rien
+              n’est ajouté au coffre sans un clic, rien n’est injecté dans la page, et rien
+              n’est envoyé ailleurs qu’à l’extension. Décoché, le détecteur n’est pas injecté du
+              tout — pas un script silencieux, aucun script.
+            </p>
+          </div>
+        </section>
+
         <button type="submit">Enregistrer</button>
         <p class="statut">{statut}</p>
       </form>
@@ -209,6 +264,12 @@ function App() {
           </button>
           <button class="secondaire" onClick={() => void onForgetTwoFa()}>
             Oublier les dispenses 2FA
+          </button>
+          <button class="secondaire" onClick={() => void onForgetNeverSave()}>
+            Réintégrer les sites exclus
+          </button>
+          <button class="secondaire" onClick={() => void onForgetLastUsed()}>
+            Oublier le classement d’usage
           </button>
         </div>
       </section>

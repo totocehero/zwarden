@@ -26,7 +26,7 @@
     "service_worker": "background.js",
     "type": "module"
   },
-  "permissions": ["storage", "clipboardWrite", "alarms", "activeTab", "scripting"],
+  "permissions": ["storage", "clipboardWrite", "alarms", "idle", "activeTab", "scripting"],
   "host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
   "content_security_policy": {
     "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"

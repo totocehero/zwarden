@@ -115,6 +115,43 @@ export async function hmacSha256(key: Uint8Array | CryptoKey, data: Uint8Array):
   return new Uint8Array(await subtle.sign('HMAC', cryptoKey, asBufferSource(data)));
 }
 
+/** Algorithmes de hachage admis par RFC 6238. */
+export type OtpAlgorithm = 'SHA-1' | 'SHA-256' | 'SHA-512';
+
+/**
+ * Calcule un HMAC pour un code à usage unique (RFC 4226 / 6238).
+ *
+ * **Fonction à usage unique, littéralement.** Elle existe parce que TOTP est
+ * spécifié sur HMAC-SHA1 et que l'immense majorité des sites n'offrent rien
+ * d'autre : refuser SHA-1 ici ne rendrait pas les codes plus sûrs, cela
+ * rendrait le second facteur inutilisable. Le risque de SHA-1 est la
+ * collision ; HMAC n'en dépend pas, et un code de six chiffres valable trente
+ * secondes n'a de toute façon pas la même vie qu'une clé de coffre.
+ *
+ * Elle ne doit **jamais** servir à authentifier une donnée du coffre : c'est
+ * `hmacSha256` et lui seul qui porte « Encrypt-then-MAC », et aucune donnée
+ * chiffrée ne passe par ici.
+ *
+ * @param algorithm Algorithme annoncé par l'URI `otpauth://`.
+ * @param key Secret partagé, déjà décodé.
+ * @param data Compteur sur 8 octets, gros-boutiste.
+ * @returns MAC brut, dont la longueur dépend de l'algorithme.
+ */
+export async function hmacForOtp(
+  algorithm: OtpAlgorithm,
+  key: Uint8Array,
+  data: Uint8Array,
+): Promise<Uint8Array> {
+  const cryptoKey = await subtle.importKey(
+    'raw',
+    asBufferSource(key),
+    { name: 'HMAC', hash: algorithm },
+    false,
+    ['sign'],
+  );
+  return new Uint8Array(await subtle.sign('HMAC', cryptoKey, asBufferSource(data)));
+}
+
 /**
  * Vérifie un HMAC-SHA256 en temps constant.
  *

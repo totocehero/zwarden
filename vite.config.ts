@@ -1,9 +1,15 @@
 /**
  * @file Build de l'extension.
  *
- * Deux entrées : la popup (page HTML) et le service worker (module ES, nommé
- * `background.js` à la racine de `dist/` pour correspondre au manifest).
- * `public/` — manifest inclus — est copié tel quel à la racine de `dist/`.
+ * Quatre entrées : les deux pages HTML (popup, options), le service worker
+ * (module ES, nommé `background.js` à la racine de `dist/` pour correspondre
+ * au manifest) et le détecteur d'identifiants (`content.js`, injecté à la
+ * demande par le worker). `public/` — manifest inclus — est copié tel quel à
+ * la racine de `dist/`.
+ *
+ * Le détecteur ne doit **importer personne** : un script de contenu n'est pas
+ * un module ES, un `import` dans le fichier émis le casserait silencieusement
+ * en production.
  *
  * Charger dans Chrome : `chrome://extensions` → mode développeur → « Charger
  * l'extension non empaquetée » → sélectionner `dist/`.
@@ -31,10 +37,15 @@ export default defineConfig({
         popup: 'src/popup/index.html',
         options: 'src/options/index.html',
         background: 'src/background/main.ts',
+        content: 'src/content/detector.ts',
       },
       output: {
-        entryFileNames: (chunk) =>
-          chunk.name === 'background' ? 'background.js' : 'assets/[name]-[hash].js',
+        entryFileNames: (chunk) => {
+          if (chunk.name === 'background') {
+            return 'background.js';
+          }
+          return chunk.name === 'content' ? 'content.js' : 'assets/[name]-[hash].js';
+        },
       },
     },
   },

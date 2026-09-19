@@ -43,7 +43,7 @@ Le noyau cryptographique est implémenté et testé. Le reste est en cours.
 - [x] `SymmetricCryptoKey` — clés 32/64 octets
 - [x] AES-256-CBC + HMAC-SHA256, Encrypt-then-MAC
 - [x] Dérivation de clé : PBKDF2-SHA256 et Argon2id
-- [x] 225 tests, dont les vecteurs RFC 4231 / 5869 / 7914
+- [x] 267 tests, dont les vecteurs RFC 4231 / 5869 / 6238 / 7914
 - [x] **Interopérabilité validée contre Vaultwarden 2026.6.0** — authentification,
       déchiffrement de la clé de coffre, et aller-retour écriture/lecture complet
 - [x] Client API : prelogin, authentification, rafraîchissement de session,
@@ -64,8 +64,16 @@ Le noyau cryptographique est implémenté et testé. Le reste est en cours.
       d'origine stricte
 - [x] Édition d'items depuis la popup — champs préservés, clé d'item et
       clés d'organisation respectées, historique de mots de passe
-- [ ] TOTP et générateur de mots de passe
-- [ ] Création d'items depuis la popup
+- [x] Items récemment utilisés en tête de liste
+- [x] Proposition d'enregistrer un identifiant saisi sur un site inconnu —
+      pastille sur l'icône, décision dans la popup, rien d'injecté dans la page
+- [x] Codes TOTP sur les lignes du coffre — vecteurs RFC 6238 rejoués
+      (SHA-1/256/512), `otpauth://` analysée, décompte et copie
+- [x] Générateur de mots de passe — tirage sans biais, composition garantie
+- [x] Garde par item (`reprompt`) — un item marqué « redemander le mot de passe
+      maître » ne livre aucun secret sans une nouvelle saisie, vérifiée hors
+      réseau
+- [ ] Création d'items depuis la popup (formulaire complet)
 - [ ] Autofill automatique (détection de formulaire, suggestion en page)
 
 ## Modèle de sécurité
@@ -109,9 +117,11 @@ interopérables dans les deux sens :
 
 ```bash
 npm install
-npm test          # 225 tests
+npm test          # 267 tests
 npm run typecheck # TypeScript strict
+npm run lint      # ESLint : promesses perdues, comparaisons laxistes
 npm run build
+npm run size      # budget de poids de dist/
 ```
 
 ## Documentation
@@ -124,4 +134,4 @@ npm run build
 
 ## Licence
 
-AGPL-3.0-only.
+AGPL-3.0-only — voir [`LICENSE`](LICENSE).

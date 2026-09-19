@@ -14,7 +14,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src tests --ext .ts,.tsx",
+    "lint": "eslint src tests",
     "size": "node scripts/check-size.mjs"
   },
   "devDependencies": {

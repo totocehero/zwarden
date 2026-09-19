@@ -188,6 +188,155 @@ button.discret {
   margin-bottom: 8px;
 }
 
+/* Code à usage unique, sous la ligne de l'item. Chiffres espacés et
+   tabulaires : on les recopie parfois à la main, l'œil ne doit pas glisser. */
+.otp {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 4px 0 2px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  background: #10131a;
+  cursor: pointer;
+}
+
+.otp-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 2px;
+  color: var(--texte);
+}
+
+.otp-fin {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.otp-copie {
+  font-size: 11px;
+  color: var(--texte-2);
+}
+
+.anneau {
+  color: var(--accent);
+  flex: none;
+}
+
+/* Le code va expirer : l'anneau passe à l'alerte plutôt que de disparaître
+   sans prévenir sous les doigts. */
+.anneau-urgent {
+  color: var(--erreur);
+}
+
+.anneau-texte {
+  fill: var(--texte-2);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* La jauge glisse d'une seconde à l'autre au lieu de sauter — sauf si le
+   système demande la sobriété de mouvement. */
+.anneau circle {
+  transition: stroke-dashoffset 0.3s linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .anneau circle {
+    transition: none;
+  }
+}
+
+/* Générateur de mots de passe. */
+.generateur {
+  margin-bottom: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--bord);
+  border-radius: 6px;
+  background: var(--panneau);
+}
+
+.generateur-sortie {
+  padding: 8px;
+  border-radius: 5px;
+  background: #10131a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  user-select: all;
+}
+
+.generateur-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.generateur-longueur {
+  display: block;
+  margin-top: 8px;
+  color: var(--texte-2);
+  font-size: 12px;
+}
+
+.generateur-longueur input {
+  width: 100%;
+}
+
+.generateur-classes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+/* Le dé partage la colonne de l'œil : décalé pour ne pas le recouvrir, et le
+   champ gagne la place des deux boutons. */
+.champ-mdp .de {
+  right: 30px;
+}
+
+.champ-mdp:has(.de) input {
+  padding-right: 58px;
+}
+
+/* Proposition d'enregistrement — au-dessus de la recherche, cadrée pour se
+   distinguer de la liste sans crier : c'est une question, pas une alerte. */
+.proposition {
+  margin-bottom: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--panneau);
+}
+
+.proposition-titre {
+  margin: 0 0 3px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.proposition-detail {
+  margin: 0 0 8px;
+  color: var(--texte-2);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.proposition-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 ul.items {
   list-style: none;
   margin: 0;
@@ -343,4 +492,53 @@ button.chip-collection {
 button.chip-collection:hover {
   background: var(--accent);
   color: #fff;
+}
+
+/* --- Garde « mot de passe maître requis » ---------------------------------
+   Superposition plutôt que bandeau : la demande protège une action précise,
+   et laisser la liste cliquable derrière elle brouillerait ce qu'on confirme. */
+.voile {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: rgb(0 0 0 / 55%);
+  z-index: 10;
+}
+
+.reprompt {
+  width: 100%;
+  max-width: 260px;
+  padding: 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--panneau);
+}
+
+.reprompt-titre {
+  margin: 0 0 3px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.reprompt-detail {
+  margin: 0 0 8px;
+  color: var(--texte-2);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.reprompt-erreur {
+  margin: 6px 0 0;
+  color: var(--erreur);
+  font-size: 12px;
+}
+
+.reprompt-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
 }

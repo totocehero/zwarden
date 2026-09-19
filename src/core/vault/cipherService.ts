@@ -80,11 +80,95 @@ export interface CipherOverview {
    * simple présence des entrées — aucun déchiffrement requis pour la liste.
    */
   readonly hasPasskey: boolean;
+  /**
+   * `true` si l'item porte un secret TOTP. Comme `hasPasskey`, déduit de la
+   * seule présence du champ chiffré : la liste sait donc afficher le bouton
+   * sans déchiffrer un secret que l'utilisateur n'a pas demandé.
+   */
+  readonly hasTotp: boolean;
+  /**
+   * `true` si l'item exige une nouvelle saisie du mot de passe maître avant
+   * de livrer un secret (`reprompt = 1` côté Bitwarden).
+   *
+   * C'est une protection choisie par l'utilisateur, item par item : elle est
+   * portée par l'aperçu — donc disponible sans rien déchiffrer — parce que la
+   * garde doit pouvoir se poser **avant** le déchiffrement, pas après.
+   */
+  readonly reprompt: boolean;
   readonly organizationId: string | null;
   /** Dossier personnel de l'item, ou `null`. Nom à résoudre via `labels.ts`. */
   readonly folderId: string | null;
   /** Collections de l'item. Noms à résoudre via `labels.ts`. */
   readonly collectionIds: readonly string[];
+}
+
+/**
+ * Cherche l'item que des identifiants saisis mettraient à jour.
+ *
+ * Le critère est le couple (origine, identifiant de connexion) : c'est ce qui
+ * distingue « j'ai changé mon mot de passe » de « j'ai un second compte sur
+ * ce site ». Se tromper de sens écraserait un mot de passe encore valide,
+ * d'où un rapprochement volontairement strict — l'origine exacte, jamais le
+ * domaine (`uriMatch.ts`, et §4 de `docs/EXTENSION.md`).
+ *
+ * Un identifiant vide ne rapproche rien : le site ne l'annonçait pas, le
+ * deviner reviendrait à écraser au hasard.
+ *
+ * @param items Items déchiffrés du coffre.
+ * @param origin Origine de la page où la saisie a eu lieu.
+ * @param username Identifiant saisi.
+ * @param matchesOrigin Test de correspondance d'origine (`uriMatch.ts`),
+ *   injecté pour garder ce module sans dépendance sur la couche URI.
+ * @returns L'item à mettre à jour, ou `null` s'il s'agit d'un nouvel item.
+ */
+export function findSaveCandidate(
+  items: readonly CipherOverview[],
+  origin: string,
+  username: string,
+  matchesOrigin: (uris: readonly string[], origin: string) => boolean,
+): CipherOverview | null {
+  const needle = username.trim().toLowerCase();
+  if (needle === '') {
+    return null;
+  }
+  return (
+    items.find(
+      (item) =>
+        item.type === 1 &&
+        item.username !== null &&
+        item.username.trim().toLowerCase() === needle &&
+        matchesOrigin(item.uris, origin),
+    ) ?? null
+  );
+}
+
+/**
+ * Classe les items les plus récemment utilisés en tête.
+ *
+ * Ce qu'on cherche à reproduire est un réflexe : le compte dont on vient de
+ * se servir est celui dont on se resservira. Les items jamais utilisés
+ * gardent leur ordre d'origine — remonter au hasard ceux qu'on n'a jamais
+ * touchés brouillerait le repère plus qu'il ne l'aiderait.
+ *
+ * Tri stable et pur : c'est la même liste, réordonnée, sans effet de bord.
+ *
+ * @param items Items déchiffrés, dans l'ordre du serveur.
+ * @param lastUsed Horodatages de dernier usage, par identifiant.
+ */
+export function sortByLastUsed(
+  items: readonly CipherOverview[],
+  lastUsed: Readonly<Record<string, number>>,
+): readonly CipherOverview[] {
+  const used: CipherOverview[] = [];
+  const rest: CipherOverview[] = [];
+  for (const item of items) {
+    (lastUsed[item.id] === undefined ? rest : used).push(item);
+  }
+  if (used.length === 0) {
+    return items;
+  }
+  used.sort((a, b) => (lastUsed[b.id] ?? 0) - (lastUsed[a.id] ?? 0));
+  return [...used, ...rest];
 }
 
 /**
@@ -166,6 +250,12 @@ export async function decryptCipherOverview(
   const login = readLogin(cipher);
   const hasPasskey =
     (readField<readonly unknown[]>(login, 'fido2Credentials') ?? []).length > 0;
+  const totpField = readField<string>(login, 'totp');
+  const hasTotp = totpField != null && totpField !== '';
+  // 0 = aucune garde, 1 = redemander le mot de passe maître. Toute autre
+  // valeur est traitée comme une garde : se tromper dans ce sens fait
+  // redemander un mot de passe, l'autre livre un secret sans garde.
+  const reprompt = (readField<number>(cipher, 'reprompt') ?? 0) !== 0;
 
   const vide: CipherOverview = {
     id,
@@ -174,6 +264,8 @@ export async function decryptCipherOverview(
     username: null,
     uris: [],
     hasPasskey,
+    hasTotp,
+    reprompt,
     organizationId,
     folderId,
     collectionIds,
@@ -210,6 +302,8 @@ export async function decryptCipherOverview(
     username: username ?? null,
     uris,
     hasPasskey,
+    hasTotp,
+    reprompt,
     organizationId,
     folderId,
     collectionIds,
@@ -312,6 +406,54 @@ export interface CipherEdit {
   readonly totp: string;
   readonly notes: string;
   readonly uris: readonly string[];
+}
+
+/**
+ * Construit le corps d'une **création** d'item de connexion.
+ *
+ * Volontairement plus pauvre que la mise à jour : un item né d'une saisie
+ * capturée n'a ni dossier, ni organisation, ni champs personnalisés, ni
+ * historique. Il est chiffré directement avec la clé du coffre — sans clé
+ * d'item propre — ce qui est la forme que l'aller-retour d'interopérabilité
+ * valide contre un vrai Vaultwarden (`tests/integration`).
+ *
+ * @param edit Valeurs en clair. `totp` et `notes` sont acceptés vides.
+ * @param userKey Clé du coffre.
+ * @returns Corps prêt pour `ApiClient.createCipher`.
+ */
+export async function buildCipherCreatePayload(
+  edit: CipherEdit,
+  userKey: SymmetricCryptoKey,
+): Promise<Record<string, unknown>> {
+  const enc = async (text: string): Promise<string> =>
+    (await encryptString(text, userKey)).toString();
+  const encOrNull = async (text: string): Promise<string | null> =>
+    text === '' ? null : enc(text);
+
+  const uris = await Promise.all(
+    edit.uris
+      .map((uri) => uri.trim())
+      .filter((uri) => uri !== '')
+      .map(async (uri) => ({ uri: await enc(uri), match: null })),
+  );
+
+  return {
+    type: 1,
+    name: await enc(edit.name),
+    notes: await encOrNull(edit.notes),
+    login: {
+      username: await encOrNull(edit.username),
+      password: await encOrNull(edit.password),
+      totp: await encOrNull(edit.totp),
+      uris,
+    },
+    favorite: false,
+    folderId: null,
+    organizationId: null,
+    reprompt: 0,
+    fields: [],
+    passwordHistory: [],
+  };
 }
 
 /** Nombre d'entrées conservées dans l'historique de mots de passe. */

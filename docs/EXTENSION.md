@@ -36,14 +36,50 @@ KDF refusé : chaque cas a son message. Le routage se fait sur le champ
 ## 2. Cycle de verrouillage
 
 - L'état déverrouillé vit dans `chrome.storage.session` (mémoire seulement) :
-  fermeture du navigateur ⇒ verrouillage, gratuitement.
-- Minuteur d'inactivité via `chrome.alarms` — le seul mécanisme qui survit à la
-  mort du service worker MV3 — configurable, avec verrouillage manuel toujours
-  accessible.
-- Verrouiller = `userKey.destroy()` **et** purge de `chrome.storage.session`.
-  Les deux, systématiquement.
+  fermeture du navigateur ⇒ verrouillage, gratuitement. **C'est le défaut** —
+  `autoLockMinutes = 0` — et c'est le comportement attendu par qui vient de
+  l'extension officielle.
+- Un délai d'inactivité optionnel se superpose à cette garantie. « Inactivité »
+  signifie *navigateur* inactif, pas *popup* fermée : un utilisateur qui change
+  d'onglet et navigue est actif. Compter le temps depuis la dernière ouverture
+  de popup redemandait le mot de passe en plein travail — le reproche récurrent
+  fait à la version précédente.
+- Le service worker en est le seul propriétaire (`background/main.ts`) : il
+  écoute `tabs.onActivated`, `windows.onFocusChanged` et `tabs.onUpdated` (sur
+  l'onglet au premier plan uniquement, pour qu'une page d'arrière-plan qui se
+  rafraîchit ne maintienne pas le coffre ouvert), et enregistre un horodatage
+  dans `chrome.storage.session`. La popup ouverte y ajoute son propre battement.
+- L'alarme `chrome.alarms` — le seul minuteur qui survit à la mort du service
+  worker MV3 — est un **battement d'une minute**, pas une échéance : la
+  recréer à chaque événement d'activité se heurterait à la limitation de débit.
+  Contrepartie assumée : le verrouillage peut tarder d'au plus une minute.
+  La règle de décision est `shouldAutoLock()`, pure et testée.
+- Le verrouillage de la session du système (`chrome.idle`, état `locked` :
+  écran de verrouillage, veille) verrouille immédiatement, quel que soit le
+  délai — c'est ce filet qui rend le défaut « fermeture du navigateur »
+  tenable, puisqu'on s'éloigne d'une machine bien plus souvent qu'on ne ferme
+  son navigateur. Réglage `lockOnSystemLock`, activé par défaut. L'état `idle`
+  (aucune saisie depuis quelques minutes) ne verrouille **pas** : il ne dit
+  rien de la présence de l'utilisateur, qui peut lire son écran.
+- Verrouiller = `userKey.destroy()` **et** purge de `chrome.storage.session`
+  **et** purge de l'état de la popup. Les trois, systématiquement, et d'un seul
+  geste : `lockVault()` porte la liste du stockage, `resetVaultState()` celle de
+  la mémoire. La seconde n'est pas cosmétique — le code à usage unique affiché
+  retient le secret TOTP déchiffré *et* un minuteur qui le recalcule chaque
+  seconde, le générateur retient sa production, et le formulaire d'édition le
+  mot de passe de l'item ouvert. Rien de tout cela n'est visible après
+  verrouillage : c'est précisément ce qui rend l'oubli facile.
+- Limite du filet « session du système verrouillée » : il dépend de la remontée
+  de l'état `locked` par `chrome.idle`, que tous les environnements de bureau
+  n'émettent pas (notamment selon le gestionnaire de session sous Linux). Là où
+  l'événement ne vient pas, le défaut `autoLockMinutes = 0` laisse le coffre
+  ouvert tant que le navigateur vit — un délai d'inactivité explicite est alors
+  le seul recours.
 - Le jeton d'accès expirant (~1 h) se renouvelle par `refreshToken()` — jamais
-  en redemandant le mot de passe.
+  en redemandant le mot de passe. Les jetons renouvelés sont enregistrés
+  **avant** l'écriture qu'ils autorisent : un serveur qui fait tourner les
+  jetons de rafraîchissement a déjà invalidé l'ancien, et ne rien enregistrer
+  ferait payer un échec réseau d'un déverrouillage complet.
 
 ## 3. Popup — deux vues commutables
 
@@ -65,6 +101,41 @@ Règles communes :
   de secrets en clair simultanément.
 - **Presse-papiers effacé ~30 s** après la copie d'un secret.
 - Mot de passe masqué par défaut ; révélation sur geste explicite.
+- **Garde par item (`reprompt`).** Un item marqué « redemander le mot de passe
+  maître » côté Bitwarden ne livre rien — copie, révélation, code à usage
+  unique, remplissage, édition — sans une nouvelle saisie. Trois points de
+  conception :
+  - la garde se pose **avant** `detailsOf`, donc avant tout déchiffrement : un
+    secret protégé n'est pas déchiffré puis caché, il n'est pas déchiffré ;
+  - `reprompt` est porté par `CipherOverview`, précisément pour que la garde
+    soit lisible sans rien déchiffrer ;
+  - la vérification est **hors réseau** : la clé maître est redérivée depuis la
+    saisie et comparée au hash local conservé au déverrouillage
+    (`verifyLocalPasswordHash`, comparaison à temps constant). Faire valider un
+    `reprompt` par le serveur donnerait à qui contrôle le réseau le pouvoir de
+    le désarmer.
+
+  Refermer un code ou masquer un mot de passe n'est pas gardé : seule la sortie
+  d'un secret l'est.
+- **Code à usage unique sur la ligne.** Les items porteurs d'un secret TOTP
+  affichent un bouton horloge ; un clic déchiffre le secret, affiche le code
+  avec son décompte et le copie. Le code est **recalculé** à chaque seconde à
+  partir de l'horloge, jamais décompté : un minuteur JavaScript dérive, et la
+  popup peut être gelée — afficher un code périmé serait pire que ne rien
+  afficher. `hasTotp` se déduit de la présence du champ chiffré, donc la liste
+  sait où poser le bouton sans déchiffrer un secret que personne n'a demandé.
+- **Générateur de mots de passe** (`core/generator`), ouvert depuis l'en-tête
+  ou depuis le champ mot de passe de l'édition — même panneau, deux points
+  d'entrée. Tirage sans biais de modulo (rejet de la tranche incomplète),
+  un caractère garanti par classe cochée, puis mélange. Options persistées à
+  part des paramètres d'application : la popup et la page d'options
+  n'écrivent pas dans le même objet.
+- **Les items récemment utilisés remontent en tête.** Copier, révéler ou
+  remplir note l'usage (`markUsed`) ; l'ordre est appliqué à l'ouverture
+  (`sortByLastUsed`), jamais pendant que la popup est ouverte — un item qui
+  remonterait sous le curseur ferait cliquer à côté la fois suivante. Les
+  items jamais utilisés gardent l'ordre du serveur. Le journal est plafonné à
+  100 entrées et effaçable depuis les options.
 
 ## 4. Autofill — règles non négociables
 
@@ -93,11 +164,53 @@ l'origine de l'item correspond à celle de l'onglet (`uriMatch.ts`), et
 revérifiée au moment du clic. Restent pour la v2 : le détecteur en page, la
 suggestion inline et les iframes.
 
-## 4 bis. Raccourcis clavier — parité avec l'extension officielle
+## 4 bis. Proposer d'enregistrer un identifiant saisi
 
-Pour que la vue « Bitwarden-like » aille au bout de sa promesse, les
-raccourcis par défaut reprennent ceux de l'extension officielle (relevés dans
-son manifest 2026.7.0) :
+Trois acteurs, aux rôles volontairement disjoints — c'est le découpage qui
+tient la promesse, pas la bonne volonté de chacun :
+
+| Acteur | Voit | Décide |
+|---|---|---|
+| `content/detector.ts` | Ce que l'utilisateur tape dans la page | Rien — il transmet |
+| Service worker | Le réglage, l'état du coffre, la liste d'exclusion | S'il faut *retenir* la capture |
+| Popup | Le coffre déchiffré | S'il faut *proposer*, et quoi |
+
+Le détecteur n'a pas la clé et ne connaît pas le coffre ; le worker non plus.
+Seule la popup peut dire « ce mot de passe y est déjà » — d'où le fait qu'elle
+tranche, à son ouverture, entre trois issues : rien à proposer (même
+identifiant, même mot de passe sur cette origine — la connexion ordinaire,
+passée sous silence, sans quoi la pastille s'allumerait à chaque connexion et
+ne voudrait plus rien dire), mise à jour, ou création.
+
+- **Signal unique : une pastille sur l'icône.** Rien n'est injecté dans la
+  page — pas de barre, pas de CSS à isoler, aucune interface qu'un site
+  hostile puisse lire, recouvrir ou imiter. Contrepartie assumée : il faut
+  ouvrir la popup pour voir la proposition.
+- **Détecteur enregistré dynamiquement** (`chrome.scripting`), pas déclaré
+  dans le manifest : réglage décoché, il n'y a aucun script dans les pages —
+  pas un script qui se tait. La différence entre une promesse et une garantie.
+- **Rien ne part sans un clic.** La capture attend ; « Ignorer » la jette,
+  « Ne plus proposer ici » ajoute l'hôte à une liste d'exclusion locale.
+- **Coffre verrouillé : la capture est refusée**, pas mise en file. Garder un
+  mot de passe en clair en mémoire pendant que tout le reste est purgé
+  contredirait le §2.
+- **Mise à jour non destructrice.** Seul le mot de passe change ; nom,
+  dossier, notes, TOTP et champs personnalisés sont repris, et l'ancien mot de
+  passe rejoint l'historique.
+- **Rapprochement par origine stricte** (`findSaveCandidate`), jamais par
+  domaine : un rapprochement laxiste n'afficherait pas une mauvaise ligne, il
+  écraserait un mot de passe valide depuis un site voisin.
+
+Limites connues : cadre principal seulement, et les connexions sans `<form>`
+ni bouton identifiable échappent au détecteur. Un identifiant manqué se
+rattrape à la main ; un identifiant capturé à tort ne coûte qu'un « Ignorer ».
+
+## 4 ter. Raccourcis clavier — parité avec l'extension officielle
+
+**Cible, non encore implémentée** — aucune section `commands` dans le manifest
+à ce stade. Pour que la vue « Bitwarden-like » aille au bout de sa promesse,
+les raccourcis par défaut reprendront ceux de l'extension officielle (relevés
+dans son manifest 2026.7.0) :
 
 | Commande | Raccourci |
 |---|---|
@@ -106,7 +219,7 @@ son manifest 2026.7.0) :
 | Générer un mot de passe | `Ctrl+Shift+9` |
 | Verrouiller le coffre | sans défaut, configurable |
 
-## 4 ter. Manifest — notes relevées sur l'extension officielle
+## 4 quater. Manifest — notes relevées sur l'extension officielle
 
 - **CSP** : exécuter du WASM en MV3 exige
   `script-src 'self' 'wasm-unsafe-eval'`. Le module Argon2id (hash-wasm) en a
@@ -114,9 +227,13 @@ son manifest 2026.7.0) :
   production alors qu'il passe en tests Node.
 - **Permissions** : l'officielle demande 16 permissions dont `webRequest`,
   `tabs`, `unlimitedStorage` et `http(s)://*/*`. Zwarden vise le minimum :
-  `storage`, `alarms`, `activeTab`, `scripting`, `clipboardWrite`, plus les
-  hôtes strictement nécessaires à l'autofill — et le modèle
-  `optional_permissions` pour le reste.
+  `storage`, `alarms`, `idle`, `activeTab`, `scripting`, `clipboardWrite`,
+  plus les hôtes strictement nécessaires à l'autofill — et le modèle
+  `optional_permissions` pour le reste. `idle` ne donne que les transitions
+  actif / inactif / verrouillé de la session : elle sert au verrouillage sur
+  écran verrouillé, rien d'autre. Le suivi de l'activité de navigation se
+  contente des événements `tabs` et `windows` accessibles sans permission —
+  d'où l'absence de `tabs`, dont l'unique apport serait de lire les URL.
 - **Presse-papiers** : l'effacement différé du presse-papiers passe par un
   document offscreen (`offscreen`), le service worker MV3 n'ayant pas accès au
   DOM.

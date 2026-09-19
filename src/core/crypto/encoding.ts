@@ -123,6 +123,55 @@ export function fromBase64Js(padded: string): Uint8Array {
   return out;
 }
 
+/** Alphabet base32, RFC 4648 — celui des secrets TOTP. */
+const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+/** Levée par {@link fromBase32} sur un caractère hors alphabet. */
+export class Base32Error extends Error {
+  override readonly name = 'Base32Error';
+  readonly code = 'base32-invalid';
+}
+
+/**
+ * Décode du base32 (RFC 4648).
+ *
+ * Utilisé pour les seuls secrets TOTP, que les sites publient dans cet
+ * alphabet. Tolérant sur la forme — casse indifférente, espaces et tirets
+ * ignorés, padding facultatif — parce que ces secrets sont recopiés à la main
+ * depuis une page web ou lus dans un QR code, et qu'un « 2FA cassé » pour un
+ * espace de trop serait incompréhensible. Strict, en revanche, sur
+ * l'alphabet : un caractère étranger signale une erreur de recopie, pas une
+ * variante de forme.
+ *
+ * @param input Chaîne base32.
+ * @returns Octets décodés.
+ * @throws {Base32Error} Caractère hors alphabet.
+ */
+export function fromBase32(input: string): Uint8Array {
+  const normalized = input.replace(/[\s-]/g, '').replace(/=+$/, '').toUpperCase();
+  const out = new Uint8Array(Math.floor((normalized.length * 5) / 8));
+
+  let buffer = 0;
+  let bits = 0;
+  let written = 0;
+  for (const char of normalized) {
+    const value = BASE32_ALPHABET.indexOf(char);
+    if (value === -1) {
+      throw new Base32Error(`Caractère hors alphabet base32 : ${JSON.stringify(char)}`);
+    }
+    buffer = (buffer << 5) | value;
+    bits += 5;
+    if (bits >= 8) {
+      bits -= 8;
+      out[written] = (buffer >> bits) & 0xff;
+      written += 1;
+    }
+  }
+  // Les bits restants (< 8) sont le rembourrage de la dernière lettre : les
+  // ignorer est ce que prescrit la RFC.
+  return out.subarray(0, written);
+}
+
 const UTF8_ENCODER = /* @__PURE__ */ new TextEncoder();
 const UTF8_DECODER = /* @__PURE__ */ new TextDecoder('utf-8', { fatal: false });
 

@@ -35,6 +35,23 @@ passe en extension. Les énoncer évite de fausses attentes.
 - **Métadonnées.** Le serveur connaît le nombre d'items, leurs dates de
   modification et leur taille approximative. Ces informations ne sont pas
   chiffrées dans le format Bitwarden.
+- **Traces locales d'usage.** Le classement « dernier utilisé » persiste sur
+  disque des identifiants d'items (UUID opaques) et des horodatages — jamais
+  un nom, une URL, un identifiant de connexion ni un secret. Qui lit le profil
+  du navigateur apprend qu'un item a servi à telle heure, pas lequel. La liste
+  des sites exclus de la proposition d'enregistrement, elle, est en clair :
+  ce sont des noms d'hôtes que l'utilisateur a lui-même désignés.
+- **Identifiant capturé, en mémoire.** Entre une saisie et la décision de
+  l'utilisateur, un mot de passe en clair attend dans
+  `chrome.storage.session` : même stockage que la clé du coffre, même purge —
+  verrouillage, fermeture du navigateur — plus une expiration de 10 minutes.
+  Il n'atteint jamais le disque.
+- **Hash local du mot de passe maître, en mémoire.** La session déverrouillée
+  conserve `localPasswordHash` afin de vérifier une nouvelle saisie hors réseau
+  (garde `reprompt`, §7). Il ne peut pas être rejoué auprès du serveur — son
+  nombre d'itérations diffère du hash d'autorisation — et il vit dans le même
+  stockage mémoire que la clé du coffre, laquelle est strictement plus
+  sensible : cette conservation n'ouvre aucune surface nouvelle.
 
 ---
 
@@ -255,6 +272,33 @@ Voir §3.
 
 Format obsolète. Le coffre doit être ré-chiffré. Aucun coffre actif connu ne
 l'utilise encore.
+
+### SHA-1 : une seule porte, et elle ne donne pas sur le coffre
+
+`hmacForOtp` est le seul point du code où SHA-1 apparaît, et il ne sert qu'aux
+codes à usage unique (RFC 6238). Ce n'est pas une concession : TOTP est
+spécifié sur HMAC-SHA1, l'immense majorité des sites n'offre rien d'autre, et
+le refuser rendrait le second facteur inutilisable sans rien sécuriser. Le
+risque de SHA-1 est la collision ; HMAC n'en dépend pas.
+
+Aucune donnée chiffrée ne passe par cette fonction : « Encrypt-then-MAC » reste
+porté par `hmacSha256`, et lui seul. La séparation est dans les noms comme dans
+les appels — un HMAC de coffre calculé avec `hmacForOtp` se verrait à la
+relecture.
+
+### Vérifier le mot de passe maître sans réseau
+
+`unlock()` produit deux hashs indépendants : l'un autorise auprès du serveur,
+l'autre reste local. Le second sert à revalider une saisie lorsqu'un item exige
+de redemander le mot de passe maître (`reprompt`, `docs/EXTENSION.md` §3) : on
+redérive la clé maître depuis la saisie, on recalcule le hash local, et on
+compare avec `timingSafeEqual`. La clé maître redérivée est détruite aussitôt.
+
+Deux raisons de ne pas passer par le serveur. D'abord un `reprompt` doit
+fonctionner hors ligne, comme le reste du coffre en cache. Ensuite, faire
+valider la garde à distance donnerait à qui contrôle le réseau le pouvoir de la
+désarmer — une réponse « mot de passe correct » suffirait. La garde est locale
+parce que ce qu'elle protège est local.
 
 ---
 

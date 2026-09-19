@@ -89,11 +89,33 @@ describe('cipherService', () => {
       username: 'alice@exemple.fr',
       uris: ['https://banque.exemple.fr'],
       hasPasskey: false,
+      // L'item de test porte un TOTP : détecté sans être déchiffré.
+      hasTotp: true,
+      reprompt: false,
       organizationId: null,
       folderId: null,
       collectionIds: [],
     });
     expect(erreurs).toHaveLength(0);
+  });
+
+  /**
+   * `reprompt` est une garde choisie par l'utilisateur : la popup refuse de
+   * livrer un secret sans une nouvelle saisie du mot de passe maître. Elle
+   * doit donc être lisible **sans** déchiffrement, et toute valeur non nulle
+   * doit protéger — se tromper dans ce sens redemande un mot de passe,
+   * l'inverse livre un secret sans garde.
+   */
+  it('repère la garde de mot de passe maître sans déchiffrer', async () => {
+    const base = await makeCipher(userKey);
+    const lire = async (reprompt: unknown): Promise<boolean> =>
+      (await decryptCipherOverview({ ...base, reprompt } as CipherResponse, userKey, () => {}))
+        .reprompt;
+
+    expect(await lire(undefined)).toBe(false);
+    expect(await lire(0)).toBe(false);
+    expect(await lire(1)).toBe(true);
+    expect(await lire(2)).toBe(true);
   });
 
   it('déchiffre les détails à la demande', async () => {

@@ -1,0 +1,29 @@
+# Vérifications de base sur chaque poussée et chaque demande de fusion.
+#
+# Les quatre commandes sont celles qu'un contributeur lance en local, dans le
+# même ordre : rien à découvrir dans ce fichier qui ne soit pas dans le README.
+# Le budget de poids en fait partie — une extension qui grossit le fait par
+# petits ajouts dont aucun ne semble coûteux, et c'est cette accumulation que
+# la vérification attrape.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  verifier:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: npm run size
