@@ -203,6 +203,171 @@
   "editPasskeyNote": {
     "message": "Passkey conservée telle quelle — la signature WebAuthn arrivera dans une prochaine version."
   },
+  "newItem": {
+    "message": "Nouveau"
+  },
+  "newItemTitle": {
+    "message": "Créer un élément"
+  },
+  "newItemType": {
+    "message": "Type"
+  },
+  "typeLogin": {
+    "message": "Identifiant"
+  },
+  "typeCard": {
+    "message": "Carte bancaire"
+  },
+  "typeIdentity": {
+    "message": "Identité"
+  },
+  "typeNote": {
+    "message": "Note sécurisée"
+  },
+  "typeSshKey": {
+    "message": "Clé SSH"
+  },
+  "itemShowDetails": {
+    "message": "Afficher le détail"
+  },
+  "itemHideDetails": {
+    "message": "Masquer le détail"
+  },
+  "itemCopyField": {
+    "message": "Copier : $1"
+  },
+  "itemFieldCopied": {
+    "message": "$1 copié"
+  },
+  "itemNotes": {
+    "message": "Notes"
+  },
+  "itemReveal": {
+    "message": "Révéler"
+  },
+  "itemConceal": {
+    "message": "Masquer"
+  },
+  "cardSection": {
+    "message": "Carte"
+  },
+  "cardNumber": {
+    "message": "Numéro"
+  },
+  "cardNumberPlaceholder": {
+    "message": "4242 4242 4242 4242"
+  },
+  "cardholderName": {
+    "message": "Titulaire"
+  },
+  "cardBrand": {
+    "message": "Réseau"
+  },
+  "cardBrandAuto": {
+    "message": "Déduit du numéro"
+  },
+  "cardExpiry": {
+    "message": "Expire"
+  },
+  "cardExpMonth": {
+    "message": "Mois"
+  },
+  "cardExpYear": {
+    "message": "Année"
+  },
+  "cardCode": {
+    "message": "Cryptogramme"
+  },
+  "cardCodeHint": {
+    "message": "$1 chiffres"
+  },
+  "cardExpired": {
+    "message": "Expirée"
+  },
+  "cardExpiresSoon": {
+    "message": "Expire bientôt"
+  },
+  "cardCheckDigitFailed": {
+    "message": "Ce numéro ne passe pas sa clé de contrôle : un chiffre est faux, ou deux sont intervertis."
+  },
+  "cardCheckDigitOk": {
+    "message": "Clé de contrôle valide"
+  },
+  "identitySection": {
+    "message": "Identité"
+  },
+  "identityGroupName": {
+    "message": "Nom"
+  },
+  "identityGroupContact": {
+    "message": "Contact"
+  },
+  "identityGroupAddress": {
+    "message": "Adresse"
+  },
+  "identityGroupDocuments": {
+    "message": "Papiers"
+  },
+  "identityFullName": {
+    "message": "Nom complet"
+  },
+  "identityFullAddress": {
+    "message": "Adresse postale"
+  },
+  "identityTitle": {
+    "message": "Civilité"
+  },
+  "identityFirstName": {
+    "message": "Prénom"
+  },
+  "identityMiddleName": {
+    "message": "Deuxième prénom"
+  },
+  "identityLastName": {
+    "message": "Nom"
+  },
+  "identityCompany": {
+    "message": "Société"
+  },
+  "identityEmail": {
+    "message": "Courriel"
+  },
+  "identityPhone": {
+    "message": "Téléphone"
+  },
+  "identityUsername": {
+    "message": "Identifiant"
+  },
+  "identityAddress1": {
+    "message": "Adresse, ligne 1"
+  },
+  "identityAddress2": {
+    "message": "Adresse, ligne 2"
+  },
+  "identityAddress3": {
+    "message": "Adresse, ligne 3"
+  },
+  "identityCity": {
+    "message": "Ville"
+  },
+  "identityState": {
+    "message": "Région"
+  },
+  "identityPostalCode": {
+    "message": "Code postal"
+  },
+  "identityCountry": {
+    "message": "Pays"
+  },
+  "identitySsn": {
+    "message": "Numéro de sécurité sociale"
+  },
+  "identityPassportNumber": {
+    "message": "Numéro de passeport"
+  },
+  "identityLicenseNumber": {
+    "message": "Numéro de permis"
+  },
   "genOutputTitle": {
     "message": "Cliquer pour copier"
   },

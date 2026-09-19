@@ -28,5 +28,5 @@
       "@shared/*": ["src/shared/*"]
     }
   },
-  "include": ["src", "tests", "vite.config.ts", "scripts"]
+  "include": ["src", "tests", "vite.config.ts", "vitest.config.ts", "scripts"]
 }

@@ -32,6 +32,7 @@ import {
 import { SymmetricCryptoKey } from '../src/core/crypto/symmetricCryptoKey.js';
 import {
   type CipherOverview,
+  buildCipherCreatePayload,
   buildCipherUpdatePayload,
   decryptCipherDetails,
   decryptCipherList,
@@ -88,6 +89,8 @@ describe('cipherService', () => {
       type: 1,
       name: 'Ma banque',
       username: 'alice@exemple.fr',
+      // A login identifies itself by its username: no subtitle to add.
+      subtitle: null,
       uris: ['https://banque.exemple.fr'],
       hasPasskey: false,
       // The test item carries a TOTP: detected without being decrypted.
@@ -131,6 +134,8 @@ describe('cipherService', () => {
       totp: 'otpauth://totp/x',
       notes: 'private notes',
       passkeys: [],
+      card: null,
+      identity: null,
     });
     expect(errors).toHaveLength(0);
   });
@@ -394,6 +399,32 @@ describe('item update (buildCipherUpdatePayload)', () => {
 
     expect(payload['organizationId']).toBe('org-9');
     expect(await dec(payload['name'], orgKey)).toBe('Nouveau nom');
+  });
+
+  /**
+   * The same class of bug as the erased passkeys, on every non-login type.
+   *
+   * An update replaces the whole item server-side. The payload only ever built a
+   * `login` section, so renaming a card — or simply editing its notes — sent a
+   * body with no `card` at all, and the server dropped the number, the holder
+   * and the expiry. Silent, irreversible, and triggered by the most innocuous
+   * edit there is.
+   */
+  it.each([
+    ['card', 3, 'card', { number: 'enc-number', cardholderName: 'enc-holder' }],
+    ['identity', 4, 'identity', { firstName: 'enc-first', ssn: 'enc-ssn' }],
+    ['secure note', 2, 'secureNote', { type: 0 }],
+    ['SSH key', 5, 'sshKey', { privateKey: 'enc-private' }],
+  ])('preserves the %s section during an edit', async (_label, type, section, content) => {
+    const existing = {
+      ...(await rawCipher(userKey)),
+      type,
+      [section]: content,
+    } as unknown as CipherResponse;
+
+    const payload = await buildCipherUpdatePayload(existing, EDIT, userKey, false);
+
+    expect(payload[section]).toEqual(content);
   });
 
   it('preserves passkeys as-is during an edit', async () => {
@@ -873,5 +904,297 @@ describe('unlock (the unlock orchestrator)', () => {
     ).catch((e: unknown) => e);
 
     expect(erreur).toBeInstanceOf(MacMismatchError);
+  });
+});
+
+/**
+ * Cards and identities, end to end.
+ *
+ * What is checked here is the round trip — a section written by the editor comes
+ * back through decryption unchanged — and the promise the list makes: that a
+ * card is identifiable in it **without** the chargeable number ever being held.
+ */
+describe('cards and identities', () => {
+  let key: SymmetricCryptoKey;
+
+  beforeAll(() => {
+    key = SymmetricCryptoKey.generate();
+  });
+
+  const CARD = {
+    cardholderName: 'Ada Lovelace',
+    brand: 'Visa',
+    number: '4242424242424242',
+    expMonth: '4',
+    expYear: '2030',
+    code: '123',
+  };
+
+  const IDENTITY = {
+    title: 'Dr',
+    firstName: 'Ada',
+    middleName: 'King',
+    lastName: 'Lovelace',
+    company: 'Analytical Engines',
+    email: 'ada@example.org',
+    phone: '+33100000000',
+    username: 'ada',
+    address1: '12 rue de la Paix',
+    address2: '',
+    address3: '',
+    city: 'Paris',
+    state: '',
+    postalCode: '75002',
+    country: 'France',
+    ssn: '1 85 12 75 123 456',
+    passportNumber: '20AB12345',
+    licenseNumber: 'B-123456',
+  };
+
+  /** Encrypts every field of a section, as the server stores it. */
+  async function encSection(values: Record<string, string>): Promise<Record<string, string>> {
+    const entries = await Promise.all(
+      Object.entries(values)
+        .filter(([, value]) => value !== '')
+        .map(async ([field, value]) => [field, await enc(value, key)] as const),
+    );
+    return Object.fromEntries(entries);
+  }
+
+  async function cardCipher(): Promise<CipherResponse> {
+    return {
+      id: 'card-1',
+      type: 3,
+      name: await enc('Carte bleue', key),
+      card: await encSection(CARD),
+      organizationId: null,
+    } as unknown as CipherResponse;
+  }
+
+  async function identityCipher(): Promise<CipherResponse> {
+    return {
+      id: 'id-1',
+      type: 4,
+      name: await enc('Papiers', key),
+      identity: await encSection(IDENTITY),
+      organizationId: null,
+    } as unknown as CipherResponse;
+  }
+
+  it('identifies a card in the list by its brand and its last four digits', async () => {
+    const overview = await decryptCipherOverview(await cardCipher(), key, () => {
+      throw new Error('no error expected');
+    });
+    expect(overview.subtitle).toBe('Visa \u2022\u2022\u2022\u2022 4242');
+  });
+
+  it('never lets the full number into the list view', async () => {
+    const overview = await decryptCipherOverview(await cardCipher(), key, () => undefined);
+    // The whole point of the subtitle: what the popup holds for the session is
+    // the masked form, never a number that could be charged.
+    expect(JSON.stringify(overview)).not.toContain('4242424242424242');
+  });
+
+  it('derives the brand from the number rather than trusting what was stored', async () => {
+    const cipher = await cardCipher();
+    // A vault imported from elsewhere can carry a brand that contradicts the
+    // number; the number is the one that decides.
+    (cipher as unknown as Record<string, Record<string, string>>)['card']!['brand'] = await enc(
+      'Mastercard',
+      key,
+    );
+    const overview = await decryptCipherOverview(cipher, key, () => undefined);
+    expect(overview.subtitle).toBe('Visa \u2022\u2022\u2022\u2022 4242');
+  });
+
+  it('identifies an identity in the list by its name', async () => {
+    const overview = await decryptCipherOverview(await identityCipher(), key, () => undefined);
+    expect(overview.subtitle).toBe('Ada Lovelace');
+  });
+
+  it('decrypts every field of a card on demand', async () => {
+    const details = await decryptCipherDetails(await cardCipher(), key, () => undefined);
+    expect(details.card).toEqual(CARD);
+    expect(details.identity).toBeNull();
+  });
+
+  it('decrypts every field of an identity on demand', async () => {
+    const details = await decryptCipherDetails(await identityCipher(), key, () => undefined);
+    expect(details.identity).toEqual({
+      ...IDENTITY,
+      address2: null,
+      address3: null,
+      state: null,
+    });
+    expect(details.card).toBeNull();
+  });
+
+  const EDIT = {
+    name: 'Carte bleue',
+    username: '',
+    password: '',
+    totp: '',
+    notes: '',
+    uris: [],
+  };
+
+  /** Decrypts a section of a payload back to cleartext. */
+  async function readSection(section: unknown): Promise<Record<string, string | null>> {
+    const entries = await Promise.all(
+      Object.entries(section as Record<string, string | null>).map(
+        async ([field, value]) =>
+          [field, await decryptStringOrNull(value ?? undefined, key, () => undefined)] as const,
+      ),
+    );
+    return Object.fromEntries(entries);
+  }
+
+  it('re-encrypts an edited card and reads it back unchanged', async () => {
+    const edited = { ...CARD, number: '5555555555554444', code: '999' };
+    const payload = await buildCipherUpdatePayload(
+      await cardCipher(),
+      { ...EDIT, card: edited },
+      key,
+      false,
+    );
+    expect(await readSection(payload['card'])).toEqual(edited);
+  });
+
+  it('re-encrypts an edited identity and reads it back unchanged', async () => {
+    const edited = { ...IDENTITY, city: 'Lyon' };
+    const payload = await buildCipherUpdatePayload(
+      await identityCipher(),
+      { ...EDIT, identity: edited },
+      key,
+      false,
+    );
+    expect(await readSection(payload['identity'])).toEqual({
+      ...edited,
+      address2: null,
+      address3: null,
+      state: null,
+    });
+  });
+
+  it('carries the stored card over when the editor says nothing about it', async () => {
+    const cipher = await cardCipher();
+    const payload = await buildCipherUpdatePayload(cipher, EDIT, key, false);
+    expect(payload['card']).toBe(
+      (cipher as unknown as Record<string, unknown>)['card'],
+    );
+  });
+
+  it('creates a card, with no login section', async () => {
+    const payload = await buildCipherCreatePayload({ ...EDIT, type: 3, card: CARD }, key);
+    expect(payload['type']).toBe(3);
+    expect(payload['login']).toBeUndefined();
+    expect(await readSection(payload['card'])).toEqual(CARD);
+  });
+
+  it('creates an identity, with no login section', async () => {
+    const payload = await buildCipherCreatePayload({ ...EDIT, type: 4, identity: IDENTITY }, key);
+    expect(payload['type']).toBe(4);
+    expect(payload['login']).toBeUndefined();
+  });
+
+  it('creates a secure note with the sub-object the API demands', async () => {
+    const payload = await buildCipherCreatePayload({ ...EDIT, type: 2 }, key);
+    expect(payload['secureNote']).toEqual({ type: 0 });
+  });
+
+  it('still creates a login by default', async () => {
+    const payload = await buildCipherCreatePayload(EDIT, key);
+    expect(payload['type']).toBe(1);
+    expect(payload['login']).toBeDefined();
+  });
+});
+
+/**
+ * What a rewrite must not drop.
+ *
+ * An update replaces the item whole, so every field the editor does not know
+ * about has to be carried across explicitly. This is the failure that erased
+ * passkeys once and wiped whole card sections a second time; these tests are
+ * what stops it happening a third.
+ */
+describe('rewriting preserves what it does not edit', () => {
+  let key: SymmetricCryptoKey;
+
+  beforeAll(() => {
+    key = SymmetricCryptoKey.generate();
+  });
+
+  const EDIT = {
+    name: 'Renamed',
+    username: 'alice',
+    password: 'secret',
+    totp: '',
+    notes: '',
+    uris: [],
+  };
+
+  it('keeps login settings the form never shows', async () => {
+    const cipher = {
+      id: 'x',
+      type: 1,
+      name: await enc('Before', key),
+      login: {
+        username: await enc('alice', key),
+        password: await enc('secret', key),
+        // Set in another client, invisible here — and lost until now on any
+        // edit, including a rename.
+        autofillOnPageLoad: true,
+        passwordRevisionDate: '2024-01-01T00:00:00Z',
+      },
+      organizationId: null,
+    } as unknown as CipherResponse;
+
+    const payload = await buildCipherUpdatePayload(cipher, EDIT, key, false);
+    const login = payload['login'] as Record<string, unknown>;
+    expect(login['autofillOnPageLoad']).toBe(true);
+    expect(login['passwordRevisionDate']).toBe('2024-01-01T00:00:00Z');
+  });
+
+  it('keeps a card field this version has never heard of', async () => {
+    const cipher = {
+      id: 'x',
+      type: 3,
+      name: await enc('Card', key),
+      card: { number: await enc('4242424242424242', key), futureField: 'opaque' },
+      organizationId: null,
+    } as unknown as CipherResponse;
+
+    const card = {
+      cardholderName: 'Ada',
+      brand: '',
+      number: '4242424242424242',
+      expMonth: '4',
+      expYear: '2030',
+      code: '123',
+    };
+    const payload = await buildCipherUpdatePayload(cipher, { ...EDIT, card }, key, false);
+    expect((payload['card'] as Record<string, unknown>)['futureField']).toBe('opaque');
+  });
+
+  it('does not send the same field twice when the cache holds PascalCase', async () => {
+    const cipher = {
+      id: 'x',
+      type: 3,
+      name: await enc('Card', key),
+      Card: { Number: await enc('4242424242424242', key) },
+      organizationId: null,
+    } as unknown as CipherResponse;
+
+    const card = {
+      cardholderName: '',
+      brand: '',
+      number: '4242424242424242',
+      expMonth: '',
+      expYear: '',
+      code: '',
+    };
+    const payload = await buildCipherUpdatePayload(cipher, { ...EDIT, card }, key, false);
+    const keys = Object.keys(payload['card'] as Record<string, unknown>);
+    expect(keys.filter((name) => name.toLowerCase() === 'number')).toHaveLength(1);
   });
 });

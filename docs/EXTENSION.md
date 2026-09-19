@@ -102,6 +102,13 @@ Common rules:
   (`CipherOverview`). Password, TOTP and notes are decrypted when the item is
   opened (`CipherDetails`). Minimal opening latency, fewer cleartext secrets at
   once.
+
+  One deliberate exception, for cards and identities: the list also decrypts the
+  card number, or the first and last name, to build a **subtitle**. Without it a
+  vault holding three cards shows three identical rows — which is exactly what
+  makes Bitwarden's list unusable. The card number is **reduced to its last four
+  digits inside the decryption function and dropped there**: what the popup holds
+  for the session is `Visa •••• 4242`, never a number that could be charged.
 - **The clipboard is overwritten after ~30 s** following a secret being copied,
   through **two** deliberately redundant mechanisms: a timer in the popup, which
   honours the exact delay while it lives, and a `chrome.alarms` alarm that
@@ -147,6 +154,41 @@ Common rules:
   the cursor would make the next click land on the wrong row. Items never used
   keep the server's order. The log is capped at 100 entries and can be cleared
   from the settings.
+
+- **Cards and identities, taken further.** The two types Bitwarden stores as a
+  flat column of fields and nothing more. What is added here, and why:
+  - **the network is derived, not declared.** `detectBrand` reads it off the
+    issuer prefix. Asking someone to pick "Visa" from a list, under a number
+    beginning with a 4, is asking them to restate what they have already said —
+    and to get it wrong. An imported vault whose stored brand contradicts its
+    number is common; the number decides;
+  - **the number is checked as it is typed.** Its Luhn key catches a wrong digit
+    and two swapped ones, which are the two mistakes people actually make. Said
+    at once, not at the till. Silent below twelve digits: telling someone their
+    card is invalid on the fourth is noise;
+  - **the expiry is compared to today**, and the card is flagged sixty days
+    ahead. A card that expired last month looks exactly like a valid one in a
+    list of fields;
+  - **the number is copied as bare digits** and displayed grouped as it is
+    embossed (4-6-5 on American Express, 4-6-4 on Diners Club). Payment forms
+    reject the spaces, and a value one has to clean up after pasting is a value
+    one ends up retyping;
+  - **the identity composes.** The full name and the postal address each become
+    one value copied in one gesture — no form asks for a street and a postcode
+    in two separate pastes. The eighteen fields are laid out in the four groups
+    a person thinks in, and the empty ones are not shown at all;
+  - **what cannot be rotated is masked**: the number, the security code, the
+    social-security, passport and licence numbers. Unlike a password, none of
+    them can be changed after being read over a shoulder. The same auto-hide
+    timer and the same `reprompt` guard cover a card panel and a password —
+    a secret on display is a secret on display, whatever its shape;
+  - **a section is never rewritten from scratch.** An update replaces the item
+    whole server-side, so `buildCipherUpdatePayload` carries over both the
+    sections it cannot edit (`secureNote`, `sshKey`) and, within the ones it can,
+    every field this version has never heard of. Two data-loss bugs of exactly
+    this shape have already been found here — erased passkeys, then wiped card
+    and identity sections on a mere rename — and the fix is by construction
+    rather than by vigilance.
 
 ## 4. Autofill — non-negotiable rules
 

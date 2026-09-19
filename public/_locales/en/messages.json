@@ -203,6 +203,171 @@
   "editPasskeyNote": {
     "message": "Passkey preserved as-is — WebAuthn signing will arrive in a future version."
   },
+  "newItem": {
+    "message": "New"
+  },
+  "newItemTitle": {
+    "message": "Create an item"
+  },
+  "newItemType": {
+    "message": "Type"
+  },
+  "typeLogin": {
+    "message": "Login"
+  },
+  "typeCard": {
+    "message": "Card"
+  },
+  "typeIdentity": {
+    "message": "Identity"
+  },
+  "typeNote": {
+    "message": "Secure note"
+  },
+  "typeSshKey": {
+    "message": "SSH key"
+  },
+  "itemShowDetails": {
+    "message": "Show the details"
+  },
+  "itemHideDetails": {
+    "message": "Hide the details"
+  },
+  "itemCopyField": {
+    "message": "Copy: $1"
+  },
+  "itemFieldCopied": {
+    "message": "$1 copied"
+  },
+  "itemNotes": {
+    "message": "Notes"
+  },
+  "itemReveal": {
+    "message": "Reveal"
+  },
+  "itemConceal": {
+    "message": "Conceal"
+  },
+  "cardSection": {
+    "message": "Card"
+  },
+  "cardNumber": {
+    "message": "Number"
+  },
+  "cardNumberPlaceholder": {
+    "message": "4242 4242 4242 4242"
+  },
+  "cardholderName": {
+    "message": "Cardholder"
+  },
+  "cardBrand": {
+    "message": "Network"
+  },
+  "cardBrandAuto": {
+    "message": "Detected from the number"
+  },
+  "cardExpiry": {
+    "message": "Expires"
+  },
+  "cardExpMonth": {
+    "message": "Month"
+  },
+  "cardExpYear": {
+    "message": "Year"
+  },
+  "cardCode": {
+    "message": "Security code"
+  },
+  "cardCodeHint": {
+    "message": "$1 digits"
+  },
+  "cardExpired": {
+    "message": "Expired"
+  },
+  "cardExpiresSoon": {
+    "message": "Expires soon"
+  },
+  "cardCheckDigitFailed": {
+    "message": "This number fails its check digit — one digit is wrong or two are swapped."
+  },
+  "cardCheckDigitOk": {
+    "message": "Check digit valid"
+  },
+  "identitySection": {
+    "message": "Identity"
+  },
+  "identityGroupName": {
+    "message": "Name"
+  },
+  "identityGroupContact": {
+    "message": "Contact"
+  },
+  "identityGroupAddress": {
+    "message": "Address"
+  },
+  "identityGroupDocuments": {
+    "message": "Documents"
+  },
+  "identityFullName": {
+    "message": "Full name"
+  },
+  "identityFullAddress": {
+    "message": "Postal address"
+  },
+  "identityTitle": {
+    "message": "Title"
+  },
+  "identityFirstName": {
+    "message": "First name"
+  },
+  "identityMiddleName": {
+    "message": "Middle name"
+  },
+  "identityLastName": {
+    "message": "Last name"
+  },
+  "identityCompany": {
+    "message": "Company"
+  },
+  "identityEmail": {
+    "message": "Email"
+  },
+  "identityPhone": {
+    "message": "Phone"
+  },
+  "identityUsername": {
+    "message": "Username"
+  },
+  "identityAddress1": {
+    "message": "Address line 1"
+  },
+  "identityAddress2": {
+    "message": "Address line 2"
+  },
+  "identityAddress3": {
+    "message": "Address line 3"
+  },
+  "identityCity": {
+    "message": "City"
+  },
+  "identityState": {
+    "message": "State or region"
+  },
+  "identityPostalCode": {
+    "message": "Postcode"
+  },
+  "identityCountry": {
+    "message": "Country"
+  },
+  "identitySsn": {
+    "message": "Social security number"
+  },
+  "identityPassportNumber": {
+    "message": "Passport number"
+  },
+  "identityLicenseNumber": {
+    "message": "Driving licence number"
+  },
   "genOutputTitle": {
     "message": "Click to copy"
   },

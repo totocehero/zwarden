@@ -55,7 +55,7 @@ The cryptographic core is implemented and tested. The rest is in progress.
 - [x] `SymmetricCryptoKey` — 32/64-byte keys
 - [x] AES-256-CBC + HMAC-SHA256, encrypt-then-MAC
 - [x] Key derivation: PBKDF2-SHA256 and Argon2id
-- [x] 301 tests, including the RFC 4231 / 5869 / 6238 / 7914 vectors
+- [x] 394 tests, including the RFC 4231 / 5869 / 6238 / 7914 vectors
 - [x] **Interoperability validated against Vaultwarden 2026.6.0** —
       authentication, vault key decryption, and a complete write/read round trip
 - [x] API client: prelogin, authentication, session refresh, sync, item creation
@@ -84,7 +84,15 @@ The cryptographic core is implemented and tested. The rest is in progress.
 - [x] Keyboard shortcuts — open, generate and copy, lock
 - [x] Clipboard overwrite that survives the popup closing (offscreen document +
       alarm)
-- [ ] Creating items from the popup (a complete form)
+- [x] Creating items from the popup — login, card, identity or secure note
+- [x] Cards and identities, taken further than Bitwarden's: the network read off
+      the number rather than picked from a list, the check digit verified as it
+      is typed, the expiry compared to today, the number copied as bare digits,
+      the full name and the postal address composed and copied in one gesture,
+      the papers masked, and the list showing `Visa •••• 4242` without ever
+      holding a chargeable number
+- [x] The browser's language and theme followed — `chrome.i18n` and a toolbar
+      icon that inverts against a light background
 - [ ] Key derivation in the service worker (a popup with no key) — and, with it,
       the autofill shortcut
 - [ ] Automatic autofill (form detection, in-page suggestion)

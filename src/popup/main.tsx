@@ -39,6 +39,7 @@ import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
 import { type EditForm, EMPTY_EDIT, EditItemForm } from './components/EditItemForm.js';
+import type { RevealedContent } from './components/ItemRow.js';
 import { chipsFor, ItemRow } from './components/ItemRow.js';
 import { RepromptGuard } from './components/RepromptGuard.js';
 import { SaveProposalBanner, type SaveProposal } from './components/SaveProposal.js';
@@ -54,8 +55,11 @@ import {
 } from '@core/api/apiClient.js';
 import { TwoFactorProvider, type CipherResponse, type SyncResponse } from '@core/api/models.js';
 import { SymmetricCryptoKey } from '@core/crypto/symmetricCryptoKey.js';
+import { digitsOf, EMPTY_CARD_EDIT } from '@core/vault/card.js';
+import { EMPTY_IDENTITY_EDIT, fullName } from '@core/vault/identity.js';
 import {
   type CipherDetails,
+  type CipherEdit,
   type CipherKeys,
   type CipherOverview,
   type PasskeyView,
@@ -221,6 +225,26 @@ function openOptions(): void {
   }
 }
 
+/**
+ * Turns a decrypted section into the form's values.
+ *
+ * Two shapes for the same fields: decryption yields `null` for what is absent,
+ * a form field holds an empty string. The blank value carries the field list, so
+ * a field the model gains cannot go missing from the form.
+ */
+function toEditValues<F extends string>(
+  view: Readonly<Record<F, string | null>> | null,
+  blank: Readonly<Record<F, string>>,
+): Readonly<Record<F, string>> {
+  if (view === null) {
+    return blank;
+  }
+  const fields = Object.keys(blank) as F[];
+  return Object.fromEntries(fields.map((field) => [field, view[field] ?? ''])) as Readonly<
+    Record<F, string>
+  >;
+}
+
 /** How long a revealed password stays on screen before being hidden again. */
 const REVEAL_HIDE_MS = 20_000;
 
@@ -256,7 +280,9 @@ function App() {
   const [filter, setFilter] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedUserId, setCopiedUserId] = useState<string | null>(null);
-  const [revealed, setRevealed] = useState<{ id: string; password: string } | null>(null);
+  const [revealed, setRevealed] = useState<{ id: string; content: RevealedContent } | null>(null);
+  /** Label of the detail field copied a moment ago — feeds the tick on it. */
+  const [copiedField, setCopiedField] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [proposal, setProposal] = useState<SaveProposal | null>(null);
   const reprompt = useReprompt(messageFor);
@@ -280,6 +306,8 @@ function App() {
   // Editing: the item in progress, the form's values, the original password
   // (for the history), and the field's visibility.
   const [editing, setEditing] = useState<CipherOverview | null>(null);
+  /** True while a **new** item is being composed: the type is still open. */
+  const [creating, setCreating] = useState(false);
   const [editForm, setEditForm] = useState<EditForm>(EMPTY_EDIT);
   const [editOriginalPassword, setEditOriginalPassword] = useState('');
   const [editShowPassword, setEditShowPassword] = useState(false);
@@ -912,15 +940,54 @@ function App() {
     reprompt.guarded(item, () => doCopyPassword(item));
   }
 
+  /**
+   * What the row's copy button takes, which is the value one opened the vault
+   * for: a password, a card number, a full name, a note.
+   *
+   * A card number is reduced to its digits — payment forms reject the spaces,
+   * and a value that has to be cleaned up after pasting is a value one ends up
+   * retyping by hand.
+   */
+  function primaryValueOf(item: CipherOverview, details: CipherDetails): string | null {
+    if (item.type === 3) {
+      return details.card === null ? null : digitsOf(details.card.number ?? '');
+    }
+    if (item.type === 4) {
+      return details.identity === null ? null : fullName(details.identity);
+    }
+    if (item.type === 2) {
+      return details.notes;
+    }
+    return details.password;
+  }
+
   async function doCopyPassword(item: CipherOverview): Promise<void> {
-    const secret = (await detailsOf(item))?.password ?? null;
-    if (secret !== null) {
+    const details = await detailsOf(item);
+    const secret = details === null ? null : primaryValueOf(item, details);
+    if (secret !== null && secret !== '') {
       await navigator.clipboard.writeText(secret);
       void noteUsage(item);
       setCopiedId(item.id);
       setTimeout(() => setCopiedId(null), 1500);
       scheduleClipboardClear();
     }
+  }
+
+  /**
+   * Copies one field of an open detail panel.
+   *
+   * No `reprompt` guard: the panel is only open because the guard already let
+   * the user through, and asking again for a field of something already on
+   * screen would ask for nothing.
+   */
+  async function onCopyField(label: string, value: string): Promise<void> {
+    if (value === '') {
+      return;
+    }
+    await navigator.clipboard.writeText(value);
+    setCopiedField(label);
+    setTimeout(() => setCopiedField(null), 1500);
+    scheduleClipboardClear();
   }
 
   async function onCopyUsername(item: CipherOverview): Promise<void> {
@@ -952,13 +1019,33 @@ function App() {
     reprompt.guarded(item, () => doReveal(item));
   }
 
+  /**
+   * What the eye shows for this type, or `null` if there is nothing to show.
+   *
+   * One union for the four types, so that the guard, the auto-hide timer and the
+   * clipboard clearing cover them all without being written four times.
+   */
+  function revealedContentFor(item: CipherOverview, details: CipherDetails): RevealedContent | null {
+    if (item.type === 3) {
+      return details.card === null ? null : { kind: 'card', card: details.card };
+    }
+    if (item.type === 4) {
+      return details.identity === null ? null : { kind: 'identity', identity: details.identity };
+    }
+    if (item.type === 2) {
+      return details.notes === null ? null : { kind: 'note', notes: details.notes };
+    }
+    return details.password === null ? null : { kind: 'password', password: details.password };
+  }
+
   async function doReveal(item: CipherOverview): Promise<void> {
-    const secret = (await detailsOf(item))?.password ?? null;
-    if (secret !== null) {
+    const details = await detailsOf(item);
+    const content = details === null ? null : revealedContentFor(item, details);
+    if (content !== null) {
       void noteUsage(item);
-      setRevealed({ id: item.id, password: secret });
-      // Auto-hide: a displayed password must not stay on screen through
-      // forgetfulness.
+      setRevealed({ id: item.id, content });
+      // Auto-hide: a secret on display must not stay there through
+      // forgetfulness — a card panel no less than a password.
       revealTimer.current = window.setTimeout(() => setRevealed(null), REVEAL_HIDE_MS);
     }
   }
@@ -1012,12 +1099,15 @@ function App() {
       return;
     }
     setEditForm({
+      type: item.type,
       name: item.name ?? '',
       username: details.username ?? '',
       password: details.password ?? '',
       totp: details.totp ?? '',
       notes: details.notes ?? '',
       uris: item.uris.join('\n'),
+      card: toEditValues(details.card, EMPTY_CARD_EDIT),
+      identity: toEditValues(details.identity, EMPTY_IDENTITY_EDIT),
     });
     setEditOriginalPassword(details.password ?? '');
     setEditPasskeys(details.passkeys);
@@ -1080,14 +1170,52 @@ function App() {
     await showVault(sync, userKey, false);
   }
 
-  /** Encrypts, sends the update, resyncs and returns to the list. */
+  /** Opens the edit screen on a blank item, type still to be chosen. */
+  function onNewItem(): void {
+    setEditForm(EMPTY_EDIT);
+    setEditOriginalPassword('');
+    setEditPasskeys([]);
+    setEditShowPassword(false);
+    setEditing(null);
+    setCreating(true);
+    setError(null);
+  }
+
+  /**
+   * The form's values, as the vault layer expects them.
+   *
+   * The typed section is supplied **only** for the type that owns it. That is
+   * not tidiness: on an update, a section the editor says nothing about is
+   * carried over from the server untouched, and handing a blank card to a secure
+   * note would be handing it an erasure.
+   */
+  function cipherEditFrom(form: EditForm): CipherEdit {
+    const base = {
+      type: form.type,
+      name: form.name.trim(),
+      username: form.username,
+      password: form.password,
+      totp: form.totp,
+      notes: form.notes,
+      uris: form.uris.split('\n'),
+    };
+    if (form.type === 3) {
+      return { ...base, card: form.card };
+    }
+    if (form.type === 4) {
+      return { ...base, identity: form.identity };
+    }
+    return base;
+  }
+
+  /** Encrypts, sends the write, resyncs and returns to the list. */
   async function onSaveEdit(event: Event): Promise<void> {
     event.preventDefault();
-    if (vault === null || editing === null) {
+    if (vault === null) {
       return;
     }
-    const raw = vault.raw.get(editing.id);
-    if (raw === undefined) {
+    const raw = editing === null ? undefined : vault.raw.get(editing.id);
+    if (editing !== null && raw === undefined) {
       return;
     }
 
@@ -1095,26 +1223,29 @@ function App() {
     setBusy(t('statusEncrypting'));
     try {
       const auth = await authorize();
-
-      const payload = await buildCipherUpdatePayload(
-        raw,
-        {
-          name: editForm.name.trim(),
-          username: editForm.username,
-          password: editForm.password,
-          totp: editForm.totp,
-          notes: editForm.notes,
-          uris: editForm.uris.split('\n'),
-        },
-        vault.keys,
-        editForm.password !== editOriginalPassword,
-      );
+      const edit = cipherEditFrom(editForm);
 
       setBusy(t('statusSaving'));
-      await auth.client.updateCipher(auth.accessToken, editing.id, payload);
+      if (raw === undefined) {
+        // Creation goes out under the vault key, with no item key of its own —
+        // the shape the interoperability round trip validates.
+        await auth.client.createCipher(
+          auth.accessToken,
+          await buildCipherCreatePayload(edit, vault.userKey),
+        );
+      } else {
+        const payload = await buildCipherUpdatePayload(
+          raw,
+          edit,
+          vault.keys,
+          editForm.password !== editOriginalPassword,
+        );
+        await auth.client.updateCipher(auth.accessToken, editing!.id, payload);
+      }
       await refreshAfterWrite(auth, vault.userKey);
 
       setEditing(null);
+      setCreating(false);
       setEditForm(EMPTY_EDIT);
       setEditOriginalPassword('');
       setRevealed(null);
@@ -1129,6 +1260,7 @@ function App() {
     setEditing(null);
     setEditForm(EMPTY_EDIT);
     setEditOriginalPassword('');
+    setCreating(false);
     setError(null);
   }
 
@@ -1136,6 +1268,8 @@ function App() {
     return (
       (item.name ?? '').toLowerCase().includes(needle) ||
       (item.username ?? '').toLowerCase().includes(needle) ||
+      // Typing the last four digits of a card, or a surname, finds the item.
+      (item.subtitle ?? '').toLowerCase().includes(needle) ||
       item.uris.some((uri) => uri.toLowerCase().includes(needle)) ||
       chipsFor(item, labels).some((chip) => chip.name.toLowerCase().includes(needle))
     );
@@ -1207,11 +1341,11 @@ function App() {
   }
 
   // --- Edit screen ----------------------------------------------------------
-  if (editing !== null) {
+  if (editing !== null || creating) {
     return (
       <EditItemForm
         form={editForm}
-        isLogin={editing.type === 1}
+        creating={creating}
         showPassword={editShowPassword}
         passkeys={editPasskeys}
         busy={busy}
@@ -1243,6 +1377,9 @@ function App() {
       <header>
         <h1>Zwarden</h1>
         <div>
+          <button class="quiet" title={t('newItemTitle')} onClick={onNewItem}>
+            {t('newItem')}
+          </button>
           <button
             class="quiet"
             title={t('editGeneratePassword')}
@@ -1311,7 +1448,8 @@ function App() {
                 labels={vault.labels}
                 passwordCopied={copiedId === item.id}
                 usernameCopied={copiedUserId === item.id}
-                revealed={revealed?.id === item.id ? revealed.password : null}
+                revealed={revealed?.id === item.id ? revealed.content : null}
+                copiedField={copiedField}
                 otp={otp?.id === item.id ? otp : null}
                 otpCopied={copiedOtp}
                 fillable={tabOrigin !== null && matchesOrigin(item.uris, tabOrigin)}
@@ -1322,6 +1460,7 @@ function App() {
                 onEdit={() => onEdit(item)}
                 onFill={() => void onFill(item)}
                 onCopyOtp={(code) => void copyOtp(code)}
+                onCopyField={(label, value) => void onCopyField(label, value)}
                 onFilter={setFilter}
               />
             ))}

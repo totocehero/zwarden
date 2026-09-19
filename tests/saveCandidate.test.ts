@@ -20,6 +20,7 @@ function item(id: string, username: string, uris: string[]): CipherOverview {
     name: id,
     username,
     uris,
+    subtitle: null,
     hasPasskey: false,
     hasTotp: false,
     reprompt: false,

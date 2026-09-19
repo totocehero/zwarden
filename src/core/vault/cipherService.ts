@@ -34,6 +34,22 @@ import { EncString } from '../crypto/encString.js';
 import { decryptBytes, decryptStringOrNull, encryptString } from '../crypto/cryptoService.js';
 import { SymmetricCryptoKey } from '../crypto/symmetricCryptoKey.js';
 import { type CipherResponse, readField } from '../api/models.js';
+import {
+  BRAND_LABELS,
+  CARD_FIELDS,
+  type CardEdit,
+  type CardView,
+  detectBrand,
+  EMPTY_CARD,
+  maskNumber,
+} from './card.js';
+import {
+  EMPTY_IDENTITY,
+  fullName,
+  type IdentityEdit,
+  IDENTITY_FIELDS,
+  type IdentityView,
+} from './identity.js';
 import { MissingOrgKeyError, type VaultKeys, keyForCipher } from './keyring.js';
 
 /**
@@ -75,6 +91,20 @@ export interface CipherOverview {
   readonly username: string | null;
   /** Decrypted URIs, for filtering by active tab. */
   readonly uris: readonly string[];
+  /**
+   * What identifies the item in the list when a username does not: the masked
+   * card, the full name of an identity.
+   *
+   * It exists because a vault holding three cards shows three identical rows
+   * otherwise — Bitwarden's own list is unusable for exactly that reason. It is
+   * also what the search matches on, so typing the last four digits finds the
+   * card.
+   *
+   * **The full number never reaches here.** It is decrypted, reduced to its last
+   * four digits, and dropped; what the list holds in memory for the whole
+   * session is `•••• 4242`, not a number that could be charged.
+   */
+  readonly subtitle: string | null;
   /**
    * `true` if the item carries at least one passkey (FIDO2). Detected from the
    * mere presence of the entries — no decryption needed for the list.
@@ -276,7 +306,22 @@ export interface CipherDetails {
   readonly notes: string | null;
   /** The item's passkeys, metadata decrypted. */
   readonly passkeys: readonly PasskeyView[];
+  /** The card, for a type 3 item — `null` for every other type. */
+  readonly card: CardView | null;
+  /** The identity, for a type 4 item — `null` for every other type. */
+  readonly identity: IdentityView | null;
 }
+
+/** An unreadable or type-less detail view. */
+const EMPTY_DETAILS: CipherDetails = Object.freeze({
+  username: null,
+  password: null,
+  totp: null,
+  notes: null,
+  passkeys: [],
+  card: null,
+  identity: null,
+});
 
 /** Default concurrency for list decryption. */
 const DEFAULT_CONCURRENCY = 8;
@@ -328,7 +373,13 @@ export async function decryptCipherOverview(
 ): Promise<CipherOverview> {
   const login = readLogin(cipher);
   const meta = readCipherMetadata(cipher, login);
-  const empty: CipherOverview = { ...meta, name: null, username: null, uris: [] };
+  const empty: CipherOverview = {
+    ...meta,
+    name: null,
+    username: null,
+    uris: [],
+    subtitle: null,
+  };
 
   const baseKey = baseKeyFor(cipher, keys, onError);
   if (baseKey === null) {
@@ -344,9 +395,10 @@ export async function decryptCipherOverview(
   }
 
   const rawUris = readField<readonly RawUriEntry[]>(login, 'uris') ?? [];
-  const [name, username, ...decryptedUris] = await Promise.all([
+  const [name, username, subtitle, ...decryptedUris] = await Promise.all([
     decryptStringOrNull(readField<string>(cipher, 'name'), itemKey, onError),
     decryptStringOrNull(readField<string>(login, 'username'), itemKey, onError),
+    decryptSubtitle(cipher, meta.type, itemKey, onError),
     ...rawUris.map((entry) =>
       decryptStringOrNull(readField<string>(entry, 'uri'), itemKey, onError),
     ),
@@ -356,8 +408,48 @@ export async function decryptCipherOverview(
     ...meta,
     name: name ?? null,
     username: username ?? null,
+    subtitle: subtitle ?? null,
     uris: decryptedUris.filter((uri): uri is string => uri !== null),
   };
+}
+
+/**
+ * Builds the list subtitle of a card or an identity.
+ *
+ * Two fields at most are decrypted, and for a card the number is reduced to its
+ * last four digits **before returning** — the cleartext number exists for the
+ * duration of this function and nowhere else. That is the whole point: the list
+ * gains what it needs to tell three cards apart without the vault holding three
+ * chargeable numbers in memory for as long as the popup is open.
+ *
+ * @returns The subtitle, or `null` for a type that has no use for one.
+ */
+async function decryptSubtitle(
+  cipher: CipherResponse,
+  type: number,
+  itemKey: SymmetricCryptoKey,
+  onError: (error: unknown) => void,
+): Promise<string | null> {
+  if (type === 3) {
+    const card = readField<Record<string, unknown>>(cipher, 'card');
+    const number = await decryptStringOrNull(readField<string>(card, 'number'), itemKey, onError);
+    if (number === null || number === '') {
+      return null;
+    }
+    const brand = detectBrand(number);
+    const masked = maskNumber(number);
+    return brand === null ? masked : `${BRAND_LABELS[brand]} ${masked}`;
+  }
+  if (type === 4) {
+    const identity = readField<Record<string, unknown>>(cipher, 'identity');
+    const [first, last] = await Promise.all([
+      decryptStringOrNull(readField<string>(identity, 'firstName'), itemKey, onError),
+      decryptStringOrNull(readField<string>(identity, 'lastName'), itemKey, onError),
+    ]);
+    const name = fullName({ ...EMPTY_IDENTITY, firstName: first, lastName: last });
+    return name === '' ? null : name;
+  }
+  return null;
 }
 
 /**
@@ -375,7 +467,7 @@ export async function decryptCipherOverview(
 function readCipherMetadata(
   cipher: CipherResponse,
   login: unknown,
-): Omit<CipherOverview, 'name' | 'username' | 'uris'> {
+): Omit<CipherOverview, 'name' | 'username' | 'uris' | 'subtitle'> {
   const totpField = readField<string>(login, 'totp');
   return {
     id: readField<string>(cipher, 'id') ?? '',
@@ -407,7 +499,7 @@ export async function decryptCipherDetails(
 ): Promise<CipherDetails> {
   const baseKey = baseKeyFor(cipher, keys, onError);
   if (baseKey === null) {
-    return { username: null, password: null, totp: null, notes: null, passkeys: [] };
+    return EMPTY_DETAILS;
   }
 
   let itemKey: SymmetricCryptoKey;
@@ -415,9 +507,10 @@ export async function decryptCipherDetails(
     itemKey = await resolveItemKey(cipher, baseKey);
   } catch (error) {
     onError(error);
-    return { username: null, password: null, totp: null, notes: null, passkeys: [] };
+    return EMPTY_DETAILS;
   }
 
+  const type = readField<number>(cipher, 'type') ?? 1;
   const login = readLogin(cipher);
   const rawPasskeys = readField<readonly Record<string, unknown>[]>(login, 'fido2Credentials') ?? [];
 
@@ -435,13 +528,52 @@ export async function decryptCipherDetails(
     }),
   ]);
 
+  const [card, identity] = await Promise.all([
+    type === 3 ? decryptSection(cipher, 'card', CARD_FIELDS, EMPTY_CARD, itemKey, onError) : null,
+    type === 4
+      ? decryptSection(cipher, 'identity', IDENTITY_FIELDS, EMPTY_IDENTITY, itemKey, onError)
+      : null,
+  ]);
+
   return {
     username: username as string | null,
     password: password as string | null,
     totp: totp as string | null,
     notes: notes as string | null,
     passkeys: passkeys as PasskeyView[],
+    card,
+    identity,
   };
+}
+
+/**
+ * Decrypts every field of a typed section in one pass.
+ *
+ * The field list is imported from the module that owns the type, not repeated
+ * here: a field added to `CardView` and forgotten in the decryption would be a
+ * field the user fills in, saves, and never sees again.
+ *
+ * @param section Name of the sub-object, `card` or `identity`.
+ * @param fields The section's fields, from its own module.
+ * @param empty The all-`null` value, returned when the section is absent.
+ * @returns The section, unreadable fields set to `null`.
+ */
+async function decryptSection<F extends string, V>(
+  cipher: CipherResponse,
+  section: string,
+  fields: readonly F[],
+  empty: V,
+  itemKey: SymmetricCryptoKey,
+  onError: (error: unknown) => void,
+): Promise<V> {
+  const raw = readField<Record<string, unknown>>(cipher, section);
+  if (raw == null) {
+    return empty;
+  }
+  const values = await Promise.all(
+    fields.map((field) => decryptStringOrNull(readField<string>(raw, field), itemKey, onError)),
+  );
+  return Object.fromEntries(fields.map((field, index) => [field, values[index] ?? null])) as V;
 }
 
 /**
@@ -490,6 +622,84 @@ export interface CipherEdit {
   readonly totp: string;
   readonly notes: string;
   readonly uris: readonly string[];
+  /**
+   * The type to create. Only read on creation — an update never changes an
+   * item's type, which would orphan the section it already carries.
+   */
+  readonly type?: number;
+  /** The card's values, for a type 3 item. */
+  readonly card?: CardEdit;
+  /** The identity's values, for a type 4 item. */
+  readonly identity?: IdentityEdit;
+}
+
+/**
+ * Everything the stored section holds that the editor does not know about.
+ *
+ * A section is rewritten whole, so a field this version has never heard of —
+ * one a later Bitwarden adds, one an import brought in — vanishes the first time
+ * the item is edited here. Carrying it over costs a spread and closes the
+ * failure by construction rather than by vigilance.
+ *
+ * The carried-over values are already encrypted under this item's key: they pass
+ * through untouched, exactly as passkeys and custom fields do.
+ */
+function unknownFieldsOf(stored: unknown, known: readonly string[]): Record<string, unknown> {
+  if (stored == null || typeof stored !== 'object') {
+    return {};
+  }
+  // Compared without regard to case: the API migrated from PascalCase, old
+  // caches still hold it, and a `Number` carried over beside a `number` written
+  // back would send the server the same field twice.
+  const seen = new Set(known.map((field) => field.toLowerCase()));
+  const rest: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(stored as Record<string, unknown>)) {
+    if (!seen.has(field.toLowerCase())) {
+      rest[field] = value;
+    }
+  }
+  return rest;
+}
+
+/** Encrypts a whole typed section, preserving what it does not know about. */
+async function buildTypedSection<F extends string>(
+  values: Readonly<Record<F, string>>,
+  fields: readonly F[],
+  stored: unknown,
+  encOrNull: (text: string) => Promise<string | null>,
+): Promise<Record<string, unknown>> {
+  const encrypted = await Promise.all(fields.map((field) => encOrNull(values[field].trim())));
+  return {
+    ...unknownFieldsOf(stored, fields),
+    ...Object.fromEntries(fields.map((field, index) => [field, encrypted[index] ?? null])),
+  };
+}
+
+/**
+ * The section an edit supplies for this type, encrypted — or `null` if the
+ * editor has nothing to say about it.
+ *
+ * `null` is not an absence of data: it means "leave what is already there
+ * alone", and the update path then carries the stored section over untouched.
+ */
+async function buildEditedSection(
+  type: number,
+  edit: CipherEdit,
+  stored: CipherResponse | null,
+  encOrNull: (text: string) => Promise<string | null>,
+): Promise<readonly [string, Record<string, unknown>] | null> {
+  if (type === 3 && edit.card !== undefined) {
+    const previous = stored === null ? null : readField<unknown>(stored, 'card');
+    return ['card', await buildTypedSection(edit.card, CARD_FIELDS, previous, encOrNull)];
+  }
+  if (type === 4 && edit.identity !== undefined) {
+    const previous = stored === null ? null : readField<unknown>(stored, 'identity');
+    return [
+      'identity',
+      await buildTypedSection(edit.identity, IDENTITY_FIELDS, previous, encOrNull),
+    ];
+  }
+  return null;
 }
 
 /**
@@ -514,30 +724,44 @@ export async function buildCipherCreatePayload(
   const encOrNull = async (text: string): Promise<string | null> =>
     text === '' ? null : enc(text);
 
-  const uris = await Promise.all(
-    edit.uris
-      .map((uri) => uri.trim())
-      .filter((uri) => uri !== '')
-      .map(async (uri) => ({ uri: await enc(uri), match: null })),
-  );
-
-  return {
-    type: 1,
+  const type = edit.type ?? 1;
+  const payload: Record<string, unknown> = {
+    type,
     name: await enc(edit.name),
     notes: await encOrNull(edit.notes),
-    login: {
-      username: await encOrNull(edit.username),
-      password: await encOrNull(edit.password),
-      totp: await encOrNull(edit.totp),
-      uris,
-    },
     favorite: false,
     folderId: null,
     organizationId: null,
     reprompt: 0,
     fields: [],
-    passwordHistory: [],
   };
+
+  if (type === 1) {
+    const uris = await Promise.all(
+      edit.uris
+        .map((uri) => uri.trim())
+        .filter((uri) => uri !== '')
+        .map(async (uri) => ({ uri: await enc(uri), match: null })),
+    );
+    payload['login'] = {
+      username: await encOrNull(edit.username),
+      password: await encOrNull(edit.password),
+      totp: await encOrNull(edit.totp),
+      uris,
+    };
+    payload['passwordHistory'] = [];
+  } else if (type === 2) {
+    // A secure note carries nothing but its notes; the sub-object exists only to
+    // say which kind of note it is, and the API refuses the item without it.
+    payload['secureNote'] = { type: 0 };
+  } else {
+    const section = await buildEditedSection(type, edit, null, encOrNull);
+    if (section !== null) {
+      payload[section[0]] = section[1];
+    }
+  }
+
+  return payload;
 }
 
 /** How many entries the password history keeps. */
@@ -624,9 +848,51 @@ export async function buildCipherUpdatePayload(
   if (type === 1) {
     payload['login'] = await buildLoginSection(edit, login, enc, encOrNull);
     payload['passwordHistory'] = buildPasswordHistory(cipher, login, recordPasswordHistory);
+  } else {
+    const edited = await buildEditedSection(type, edit, cipher, encOrNull);
+    if (edited !== null) {
+      payload[edited[0]] = edited[1];
+    } else {
+      carryTypeSection(cipher, type, payload);
+    }
   }
 
   return payload;
+}
+
+/**
+ * The sub-object each item type carries its own data in.
+ *
+ * An update replaces the whole item server-side, so a type whose section is not
+ * in the payload loses it. The editor only knows how to rebuild `login`; every
+ * other section is carried over as-is, still encrypted.
+ *
+ * This is the same trap the passkeys fell into, one level up: there a field was
+ * missing from a section, here a whole section is missing from the item. Both
+ * are silent, irreversible, and triggered by the most innocuous edit there is —
+ * a rename.
+ */
+const TYPE_SECTIONS: Readonly<Record<number, string>> = {
+  2: 'secureNote',
+  3: 'card',
+  4: 'identity',
+  5: 'sshKey',
+};
+
+/** Copies the type's own section into the payload, untouched. */
+function carryTypeSection(
+  cipher: CipherResponse,
+  type: number,
+  payload: Record<string, unknown>,
+): void {
+  const section = TYPE_SECTIONS[type];
+  if (section === undefined) {
+    return;
+  }
+  const content = readField<unknown>(cipher, section);
+  if (content != null) {
+    payload[section] = content;
+  }
 }
 
 /** Field encryptor, as supplied by the caller that holds the item key. */
@@ -647,6 +913,11 @@ async function buildLoginSection(
   );
 
   return {
+    // Everything the form does not touch — `passwordRevisionDate`,
+    // `autofillOnPageLoad`, anything a later version adds — carried over rather
+    // than dropped. A setting the user chose in another client must not be
+    // undone by a rename here.
+    ...unknownFieldsOf(login, ['username', 'password', 'totp', 'uris', 'fido2Credentials']),
     username: await encOrNull(edit.username),
     password: await encOrNull(edit.password),
     totp: await encOrNull(edit.totp),
