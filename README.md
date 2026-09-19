@@ -5,6 +5,20 @@ Extension navigateur de gestion de mots de passe, open source, compatible
 
 Objectif : la même compatibilité, un ordre de grandeur en moins de poids.
 
+## Provenance du code
+
+**Ce dépôt ne contient aucune ligne écrite par un humain.** Code, tests et
+documentation ont été entièrement produits par un modèle de langage (Claude),
+sous direction humaine : périmètre, arbitrages et validations. Les pieds
+`Co-Authored-By` des commits en gardent la trace.
+
+Ce que cela implique, dit franchement : les choix cryptographiques sont
+vérifiés par des vecteurs officiels (RFC 4231 / 5869 / 6238 / 7914) et un
+aller-retour d'interopérabilité contre un vrai Vaultwarden, mais **aucun audit
+de sécurité humain indépendant n'a été conduit**. Pour un gestionnaire de mots
+de passe, c'est une information qui vous appartient avant d'y confier un
+coffre.
+
 ## Pourquoi
 
 L'extension Bitwarden officielle (2026.7.0) mesurée sur disque — **46,4 Mo**
