@@ -618,6 +618,31 @@ describe('correspondance d’origine (uriMatch)', () => {
     expect(uriOrigin('androidapp://com.exemple')).toBeNull();
   });
 
+  /**
+   * Forme courante d'un service auto-hébergé. `new URL('localhost:8080')`
+   * réussit, avec le protocole `localhost:` : s'arrêter au premier candidat
+   * analysable faisait échouer toutes ces URIs, silencieusement.
+   */
+  it('accepte un hôte et un port sans schéma', () => {
+    expect(uriOrigin('exemple.fr:8080')).toBe('https://exemple.fr:8080');
+    expect(uriOrigin('exemple.fr:8080/connexion')).toBe('https://exemple.fr:8080');
+    expect(uriOrigin('localhost:8080')).toBe('https://localhost:8080');
+  });
+
+  /**
+   * Le piège de la correction précédente, et la raison d'être de la détection
+   * de schéma : `https://mailto:alice@banque.fr` s'analyse en
+   * `https://banque.fr`. Préfixer sans réfléchir transformait un échec muet en
+   * correspondance fausse — un item dont l'unique URI est une adresse e-mail
+   * aurait proposé le remplissage sur la banque.
+   */
+  it('ne fabrique pas une origine depuis un schéma opaque', () => {
+    expect(uriOrigin('mailto:alice@banque.fr')).toBeNull();
+    expect(uriOrigin('ssh://git@exemple.fr')).toBeNull();
+    expect(uriOrigin('tel:+33123456789')).toBeNull();
+    expect(matchesOrigin(['mailto:alice@banque.fr'], 'https://banque.fr')).toBe(false);
+  });
+
   it('correspond exactement, jamais par sous-chaîne', () => {
     expect(matchesOrigin(['https://exemple.fr/login'], 'https://exemple.fr')).toBe(true);
     // L'attaque que la règle d'origine stricte neutralise :

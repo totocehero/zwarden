@@ -242,34 +242,9 @@ export async function decryptCipherOverview(
   keys: CipherKeys,
   onError: (error: unknown) => void,
 ): Promise<CipherOverview> {
-  const id = readField<string>(cipher, 'id') ?? '';
-  const type = readField<number>(cipher, 'type') ?? 0;
-  const organizationId = readField<string | null>(cipher, 'organizationId') ?? null;
-  const folderId = readField<string | null>(cipher, 'folderId') ?? null;
-  const collectionIds = readField<readonly string[]>(cipher, 'collectionIds') ?? [];
   const login = readLogin(cipher);
-  const hasPasskey =
-    (readField<readonly unknown[]>(login, 'fido2Credentials') ?? []).length > 0;
-  const totpField = readField<string>(login, 'totp');
-  const hasTotp = totpField != null && totpField !== '';
-  // 0 = aucune garde, 1 = redemander le mot de passe maître. Toute autre
-  // valeur est traitée comme une garde : se tromper dans ce sens fait
-  // redemander un mot de passe, l'autre livre un secret sans garde.
-  const reprompt = (readField<number>(cipher, 'reprompt') ?? 0) !== 0;
-
-  const vide: CipherOverview = {
-    id,
-    type,
-    name: null,
-    username: null,
-    uris: [],
-    hasPasskey,
-    hasTotp,
-    reprompt,
-    organizationId,
-    folderId,
-    collectionIds,
-  };
+  const meta = readCipherMetadata(cipher, login);
+  const vide: CipherOverview = { ...meta, name: null, username: null, uris: [] };
 
   const baseKey = baseKeyFor(cipher, keys, onError);
   if (baseKey === null) {
@@ -285,7 +260,6 @@ export async function decryptCipherOverview(
   }
 
   const rawUris = readField<readonly RawUriEntry[]>(login, 'uris') ?? [];
-
   const [name, username, ...decryptedUris] = await Promise.all([
     decryptStringOrNull(readField<string>(cipher, 'name'), itemKey, onError),
     decryptStringOrNull(readField<string>(login, 'username'), itemKey, onError),
@@ -293,20 +267,44 @@ export async function decryptCipherOverview(
       decryptStringOrNull(readField<string>(entry, 'uri'), itemKey, onError),
     ),
   ]);
-  const uris = decryptedUris.filter((uri): uri is string => uri !== null);
 
   return {
-    id,
-    type,
+    ...meta,
     name: name ?? null,
     username: username ?? null,
-    uris,
-    hasPasskey,
-    hasTotp,
-    reprompt,
-    organizationId,
-    folderId,
-    collectionIds,
+    uris: decryptedUris.filter((uri): uri is string => uri !== null),
+  };
+}
+
+/**
+ * Lit tout ce qu'un item dit de lui-même **sans déchiffrement** : identité,
+ * appartenance, et les trois indicateurs que la liste doit connaître avant de
+ * déchiffrer quoi que ce soit.
+ *
+ * Extrait pour une raison de fond autant que de longueur : ces champs
+ * apparaissaient deux fois dans l'appelant — une fois pour l'item illisible,
+ * une fois pour l'item déchiffré — et deux copies d'une liste de onze champs
+ * sont deux occasions d'en oublier un. L'ajout de `reprompt` a failli être
+ * exactement cet oubli, et un `reprompt` omis dans la branche « illisible »
+ * aurait retiré la garde d'un item précisément quand son déchiffrement échoue.
+ */
+function readCipherMetadata(
+  cipher: CipherResponse,
+  login: unknown,
+): Omit<CipherOverview, 'name' | 'username' | 'uris'> {
+  const totpField = readField<string>(login, 'totp');
+  return {
+    id: readField<string>(cipher, 'id') ?? '',
+    type: readField<number>(cipher, 'type') ?? 0,
+    hasPasskey: (readField<readonly unknown[]>(login, 'fido2Credentials') ?? []).length > 0,
+    hasTotp: totpField != null && totpField !== '',
+    // 0 = aucune garde, 1 = redemander le mot de passe maître. Toute autre
+    // valeur est traitée comme une garde : se tromper dans ce sens fait
+    // redemander un mot de passe, l'autre livre un secret sans garde.
+    reprompt: (readField<number>(cipher, 'reprompt') ?? 0) !== 0,
+    organizationId: readField<string | null>(cipher, 'organizationId') ?? null,
+    folderId: readField<string | null>(cipher, 'folderId') ?? null,
+    collectionIds: readField<readonly string[]>(cipher, 'collectionIds') ?? [],
   };
 }
 
@@ -482,23 +480,33 @@ const PASSWORD_HISTORY_LIMIT = 5;
  * @returns Corps prêt pour `ApiClient.updateCipher`.
  * @throws {MissingOrgKeyError} Item d'organisation sans clé déballée.
  */
+/**
+ * Clé de base sous laquelle réécrire un item : celle du coffre, ou celle de son
+ * organisation.
+ *
+ * Contrairement à la lecture — où une clé manquante donne un item illisible et
+ * un `onError` — l'écriture **lève**. Réécrire un item d'organisation avec la
+ * clé du coffre produirait un item que plus personne, propriétaire compris, ne
+ * saurait déchiffrer : mieux vaut refuser d'écrire.
+ */
+function requireBaseKey(cipher: CipherResponse, keys: CipherKeys): SymmetricCryptoKey {
+  if (keys instanceof SymmetricCryptoKey) {
+    return keys;
+  }
+  const resolved = keyForCipher(cipher, keys);
+  if (resolved === null) {
+    throw new MissingOrgKeyError(readField<string>(cipher, 'organizationId') ?? 'inconnue');
+  }
+  return resolved;
+}
+
 export async function buildCipherUpdatePayload(
   cipher: CipherResponse,
   edit: CipherEdit,
   keys: CipherKeys,
   recordPasswordHistory: boolean,
 ): Promise<Record<string, unknown>> {
-  let baseKey: SymmetricCryptoKey;
-  if (keys instanceof SymmetricCryptoKey) {
-    baseKey = keys;
-  } else {
-    const resolved = keyForCipher(cipher, keys);
-    if (resolved === null) {
-      throw new MissingOrgKeyError(readField<string>(cipher, 'organizationId') ?? 'inconnue');
-    }
-    baseKey = resolved;
-  }
-  const itemKey = await resolveItemKey(cipher, baseKey);
+  const itemKey = await resolveItemKey(cipher, requireBaseKey(cipher, keys));
 
   const enc = async (text: string): Promise<string> =>
     (await encryptString(text, itemKey)).toString();
@@ -509,6 +517,8 @@ export async function buildCipherUpdatePayload(
   const login = readLogin(cipher);
   const wrappedItemKey = readField<string>(cipher, 'key');
 
+  // Champs repris de l'item existant, jamais recalculés : une mise à jour
+  // remplace l'item entier côté serveur, et tout champ omis est perdu.
   const payload: Record<string, unknown> = {
     type,
     organizationId: readField<string | null>(cipher, 'organizationId') ?? null,
@@ -526,32 +536,61 @@ export async function buildCipherUpdatePayload(
   }
 
   if (type === 1) {
-    const uris = await Promise.all(
-      edit.uris
-        .map((uri) => uri.trim())
-        .filter((uri) => uri !== '')
-        .map(async (uri) => ({ uri: await enc(uri), match: null })),
-    );
-    payload['login'] = {
-      username: await encOrNull(edit.username),
-      password: await encOrNull(edit.password),
-      totp: await encOrNull(edit.totp),
-      uris,
-      // Les passkeys ne sont pas éditables ici : reprises telles quelles,
-      // déjà chiffrées. Les omettre les effacerait du serveur.
-      fido2Credentials: readField<unknown>(login, 'fido2Credentials') ?? null,
-    };
-
-    const previousPassword = readField<string>(login, 'password');
-    const history = readField<readonly unknown[]>(cipher, 'passwordHistory') ?? [];
-    payload['passwordHistory'] =
-      recordPasswordHistory && previousPassword != null && previousPassword !== ''
-        ? [
-            { password: previousPassword, lastUsedDate: new Date().toISOString() },
-            ...history,
-          ].slice(0, PASSWORD_HISTORY_LIMIT)
-        : history;
+    payload['login'] = await buildLoginSection(edit, login, enc, encOrNull);
+    payload['passwordHistory'] = buildPasswordHistory(cipher, login, recordPasswordHistory);
   }
 
   return payload;
+}
+
+/** Chiffreur de champ, tel que fourni par l'appelant qui détient la clé d'item. */
+type FieldEncryptor = (text: string) => Promise<string>;
+
+/** Section `login` d'une mise à jour : champs édités, passkeys préservées. */
+async function buildLoginSection(
+  edit: CipherEdit,
+  login: unknown,
+  enc: FieldEncryptor,
+  encOrNull: (text: string) => Promise<string | null>,
+): Promise<Record<string, unknown>> {
+  const uris = await Promise.all(
+    edit.uris
+      .map((uri) => uri.trim())
+      .filter((uri) => uri !== '')
+      .map(async (uri) => ({ uri: await enc(uri), match: null })),
+  );
+
+  return {
+    username: await encOrNull(edit.username),
+    password: await encOrNull(edit.password),
+    totp: await encOrNull(edit.totp),
+    uris,
+    // Les passkeys ne sont pas éditables ici : reprises telles quelles, déjà
+    // chiffrées. Les omettre les effacerait du serveur.
+    fido2Credentials: readField<unknown>(login, 'fido2Credentials') ?? null,
+  };
+}
+
+/**
+ * Historique de mots de passe, l'ancien en tête.
+ *
+ * L'ancien mot de passe est déjà chiffré — il est repris tel quel depuis l'item
+ * existant, jamais rechiffré : le rechiffrer avec une autre clé d'item le
+ * rendrait illisible, et c'est précisément l'historique qu'on consulte quand on
+ * a perdu l'accès à un compte.
+ */
+function buildPasswordHistory(
+  cipher: CipherResponse,
+  login: unknown,
+  record: boolean,
+): readonly unknown[] {
+  const history = readField<readonly unknown[]>(cipher, 'passwordHistory') ?? [];
+  const previousPassword = readField<string>(login, 'password');
+  if (!record || previousPassword == null || previousPassword === '') {
+    return history;
+  }
+  return [
+    { password: previousPassword, lastUsedDate: new Date().toISOString() },
+    ...history,
+  ].slice(0, PASSWORD_HISTORY_LIMIT);
 }

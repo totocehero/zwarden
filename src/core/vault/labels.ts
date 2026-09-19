@@ -69,10 +69,22 @@ export async function decryptLabels(
 ): Promise<VaultLabels> {
   const userKey = keys instanceof SymmetricCryptoKey ? keys : keys.userKey;
   const orgKeys =
-    keys instanceof SymmetricCryptoKey
-      ? new Map<string, SymmetricCryptoKey>()
-      : keys.orgKeys;
+    keys instanceof SymmetricCryptoKey ? new Map<string, SymmetricCryptoKey>() : keys.orgKeys;
 
+  const [folders, collections] = await Promise.all([
+    decryptFolders(sync, userKey, onError),
+    decryptCollections(sync, userKey, orgKeys, onError),
+  ]);
+
+  return { folders, collections, organizations: readOrganizations(sync) };
+}
+
+/** Dossiers personnels : nom chiffré avec la clé du coffre. */
+async function decryptFolders(
+  sync: SyncResponse,
+  userKey: SymmetricCryptoKey,
+  onError: (error: unknown) => void,
+): Promise<Map<string, string>> {
   const folders = new Map<string, string>();
   for (const folder of readField<readonly FolderResponse[]>(sync, 'folders') ?? []) {
     const id = readField<string>(folder, 'id');
@@ -84,7 +96,14 @@ export async function decryptLabels(
       folders.set(id, name);
     }
   }
+  return folders;
+}
 
+/**
+ * Noms d'organisations. Seule famille d'étiquettes qui arrive **en clair** dans
+ * le profil : d'où l'absence de déchiffrement, et de fonction asynchrone.
+ */
+function readOrganizations(sync: SyncResponse): Map<string, string> {
   const organizations = new Map<string, string>();
   const profile = readField<SyncResponse['profile']>(sync, 'profile');
   for (const org of readField<ReadonlyArray<Record<string, unknown>>>(profile, 'organizations') ??
@@ -95,7 +114,20 @@ export async function decryptLabels(
       organizations.set(id, name);
     }
   }
+  return organizations;
+}
 
+/**
+ * Collections. Le nom est chiffré avec la clé de **son** organisation, pas
+ * celle du coffre : une collection dont la clé d'organisation n'a pas été
+ * déballée est signalée et sautée, sans faire échouer les autres.
+ */
+async function decryptCollections(
+  sync: SyncResponse,
+  userKey: SymmetricCryptoKey,
+  orgKeys: ReadonlyMap<string, SymmetricCryptoKey>,
+  onError: (error: unknown) => void,
+): Promise<Map<string, CollectionLabel>> {
   const collections = new Map<string, CollectionLabel>();
   for (const collection of readField<readonly CollectionResponse[]>(sync, 'collections') ?? []) {
     const id = readField<string>(collection, 'id');
@@ -104,7 +136,6 @@ export async function decryptLabels(
     }
     const organizationId = readField<string | null>(collection, 'organizationId') ?? null;
 
-    // Le nom d'une collection est chiffré avec la clé de son organisation.
     const key = organizationId === null ? userKey : orgKeys.get(organizationId);
     if (key === undefined) {
       onError(new MissingOrgKeyError(organizationId ?? 'inconnue'));
@@ -121,6 +152,5 @@ export async function decryptLabels(
       readOnly: readField<boolean>(collection, 'readOnly') ?? false,
     });
   }
-
-  return { folders, collections, organizations };
+  return collections;
 }

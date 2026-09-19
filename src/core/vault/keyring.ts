@@ -104,6 +104,32 @@ export async function buildVaultKeys(
 }
 
 /**
+ * Efface tout le matériel de clé d'un trousseau.
+ *
+ * À appeler au verrouillage, et c'est le point : `userKey.destroy()` seul
+ * laissait les clés d'organisation — capables de déchiffrer tous les items
+ * partagés — en mémoire jusqu'au passage du ramasse-miettes, sans être
+ * écrasées. L'incohérence était d'autant plus nette que la clé privée RSA,
+ * elle, est bien effacée dès son dernier usage ({@link buildVaultKeys}).
+ *
+ * Accepte aussi bien une clé nue qu'un trousseau : l'appelant verrouille sans
+ * avoir à savoir dans quel cas il est.
+ *
+ * Best-effort, comme tout effacement en JavaScript — voir
+ * `SymmetricCryptoKey.destroy()`.
+ */
+export function destroyVaultKeys(keys: SymmetricCryptoKey | VaultKeys): void {
+  if (keys instanceof SymmetricCryptoKey) {
+    keys.destroy();
+    return;
+  }
+  keys.userKey.destroy();
+  for (const orgKey of keys.orgKeys.values()) {
+    orgKey.destroy();
+  }
+}
+
+/**
  * Clé de base d'un item : celle du coffre, ou celle de son organisation.
  *
  * @returns `null` si l'item appartient à une organisation dont la clé n'a pas

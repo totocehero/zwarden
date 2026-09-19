@@ -64,15 +64,47 @@ const AMBIGUOUS = 'l1IO0o';
 export type RandomSource = (length: number) => Uint8Array;
 
 /**
+ * Taille du tampon d'aléa. Un mot de passe de 128 caractères consomme au moins
+ * autant d'octets, davantage avec les rejets et le mélange : demander un octet
+ * à la fois faisait une centaine d'appels au CSPRNG par tirage, et le curseur
+ * de longueur retire à chaque cran.
+ */
+const RANDOM_CHUNK = 64;
+
+/**
+ * Distributeur d'octets aléatoires, rechargé par blocs.
+ *
+ * Le regroupement ne change **rien** à la distribution : les octets sont
+ * consommés dans l'ordre, un par un, exactement comme s'ils avaient été
+ * demandés séparément. Seul le nombre d'appels à la source diminue.
+ */
+function byteStream(random: RandomSource): () => number {
+  let buffer: Uint8Array = new Uint8Array(0);
+  let offset = 0;
+  return () => {
+    if (offset >= buffer.length) {
+      buffer = random(RANDOM_CHUNK);
+      offset = 0;
+      if (buffer.length === 0) {
+        // Source épuisée ou défaillante : mieux vaut échouer que rendre un mot
+        // de passe prévisible.
+        throw new GeneratorError("La source aléatoire n'a fourni aucun octet");
+      }
+    }
+    return buffer[offset++]!;
+  };
+}
+
+/**
  * Tire un entier uniforme dans `[0, bound[`.
  *
  * Rejette les octets de la tranche incomplète : c'est ce rejet, et lui seul,
  * qui garantit l'uniformité.
  */
-function nextIndex(bound: number, random: RandomSource): number {
+function nextIndex(bound: number, nextByte: () => number): number {
   const limit = 256 - (256 % bound);
   for (;;) {
-    const byte = random(1)[0] ?? 0;
+    const byte = nextByte();
     if (byte < limit) {
       return byte % bound;
     }
@@ -80,9 +112,9 @@ function nextIndex(bound: number, random: RandomSource): number {
 }
 
 /** Mélange de Fisher-Yates, avec la même source non biaisée. */
-function shuffle(chars: string[], random: RandomSource): void {
+function shuffle(chars: string[], nextByte: () => number): void {
   for (let i = chars.length - 1; i > 0; i--) {
-    const j = nextIndex(i + 1, random);
+    const j = nextIndex(i + 1, nextByte);
     [chars[i], chars[j]] = [chars[j]!, chars[i]!];
   }
 }
@@ -127,6 +159,7 @@ export function generatePassword(
 
   const length = Math.min(MAX_LENGTH, Math.max(MIN_LENGTH, Math.round(options.length)));
   const alphabet = sets.join('');
+  const nextByte = byteStream(random);
 
   // Un caractère par classe d'abord : la garantie de composition. Si la
   // longueur est inférieure au nombre de classes, les dernières sautent —
@@ -134,12 +167,12 @@ export function generatePassword(
   // protège l'invariant plutôt que de compter dessus.
   const chars: string[] = [];
   for (const set of sets.slice(0, length)) {
-    chars.push(set[nextIndex(set.length, random)]!);
+    chars.push(set[nextIndex(set.length, nextByte)]!);
   }
   while (chars.length < length) {
-    chars.push(alphabet[nextIndex(alphabet.length, random)]!);
+    chars.push(alphabet[nextIndex(alphabet.length, nextByte)]!);
   }
 
-  shuffle(chars, random);
+  shuffle(chars, nextByte);
   return chars.join('');
 }

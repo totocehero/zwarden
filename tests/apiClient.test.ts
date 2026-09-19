@@ -16,7 +16,7 @@ import {
   RateLimitedError,
   TwoFactorRequiredError,
 } from '../src/core/api/apiClient.js';
-import { DeviceType } from '../src/core/api/models.js';
+import { DeviceType, readField } from '../src/core/api/models.js';
 import { KdfType } from '../src/core/crypto/kdf.js';
 
 /** Appel capturé par le `fetch` simulé. */
@@ -365,5 +365,67 @@ describe('deleteCipher', () => {
     const erreur = await client.deleteCipher('jeton', 'id').catch((e: unknown) => e);
     expect(erreur).toBeInstanceOf(ApiError);
     expect((erreur as ApiError).status).toBe(403);
+  });
+});
+
+describe('normalisation de l’URL de serveur', () => {
+  const base = { deviceIdentifier: 'id-1', fetchFn: (async () => new Response('{}')) as typeof fetch };
+
+  /**
+   * La validation portait sur l'URL analysée mais renvoyait la chaîne d'entrée :
+   * paramètres et ancres survivaient, et la concaténation de chemin qui suit les
+   * rend destructeurs. `https://coffre.fr/#x` + `/api/sync` donne
+   * `https://coffre.fr/#x/api/sync`, où l'ancre avale le chemin.
+   */
+  it('refuse une URL porteuse d’un paramètre ou d’une ancre', () => {
+    expect(() => new ApiClient({ ...base, serverUrl: 'https://coffre.fr/#x' })).toThrow(RangeError);
+    expect(() => new ApiClient({ ...base, serverUrl: 'https://coffre.fr/?debug=1' })).toThrow(
+      RangeError,
+    );
+  });
+
+  it('conserve un chemin d’installation en sous-répertoire', async () => {
+    const appels: string[] = [];
+    const client = new ApiClient({
+      deviceIdentifier: 'id-1',
+      serverUrl: 'https://coffre.fr/bitwarden/',
+      fetchFn: (async (url: string) => {
+        appels.push(url);
+        return new Response('{"kdf":0,"kdfIterations":600000}');
+      }) as unknown as typeof fetch,
+    });
+    await client.prelogin('a@b.fr');
+    expect(appels[0]).toBe('https://coffre.fr/bitwarden/identity/accounts/prelogin');
+  });
+
+  it('exige HTTPS, sauf vers la boucle locale', () => {
+    expect(() => new ApiClient({ ...base, serverUrl: 'http://coffre.fr' })).toThrow(RangeError);
+    expect(() => new ApiClient({ ...base, serverUrl: 'http://localhost:8080' })).not.toThrow();
+  });
+});
+
+describe('readField', () => {
+  it('lit indifféremment les deux casses', () => {
+    expect(readField<string>({ accessToken: 'a' }, 'accessToken')).toBe('a');
+    expect(readField<string>({ AccessToken: 'a' }, 'accessToken')).toBe('a');
+    expect(readField<string>({ key: 'k' }, 'Key')).toBe('k');
+  });
+
+  /**
+   * `name in record` remontait la chaîne de prototypes : `constructor`,
+   * `toString` et `valueOf` répondaient toujours présents. Aucun champ de l'API
+   * n'entrait en collision, donc rien n'était exploitable — mais la garantie
+   * tenait à une coïncidence de nommage plutôt qu'à la structure du code.
+   */
+  it('ne lit jamais une propriété héritée du prototype', () => {
+    expect(readField<unknown>({}, 'constructor')).toBeUndefined();
+    expect(readField<unknown>({}, 'toString')).toBeUndefined();
+    expect(readField<unknown>({}, 'valueOf')).toBeUndefined();
+    expect(readField<unknown>({}, 'hasOwnProperty')).toBeUndefined();
+  });
+
+  it('rend undefined sur une source non-objet', () => {
+    expect(readField<unknown>(null, 'x')).toBeUndefined();
+    expect(readField<unknown>('texte', 'x')).toBeUndefined();
   });
 });

@@ -372,7 +372,7 @@ export class ApiClient {
     cipherId: string,
     cipher: Record<string, unknown>,
   ): Promise<CipherResponse> {
-    return this.requestJson<CipherResponse>(`/api/ciphers/${cipherId}`, {
+    return this.requestJson<CipherResponse>(`/api/ciphers/${encodeURIComponent(cipherId)}`, {
       method: 'PUT',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -394,7 +394,8 @@ export class ApiClient {
    * @throws {ApiError} Si la suppression échoue pour une autre raison.
    */
   async deleteCipher(accessToken: string, cipherId: string): Promise<void> {
-    const response = await this.fetchFn(`${this.baseUrl}/api/ciphers/${cipherId}`, {
+    const url = `${this.baseUrl}/api/ciphers/${encodeURIComponent(cipherId)}`;
+    const response = await this.fetchFn(url, {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${accessToken}` },
       signal: AbortSignal.timeout(this.timeoutMs),
@@ -483,15 +484,27 @@ export class ApiClient {
 }
 
 /**
- * Valide l'URL du serveur et la normalise (slash final retiré, pour éviter les
- * `//` dans les chemins, que certains reverse-proxies traitent différemment du
- * serveur applicatif).
+ * Valide l'URL du serveur et la normalise.
  *
  * HTTPS est exigé : un coffre — même chiffré de bout en bout — ne transite pas
  * en clair, ne serait-ce que pour protéger les jetons de session. HTTP reste
  * toléré vers localhost, pour le développement.
  *
- * @throws {RangeError} URL invalide, ou protocole refusé.
+ * **La valeur renvoyée est reconstruite depuis l'URL analysée**, jamais la
+ * chaîne d'entrée. Les renvoyer telle quelle laissait passer paramètres et
+ * ancres, que la concaténation de chemin qui suit rend silencieusement
+ * destructeurs : `https://coffre.fr/#x` + `/api/sync` donne
+ * `https://coffre.fr/#x/api/sync`, où l'ancre avale le chemin. La requête
+ * partait sur la racine, le serveur répondait du HTML, et l'utilisateur lisait
+ * « Réponse illisible » sans pouvoir soupçonner son URL. Une saisie collée
+ * depuis une barre d'adresse porte couramment l'un ou l'autre : mieux vaut les
+ * refuser franchement.
+ *
+ * Le slash final est retiré pour éviter les `//` dans les chemins, que certains
+ * reverse-proxies traitent différemment du serveur applicatif.
+ *
+ * @throws {RangeError} URL invalide, protocole refusé, ou URL porteuse d'un
+ *   paramètre ou d'une ancre.
  */
 function validateServerUrl(serverUrl: string): string {
   let url: URL;
@@ -514,7 +527,13 @@ function validateServerUrl(serverUrl: string): string {
     );
   }
 
-  return serverUrl.replace(/\/+$/, '');
+  if (url.search !== '' || url.hash !== '') {
+    throw new RangeError(
+      `L'URL du serveur ne doit porter ni paramètre ni ancre : « ${serverUrl} »`,
+    );
+  }
+
+  return `${url.origin}${url.pathname}`.replace(/\/+$/, '');
 }
 
 /** Normalise l'e-mail comme le fait la dérivation de clé, pour rester cohérent. */

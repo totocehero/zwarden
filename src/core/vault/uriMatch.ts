@@ -16,6 +16,18 @@
  * sont interprétées en HTTPS — jamais en HTTP, qui élargirait la
  * correspondance vers du trafic en clair.
  *
+ * **Le repli en HTTPS n'est tenté que sur une URI sans schéma**, et c'est une
+ * subtilité qui mérite d'être dite, parce que la version évidente du code est
+ * dangereuse. `new URL('localhost:8080')` réussit — protocole `localhost:` —
+ * donc s'arrêter au premier candidat qui s'analyse faisait échouer toute URI
+ * de la forme `hôte:port`, la forme courante d'un service auto-hébergé.
+ * Enchaîner naïvement sur `https://${uri}` corrige ce cas et en ouvre un pire :
+ * `https://mailto:alice@banque.fr` s'analyse en `https://banque.fr`, et un item
+ * dont l'unique URI est une adresse e-mail proposerait alors le remplissage sur
+ * la banque. Un échec muet devenait une correspondance fausse — l'échange n'est
+ * pas acceptable. D'où {@link porteUnSchema}, qui départage `hôte:port` d'un
+ * vrai schéma opaque.
+ *
  * @returns L'origine normalisée, ou `null` si l'URI est inexploitable.
  */
 export function uriOrigin(uri: string): string | null {
@@ -23,18 +35,35 @@ export function uriOrigin(uri: string): string | null {
   if (trimmed === '') {
     return null;
   }
-  for (const candidate of [trimmed, `https://${trimmed}`]) {
+  const candidates = porteUnSchema(trimmed) ? [trimmed] : [trimmed, `https://${trimmed}`];
+  for (const candidate of candidates) {
     try {
       const url = new URL(candidate);
       if (url.protocol === 'http:' || url.protocol === 'https:') {
         return url.origin;
       }
-      return null;
     } catch {
-      // Essayer le candidat suivant.
+      // Candidat suivant.
     }
   }
   return null;
+}
+
+/**
+ * `true` si l'URI porte déjà un schéma, auquel cas il ne faut pas lui en
+ * ajouter un.
+ *
+ * Deux marques : `://`, ou un préfixe `mot:` suivi d'autre chose qu'un numéro
+ * de port. C'est cette seconde clause qui distingue `mailto:alice@banque.fr`
+ * (schéma opaque, à laisser tel quel) de `exemple.fr:8080` (hôte et port, à
+ * préfixer).
+ */
+function porteUnSchema(uri: string): boolean {
+  if (uri.includes('://')) {
+    return true;
+  }
+  const schema = /^[a-zA-Z][a-zA-Z0-9+.-]*:(.*)$/.exec(uri);
+  return schema !== null && !/^\d+([/?#]|$)/.test(schema[1]!);
 }
 
 /**

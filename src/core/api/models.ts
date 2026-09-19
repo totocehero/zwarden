@@ -203,7 +203,12 @@ export function readField<T>(source: unknown, name: string): T | undefined {
   }
 
   const record = source as Record<string, unknown>;
-  if (name in record) {
+  // `Object.hasOwn` et non `in` : `in` remonte la chaîne de prototypes, où
+  // `constructor`, `toString` et `valueOf` répondent toujours présents. Aucun
+  // nom de champ de l'API n'entre en collision avec eux aujourd'hui — la
+  // garantie tenait donc à une coïncidence, alors qu'elle peut être
+  // structurelle pour le même prix.
+  if (Object.hasOwn(record, name)) {
     return record[name] as T;
   }
 
@@ -212,5 +217,5 @@ export function readField<T>(source: unknown, name: string): T | undefined {
       ? name.charAt(0).toLowerCase() + name.slice(1)
       : name.charAt(0).toUpperCase() + name.slice(1);
 
-  return record[flipped] as T | undefined;
+  return Object.hasOwn(record, flipped) ? (record[flipped] as T) : undefined;
 }

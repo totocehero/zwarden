@@ -10,7 +10,7 @@ import { globSync } from 'node:fs';
 
 const SEUIL = Number(process.argv[2] ?? 40);
 
-const fichiers = globSync('src/**/*.ts');
+const fichiers = globSync('src/**/*.{ts,tsx}');
 
 const SIGNATURE =
   /^\s*(?:export\s+)?(?:async\s+)?(?:function\s+(\w+)|(?:private\s+|public\s+|static\s+|readonly\s+)*(?:async\s+)?(\w+)\s*\()/;
