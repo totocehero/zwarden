@@ -434,6 +434,15 @@
   "settingsPasskeyHint": {
     "message": "Désactivé par défaut. C’est la seule fonctionnalité qui place du code dans chaque page visitée — le remplacement d’une fonction du navigateur, et rien d’autre : aucun élément, aucun style, aucune interface. La confirmation se fait dans la popup, comme toute autre décision ici. Quand Zwarden n’a rien à proposer, ou que vous refusez, le navigateur reprend la main et votre clé matérielle fonctionne exactement comme avant."
   },
+  "settingsPasskeyInstalled": {
+    "message": "Installé dans les pages : oui."
+  },
+  "settingsPasskeyMissing": {
+    "message": "Installé dans les pages : NON. Rien ne sera intercepté."
+  },
+  "settingsPasskeyReload": {
+    "message": "Les onglets déjà ouverts ne sont pas couverts — ouvrez-en un nouveau."
+  },
   "assertionTitle": {
     "message": "Se connecter par passkey"
   },

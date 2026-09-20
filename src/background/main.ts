@@ -54,6 +54,7 @@ import {
   loadLastActivity,
   isNeverSaveHost,
   loadPasskeyParties,
+  savePasskeyHookStatus,
   loadSettings,
   hasStoredSession,
   lockVault,
@@ -471,9 +472,11 @@ async function applyPasskeyRegistration(): Promise<void> {
     if (existing.length > 0) {
       await chrome.scripting.unregisterContentScripts({ ids });
     }
+    await savePasskeyHookStatus({ registered: false, error: null });
     return;
   }
   if (existing.length === ids.length) {
+    await savePasskeyHookStatus({ registered: true, error: null });
     return;
   }
   // Partially registered — one half there, the other not. Registering would be
@@ -485,8 +488,13 @@ async function applyPasskeyRegistration(): Promise<void> {
     });
   }
 
-  try {
-    await chrome.scripting.registerContentScripts([
+  // Whether `world: 'MAIN'` may be combined with `persistAcrossSessions` is not
+  // something the documentation settles, and a refusal here is invisible from
+  // the page — it looks exactly like a site that simply never calls WebAuthn.
+  // So the persistent form is tried, and the session-only form after it.
+  for (const persistAcrossSessions of [true, false]) {
+    try {
+      await chrome.scripting.registerContentScripts([
       {
         id: PASSKEY_HOOK_ID,
         js: ['webauthnHook.js'],
@@ -503,7 +511,7 @@ async function applyPasskeyRegistration(): Promise<void> {
         // own prompt instead of ours.
         allFrames: false,
         runAt: 'document_start',
-        persistAcrossSessions: true,
+        persistAcrossSessions,
       },
       {
         id: PASSKEY_BRIDGE_ID,
@@ -512,14 +520,20 @@ async function applyPasskeyRegistration(): Promise<void> {
         matches: ['https://*/*'],
         allFrames: false,
         runAt: 'document_start',
-        persistAcrossSessions: true,
+        persistAcrossSessions,
       },
-    ]);
-  } catch (error) {
-    // Said out loud. A registration that fails silently leaves the feature
-    // switched on in the settings and absent from every page, which is the
-    // worst of both: the user believes it works and has no way to find out.
-    console.error('[zwarden] could not install the passkey hook:', error);
+      ]);
+      console.log('[zwarden] passkey hook registered', { persistAcrossSessions });
+      await savePasskeyHookStatus({ registered: true, error: null });
+      return;
+    } catch (error) {
+      // Recorded where the settings page can show it. A registration that fails
+      // silently leaves the feature switched on and absent from every page —
+      // the worst of both, since the user believes it works and has no way to
+      // find out.
+      console.error('[zwarden] could not install the passkey hook:', error);
+      await savePasskeyHookStatus({ registered: false, error: String(error) });
+    }
   }
 }
 

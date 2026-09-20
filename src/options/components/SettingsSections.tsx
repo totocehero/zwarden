@@ -7,7 +7,14 @@
  */
 
 import { AVAILABLE_LOCALES, FOLLOW_BROWSER, type MessageKey, t } from '@shared/i18n.js';
-import { type AppSettings, DEFAULT_SETTINGS } from '@shared/storage.js';
+import { useEffect, useState } from 'preact/hooks';
+
+import {
+  type AppSettings,
+  DEFAULT_SETTINGS,
+  loadPasskeyHookStatus,
+  type PasskeyHookStatus,
+} from '@shared/storage.js';
 
 /** A partial settings change, raised to `App`. */
 export type PatchSettings = (patch: Partial<AppSettings>) => void;
@@ -168,6 +175,16 @@ export function PasskeySection({
   settings: AppSettings;
   patch: PatchSettings;
 }) {
+  const [status, setStatus] = useState<PasskeyHookStatus | null>(null);
+
+  // Re-read whenever the switch moves: the worker rewrites it in response, and
+  // a stale "installed: no" beside a switch just turned on would be worse than
+  // saying nothing.
+  useEffect(() => {
+    const timer = setTimeout(() => void loadPasskeyHookStatus().then(setStatus), 200);
+    return () => clearTimeout(timer);
+  }, [settings.passkeySignIn]);
+
   return (
     <section>
       <h2>{t('settingsPasskeySection')}</h2>
@@ -180,6 +197,17 @@ export function PasskeySection({
           />
           {t('settingsPasskeyEnable')}
         </label>
+        {/* Whether the scripts are actually in pages, said here rather than
+            left in a console. A failed installation is indistinguishable from
+            a site that never asks for a passkey, which is how it went
+            unnoticed through several rounds of looking elsewhere. */}
+        {settings.passkeySignIn && status !== null && (
+          <p class={status.registered ? 'hint' : 'error'}>
+            {status.registered ? t('settingsPasskeyInstalled') : t('settingsPasskeyMissing')}
+            {status.error !== null ? ` ${status.error}` : ''}
+          </p>
+        )}
+        {settings.passkeySignIn && <p class="hint-diag">{t('settingsPasskeyReload')}</p>}
         <p class="hint">{t('settingsPasskeyHint')}</p>
       </div>
     </section>

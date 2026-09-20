@@ -434,6 +434,15 @@
   "settingsPasskeyHint": {
     "message": "Off by default. This is the one feature that puts code inside every page you visit — a replacement for one browser function, and nothing else: no element, no style, no interface. The confirmation happens in the popup, like every other decision here. When Zwarden has nothing to offer, or you decline, the browser takes over and your hardware key works exactly as before."
   },
+  "settingsPasskeyInstalled": {
+    "message": "Installed in pages: yes."
+  },
+  "settingsPasskeyMissing": {
+    "message": "Installed in pages: NO. Nothing will be intercepted."
+  },
+  "settingsPasskeyReload": {
+    "message": "Already-open tabs are not covered — open a new one."
+  },
   "assertionTitle": {
     "message": "Sign in with a passkey"
   },

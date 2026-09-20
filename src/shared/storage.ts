@@ -756,6 +756,43 @@ export async function clearStoredSession(): Promise<void> {
   await forgetSealingKey();
 }
 
+// --- Is the passkey hook actually in pages? ----------------------------------
+
+const PASSKEY_HOOK_STATUS_KEY = 'passkeyHookStatus';
+
+/** Whether the two content scripts are installed, and why not if they are not. */
+export interface PasskeyHookStatus {
+  readonly registered: boolean;
+  readonly error: string | null;
+}
+
+/**
+ * Records the outcome of installing the passkey hook.
+ *
+ * Written by the service worker, shown by the settings page. Without it the
+ * only evidence is a line in a console nobody opens, and a failed installation
+ * is indistinguishable from a site that never asks for a passkey — which is
+ * how this went unnoticed through several rounds of looking for it elsewhere.
+ */
+export async function savePasskeyHookStatus(status: PasskeyHookStatus): Promise<void> {
+  if (hasLocal) {
+    await chrome.storage.local.set({ [PASSKEY_HOOK_STATUS_KEY]: status });
+  }
+}
+
+/** The last recorded outcome, or `null` if it has never been attempted. */
+export async function loadPasskeyHookStatus(): Promise<PasskeyHookStatus | null> {
+  if (!hasLocal) {
+    return null;
+  }
+  const stored = await chrome.storage.local.get(PASSKEY_HOOK_STATUS_KEY);
+  const value = stored[PASSKEY_HOOK_STATUS_KEY] as Partial<PasskeyHookStatus> | undefined;
+  if (value === undefined || typeof value.registered !== 'boolean') {
+    return null;
+  }
+  return { registered: value.registered, error: typeof value.error === 'string' ? value.error : null };
+}
+
 // --- Which sites the vault can answer for ------------------------------------
 
 const PASSKEY_PARTIES_KEY = 'passkeyRelyingParties';
