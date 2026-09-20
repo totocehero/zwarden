@@ -119,6 +119,13 @@ export const MESSAGE_KEYS = [
   'editHide',
   'editPasskeyNote',
 
+  // List filters
+  'filterAll',
+  'filterShowType',
+  'filterHideType',
+  'filterShowAll',
+  'filterCount',
+
   // Item types and creation
   'newItem',
   'newItemTitle',

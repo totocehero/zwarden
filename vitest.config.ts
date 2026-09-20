@@ -1,6 +1,17 @@
+import { fileURLToPath } from 'node:url';
+
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  // The same aliases the build uses. Without them a test can reach the core
+  // modules (which import by relative path) but not a component, which imports
+  // by alias — and a rule worth testing is not always in the core.
+  resolve: {
+    alias: {
+      '@core': fileURLToPath(new URL('./src/core', import.meta.url)),
+      '@shared': fileURLToPath(new URL('./src/shared', import.meta.url)),
+    },
+  },
   test: {
     globals: true,
     // WebCrypto is available natively in Node >= 20 through globalThis.crypto,

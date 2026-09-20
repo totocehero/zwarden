@@ -40,6 +40,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
 import { type EditForm, EMPTY_EDIT, EditItemForm } from './components/EditItemForm.js';
 import type { RevealedContent } from './components/ItemRow.js';
+import { TypeFilter } from './components/TypeFilter.js';
 import { chipsFor, ItemRow } from './components/ItemRow.js';
 import { RepromptGuard } from './components/RepromptGuard.js';
 import { SaveProposalBanner, type SaveProposal } from './components/SaveProposal.js';
@@ -283,6 +284,13 @@ function App() {
   const [revealed, setRevealed] = useState<{ id: string; content: RevealedContent } | null>(null);
   /** Label of the detail field copied a moment ago — feeds the tick on it. */
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  /**
+   * The types the list is narrowed to. Empty means every type.
+   *
+   * Not persisted: a filter left on from yesterday would hide items with no
+   * visible reason, and the cost of setting it again is one click.
+   */
+  const [typeFilter, setTypeFilter] = useState<ReadonlySet<number>>(new Set());
   const [showPassword, setShowPassword] = useState(false);
   const [proposal, setProposal] = useState<SaveProposal | null>(null);
   const reprompt = useReprompt(messageFor);
@@ -1366,11 +1374,23 @@ function App() {
   const needle = filter.trim().toLowerCase();
   const visible = useMemo(
     () =>
-      needle === ''
-        ? vault.items
-        : vault.items.filter((i) => matchesNeedle(i, needle, vault.labels)),
-    [vault.items, vault.labels, needle],
+      vault.items.filter(
+        (i) =>
+          (typeFilter.size === 0 || typeFilter.has(i.type)) &&
+          (needle === '' || matchesNeedle(i, needle, vault.labels)),
+      ),
+    [vault.items, vault.labels, needle, typeFilter],
   );
+
+  // Counted over the whole vault, not over what is visible: a chip whose count
+  // changed as it was clicked would be reporting the filter, not the vault.
+  const typeCounts = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const item of vault.items) {
+      counts.set(item.type, (counts.get(item.type) ?? 0) + 1);
+    }
+    return counts;
+  }, [vault.items]);
 
   return (
     <div>
@@ -1414,6 +1434,7 @@ function App() {
             onNever={() => void onNeverForHost()}
           />
         )}
+        <TypeFilter counts={typeCounts} selected={typeFilter} onSelect={setTypeFilter} />
         <input
           class="search"
           type="search"

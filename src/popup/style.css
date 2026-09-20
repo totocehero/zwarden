@@ -680,3 +680,33 @@ input.mono {
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
+
+/* Filter chips by type, above the search box. */
+
+.type-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+button.chip-type-filter {
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 18px;
+}
+
+button.chip-type-filter:hover {
+  color: var(--text);
+  border-color: var(--text-2);
+}
+
+/* The active chip: filled, not merely outlined — from across the popup it must
+   be obvious that the list is showing a subset, or an empty list reads as an
+   empty vault. */
+button.chip-type-filter.chip-on {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}

@@ -203,6 +203,21 @@
   "editPasskeyNote": {
     "message": "Passkey preserved as-is — WebAuthn signing will arrive in a future version."
   },
+  "filterAll": {
+    "message": "All"
+  },
+  "filterShowType": {
+    "message": "Also show: $1"
+  },
+  "filterHideType": {
+    "message": "Stop showing: $1"
+  },
+  "filterShowAll": {
+    "message": "Show every item"
+  },
+  "filterCount": {
+    "message": "$1 ($2)"
+  },
   "newItem": {
     "message": "New"
   },

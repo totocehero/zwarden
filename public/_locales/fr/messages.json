@@ -203,6 +203,21 @@
   "editPasskeyNote": {
     "message": "Passkey conservée telle quelle — la signature WebAuthn arrivera dans une prochaine version."
   },
+  "filterAll": {
+    "message": "Tout"
+  },
+  "filterShowType": {
+    "message": "Afficher aussi : $1"
+  },
+  "filterHideType": {
+    "message": "Ne plus afficher : $1"
+  },
+  "filterShowAll": {
+    "message": "Afficher tous les éléments"
+  },
+  "filterCount": {
+    "message": "$1 ($2)"
+  },
   "newItem": {
     "message": "Nouveau"
   },
