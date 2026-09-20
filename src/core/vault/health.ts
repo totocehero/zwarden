@@ -33,7 +33,14 @@ export interface HealthItem {
   /** `true` if the item demands the master password again: it is not examined. */
   readonly reprompt: boolean;
   readonly password: string | null;
-  /** When the password last changed, ISO-8601, if the server said. */
+  /**
+   * When the password was last **set**, ISO-8601.
+   *
+   * Not merely when it was last changed: an item created long ago and never
+   * edited has no `passwordRevisionDate` at all, and its password is as old as
+   * the item. The caller resolves that — what arrives here is the date the
+   * password has stood unchanged since, whichever field it came from.
+   */
   readonly passwordUpdatedAt: string | null;
   readonly card: CardView | null;
 }

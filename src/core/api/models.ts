@@ -113,6 +113,23 @@ export interface CipherResponse {
   readonly folderId?: string | null;
   /** Organisation collections the item belongs to. */
   readonly collectionIds?: readonly string[] | null;
+  /**
+   * When the item was created, in clear.
+   *
+   * The only date that says how old a **password** is when it has never been
+   * changed since — which is the common case, and precisely the one a health
+   * report must not miss.
+   */
+  readonly creationDate?: string | null;
+  /**
+   * When the item last changed, in clear.
+   *
+   * Moves on any edit, a rename included, so it says nothing about the age of
+   * the password. It is what conflict detection compares
+   * (`offlineQueue.decideReplay`) and what lets an unchanged item be reused
+   * without decrypting it again (`reuseByRevision`).
+   */
+  readonly revisionDate?: string | null;
 }
 
 /** A personal folder. The name is encrypted with the vault key. */

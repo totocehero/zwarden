@@ -68,7 +68,18 @@ function DiscardButton({ onDelete }: { onDelete: () => void }) {
   );
 }
 
-/** One group of findings, or nothing when there are none. */
+/**
+ * One group of findings, folded, or nothing when there are none.
+ *
+ * `<details>` rather than a hand-rolled toggle: it opens on click, on Enter and
+ * on Space, it is announced correctly, and browser find-in-page can open it.
+ * None of that comes free from a `useState` and a chevron.
+ *
+ * **Folded by default, with the count in the heading.** A report of five
+ * categories opened flat is a wall one scrolls past; folded, it is a summary
+ * one reads in a second and then opens where it matters. That is the whole
+ * reason to have categories at all.
+ */
 function Finding({
   title,
   rows,
@@ -82,8 +93,11 @@ function Finding({
     return null;
   }
   return (
-    <section class="detail-group">
-      <h2>{title}</h2>
+    <details class="detail-group health-group">
+      <summary>
+        <span class="health-group-title">{title}</span>
+        <span class="health-group-count">{rows.length}</span>
+      </summary>
       {rows.map((row) => (
         <div key={row.key} class="health-row">
           <span class="health-name">{row.name}</span>
@@ -93,7 +107,7 @@ function Finding({
           )}
         </div>
       ))}
-    </section>
+    </details>
   );
 }
 

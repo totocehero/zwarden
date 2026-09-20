@@ -148,9 +148,10 @@ describe('stale passwords', () => {
     expect(report.stale).toEqual([]);
   });
 
-  it('treats an unknown date as unknown, not as old', () => {
-    // Most items have no `passwordRevisionDate` at all. Flagging them would
-    // bury the real findings under the whole vault.
+  it('treats a date it cannot read as unknown, not as old', () => {
+    // A missing date is the caller's business — it resolves the creation date
+    // when a password was never revised. What reaches here and cannot be read
+    // is not evidence of age.
     expect(buildHealthReport([item({ passwordUpdatedAt: null })], NOW).stale).toEqual([]);
     expect(buildHealthReport([item({ passwordUpdatedAt: 'not a date' })], NOW).stale).toEqual([]);
   });

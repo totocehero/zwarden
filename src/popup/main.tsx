@@ -1450,9 +1450,19 @@ function App() {
             type: item.type,
             reprompt: item.reprompt,
             password: details?.password ?? null,
-            // Not encrypted — a date the server keeps in clear, so reading it
-            // costs nothing and asks nothing of the guard.
-            passwordUpdatedAt: readField<string>(login, 'passwordRevisionDate') ?? null,
+            // Neither is encrypted, so reading them costs nothing and asks
+            // nothing of the guard.
+            //
+            // The fallback is the point: Bitwarden sets `passwordRevisionDate`
+            // only when a password is **changed after creation**, so an item
+            // made years ago and never edited has none at all. Skipping those
+            // would hide exactly the oldest passwords, which is the opposite of
+            // what this list is for. If the password was never revised, it is
+            // as old as the item.
+            passwordUpdatedAt:
+              readField<string>(login, 'passwordRevisionDate') ??
+              readField<string>(cipher, 'creationDate') ??
+              null,
             card: details?.card ?? null,
           };
         }),
