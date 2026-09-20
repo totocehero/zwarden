@@ -256,7 +256,7 @@ describe('login', () => {
 
   it('exposes the remember token the server returns', async () => {
     const client = clientWith(() =>
-      jsonResponse(200, { ...TOKEN_OK, TwoFactorToken: 'jeton-de-dispense' }),
+      jsonResponse(200, { ...TOKEN_OK, TwoFactorToken: 'two-factor-exemption-token' }),
     );
 
     const session = await client.login('a@b.c', HASH, {
@@ -264,7 +264,7 @@ describe('login', () => {
       token: '123456',
       remember: true,
     });
-    expect(session.twoFactorRememberToken).toBe('jeton-de-dispense');
+    expect(session.twoFactorRememberToken).toBe('two-factor-exemption-token');
   });
 
   it('translates a captcha requirement', async () => {

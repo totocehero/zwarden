@@ -155,7 +155,7 @@ describe('cipherService', () => {
             keyCurve: await enc('P-256', userKey),
             keyValue: await enc('private-key-pkcs8-b64', userKey),
             rpId: await enc('npmjs.com', userKey),
-            userName: await enc('fredc', userKey),
+            userName: await enc('ada', userKey),
             counter: await enc('0', userKey),
             creationDate: '2026-08-22T00:00:00Z',
           },
@@ -168,7 +168,7 @@ describe('cipherService', () => {
     expect(view.hasPasskey).toBe(true);
 
     const details = await decryptCipherDetails(cipher, userKey, (e) => errors.push(e));
-    expect(details.passkeys).toEqual([{ rpId: 'npmjs.com', userName: 'fredc' }]);
+    expect(details.passkeys).toEqual([{ rpId: 'npmjs.com', userName: 'ada' }]);
     expect(errors).toHaveLength(0);
 
     // The private key is never exposed by the views.
@@ -787,7 +787,7 @@ describe('unlock (the unlock orchestrator)', () => {
         const key = options?.protectedKeyOverride ?? protectedUserKey;
         return jsonResponse(200, {
           access_token: 'session-token',
-          refresh_token: 'jeton-de-rafraichissement',
+          refresh_token: 'refresh-token',
           expires_in: 3600,
           token_type: 'Bearer',
           ...(form.get('twoFactorRemember') === '1' ? { TwoFactorToken: '2fa-remember' } : {}),
