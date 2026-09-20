@@ -2,57 +2,64 @@
  * @file The "most recently used first" ordering.
  *
  * Two pure functions carry all the observable behaviour: the list's order
- * (`sortByLastUsed`) and the use log's cap (`pruneLastUsed`). The rest is just
- * storage.
+ * (`sortCiphersByLastUsed`) and the use log's cap (`pruneLastUsed`). The rest is
+ * just storage.
+ *
+ * The ordering is applied to items **before** they are decrypted, which is what
+ * lets the popup decrypt the first screenful first. So it is checked on raw
+ * items, in both the casings the API has used over its life — a sort that quietly
+ * failed to read an identifier would put the whole vault back in server order.
  */
 
 import { describe, expect, it } from 'vitest';
 
-import type { CipherOverview } from '../src/core/vault/cipherService.js';
-import { sortByLastUsed } from '../src/core/vault/cipherService.js';
+import type { CipherResponse } from '../src/core/api/models.js';
+import { sortCiphersByLastUsed } from '../src/core/vault/cipherService.js';
 import { pruneLastUsed } from '../src/shared/storage.js';
 
-function item(id: string): CipherOverview {
-  return {
-    id,
-    type: 1,
-    name: id,
-    username: null,
-    uris: [],
-  subtitle: null,
-    hasPasskey: false,
-    hasTotp: false,
-    reprompt: false,
-    organizationId: null,
-    folderId: null,
-    collectionIds: [],
-  };
-}
+const item = (id: string): CipherResponse => ({ id, type: 1 }) as unknown as CipherResponse;
 
-const ids = (items: readonly CipherOverview[]): string[] => items.map((i) => i.id);
+const ids = (items: readonly CipherResponse[]): string[] =>
+  items.map((i) => (i as unknown as { id?: string; Id?: string }).id ?? '');
 
-describe('sortByLastUsed', () => {
+describe('sortCiphersByLastUsed', () => {
   const list = [item('a'), item('b'), item('c'), item('d')];
 
   it('leaves the list untouched when nothing has been used', () => {
-    expect(sortByLastUsed(list, {})).toBe(list);
+    expect(sortCiphersByLastUsed(list, {})).toBe(list);
   });
 
   it('floats the used item to the top', () => {
-    expect(ids(sortByLastUsed(list, { c: 1000 }))).toEqual(['c', 'a', 'b', 'd']);
+    expect(ids(sortCiphersByLastUsed(list, { c: 1000 }))).toEqual(['c', 'a', 'b', 'd']);
   });
 
   it('orders used items from most to least recent', () => {
-    expect(ids(sortByLastUsed(list, { a: 10, c: 30, d: 20 }))).toEqual(['c', 'd', 'a', 'b']);
+    expect(ids(sortCiphersByLastUsed(list, { a: 10, c: 30, d: 20 }))).toEqual([
+      'c',
+      'd',
+      'a',
+      'b',
+    ]);
   });
 
   it('preserves the original order of items never used', () => {
-    expect(ids(sortByLastUsed(list, { d: 1 }))).toEqual(['d', 'a', 'b', 'c']);
+    expect(ids(sortCiphersByLastUsed(list, { d: 1 }))).toEqual(['d', 'a', 'b', 'c']);
   });
 
   it('ignores uses of items absent from the vault', () => {
     // An item deleted since, or belonging to another account.
-    expect(ids(sortByLastUsed(list, { zzz: 999 }))).toEqual(['a', 'b', 'c', 'd']);
+    expect(ids(sortCiphersByLastUsed(list, { zzz: 999 }))).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('reads the identifier in either casing', () => {
+    // A cache written by an older API version holds PascalCase. Failing to read
+    // the identifier here would silently return the whole vault in server order.
+    const pascal = [
+      { Id: 'a', Type: 1 },
+      { Id: 'b', Type: 1 },
+    ] as unknown as CipherResponse[];
+    const sorted = sortCiphersByLastUsed(pascal, { b: 1000 });
+    expect((sorted[0] as unknown as { Id: string }).Id).toBe('b');
   });
 });
 

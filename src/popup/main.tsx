@@ -73,7 +73,7 @@ import {
   decryptCipherList,
   findSaveCandidate,
   reuseByRevision,
-  sortByLastUsed,
+  sortCiphersByLastUsed,
 } from '@core/vault/cipherService.js';
 import { buildVaultKeys, destroyVaultKeys } from '@core/vault/keyring.js';
 import { type VaultLabels, decryptLabels } from '@core/vault/labels.js';
@@ -116,6 +116,14 @@ interface OpenVault {
   readonly labels: VaultLabels;
   /** Decryption failures encountered, for on-screen diagnosis. */
   readonly errors: readonly unknown[];
+  /**
+   * How many items are still being decrypted, `0` once the vault is whole.
+   *
+   * Shown rather than hidden: while it is above zero the list is incomplete, so
+   * a search that finds nothing may simply not have reached the item yet. An
+   * empty result the user cannot tell from a missing one is worse than a wait.
+   */
+  readonly pending: number;
 }
 
 /**
@@ -247,6 +255,21 @@ function toEditValues<F extends string>(
     Record<F, string>
   >;
 }
+
+/**
+ * How many items are decrypted before the list is first drawn.
+ *
+ * A vault of five hundred items with a key of its own per item costs the better
+ * part of a second to decrypt, and a popup is a cold start every time — no JIT,
+ * no warm cache. Twenty rows is more than the 420-pixel popup shows, so the
+ * list is complete as far as the eye goes, and the rest lands while the hand is
+ * still moving.
+ *
+ * The server cannot help here: Bitwarden's `/api/sync` returns the vault whole
+ * and takes no page parameter. What is split is the decryption, which is where
+ * the time actually goes.
+ */
+const FIRST_SLICE = 20;
 
 /** The total held by a per-type count. */
 function countOf(counts: ReadonlyMap<number, number>): number {
@@ -533,14 +556,10 @@ function App() {
       setBusy(t('statusDecrypting', String(ciphers.length)));
     }
     const keys = await buildVaultKeys(sync.profile, userKey, onDecryptError);
-    // Items whose revision date has not moved since the previous display are
-    // reused as-is: after a write, only the written item is re-decrypted rather
-    // than the whole vault.
-    const reuse = vault === null ? undefined : reuseByRevision(vault.items, vault.raw);
-    const [items, labels] = await Promise.all([
-      decryptCipherList(ciphers, keys, onDecryptError, undefined, reuse),
-      decryptLabels(sync, keys, onDecryptError),
-    ]);
+
+    // Counted from the raw items: `type` is not encrypted, so the filter is
+    // right from the first frame and never has to be revised.
+    setRawCounts(countTypes(ciphers));
 
     const raw = new Map<string, CipherResponse>();
     for (const cipher of ciphers) {
@@ -550,10 +569,42 @@ function App() {
     // The ordering is frozen at opening, never reapplied while the popup is
     // open: an item floating up under the cursor at the moment it is copied
     // would make the next click land on the wrong row.
-    const ordered = sortByLastUsed(items, await loadLastUsed());
+    //
+    // Applied to the raw items, before decryption — the use log is keyed by
+    // identifier, and an identifier is in clear. That is the whole trick: it is
+    // what makes the first slice the rows actually on screen, rather than
+    // whichever twenty the server happened to list first.
+    const ordered = sortCiphersByLastUsed(ciphers, await loadLastUsed());
+    const head = ordered.slice(0, FIRST_SLICE);
+    const tail = ordered.slice(FIRST_SLICE);
 
-    setVault({ userKey, keys, items: ordered, raw, labels, errors });
-    await evaluatePending(ordered, raw, keys, onDecryptError);
+    // Items whose revision date has not moved since the previous display are
+    // reused as-is: after a write, only the written item is re-decrypted rather
+    // than the whole vault.
+    const reuse = vault === null ? undefined : reuseByRevision(vault.items, vault.raw);
+    const [headItems, labels] = await Promise.all([
+      decryptCipherList(head, keys, onDecryptError, undefined, reuse),
+      decryptLabels(sync, keys, onDecryptError),
+    ]);
+
+    const base = { userKey, keys, raw, labels, errors };
+    if (tail.length > 0) {
+      // On screen at once. The rest follows in the same turn of the loop, but
+      // the rows the user is about to read are already there.
+      setVault({ ...base, items: headItems, pending: tail.length });
+    }
+
+    const items = [
+      ...headItems,
+      ...(tail.length === 0
+        ? []
+        : await decryptCipherList(tail, keys, onDecryptError, undefined, reuse)),
+    ];
+    setVault({ ...base, items, pending: 0 });
+
+    // Both of these need the whole vault: a save candidate missed because its
+    // item was still encrypted would offer to create a duplicate.
+    await evaluatePending(items, raw, keys, onDecryptError);
 
     // Active tab: strict origin for "Fill", domain for the pre-filled filter —
     // without overwriting a search already typed, and only if it matches
@@ -561,7 +612,7 @@ function App() {
     const tab = await activeWebTab();
     setTabOrigin(tab === null ? null : tab.url.origin);
     const host = tab?.url.hostname.replace(/^www\./, '');
-    if (host !== undefined && ordered.some((item) => matchesNeedle(item, host, labels))) {
+    if (host !== undefined && items.some((item) => matchesNeedle(item, host, labels))) {
       setFilter((current) => (current === '' ? host : current));
     }
   }
@@ -1427,20 +1478,6 @@ function App() {
     [vault.items, vault.labels, needle, typeFilter],
   );
 
-  // Counted over the whole vault, not over what is visible: a chip whose count
-  // changed as it was clicked would be reporting the filter, not the vault.
-  //
-  // Recounted from the decrypted items rather than kept from `rawCounts`, which
-  // only described the cache: the network refresh that follows can add or remove
-  // items, and a count frozen at opening would drift.
-  const typeCounts = useMemo(() => {
-    const counts = new Map<number, number>();
-    for (const item of vault.items) {
-      counts.set(item.type, (counts.get(item.type) ?? 0) + 1);
-    }
-    return counts;
-  }, [vault.items]);
-
   return (
     <div>
       <VaultHeader
@@ -1469,7 +1506,10 @@ function App() {
             onNever={() => void onNeverForHost()}
           />
         )}
-        <TypeFilter counts={typeCounts} selected={typeFilter} onSelect={setTypeFilter} />
+        {/* The same counts the loading screen showed, from the same source:
+            `type` is not encrypted, so they were right before a single field
+            was read and there is nothing to revise. */}
+        <TypeFilter counts={rawCounts} selected={typeFilter} onSelect={setTypeFilter} />
         <input
           class="search"
           type="search"
@@ -1493,7 +1533,12 @@ function App() {
           </details>
         )}
         {error !== null && <p class="error">{error}</p>}
-        {visible.length === 0 ? (
+        {vault.pending > 0 && (
+          // Said out loud: while this is up, a search that finds nothing may
+          // simply not have reached the item yet.
+          <p class="status">{t('listStillOpening', String(vault.pending))}</p>
+        )}
+        {visible.length === 0 && vault.pending === 0 ? (
           <p class="empty">{t('listEmpty')}</p>
         ) : (
           <ul class="items">

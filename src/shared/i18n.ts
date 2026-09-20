@@ -99,6 +99,7 @@ export const MESSAGE_KEYS = [
   // Vault list
   'listSearch',
   'listSearchUnknown',
+  'listStillOpening',
   'listEmpty',
   'listUnreadableFields',
   'listFullLog',

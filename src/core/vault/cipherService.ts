@@ -270,19 +270,45 @@ export function decideProposal(
  * @param items Decrypted items, in the server's order.
  * @param lastUsed Last-use timestamps, by identifier.
  */
-export function sortByLastUsed(
-  items: readonly CipherOverview[],
+/**
+ * The same order, applied to items **not yet decrypted**.
+ *
+ * The use log is keyed by identifier, and an identifier is not encrypted — so
+ * the order the rows will appear in is known before a single field is read.
+ * That is what lets the popup decrypt the first screenful first, instead of
+ * decrypting everything and only then discovering which twenty were on top.
+ *
+ * @param ciphers Raw items, typically `sync.ciphers`.
+ * @param lastUsed Use log, `{ [id]: timestamp }`.
+ * @returns The same items, most recently used first.
+ */
+export function sortCiphersByLastUsed(
+  ciphers: readonly CipherResponse[],
   lastUsed: Readonly<Record<string, number>>,
-): readonly CipherOverview[] {
-  const used: CipherOverview[] = [];
-  const rest: CipherOverview[] = [];
+): readonly CipherResponse[] {
+  return orderByLastUsed(ciphers, (cipher) => readField<string>(cipher, 'id') ?? '', lastUsed);
+}
+
+/**
+ * The ordering rule itself, over anything that can name its own identifier.
+ *
+ * One rule, two callers: the decrypted list and the raw one must agree, and the
+ * only way to guarantee that is for the comparison to exist once.
+ */
+function orderByLastUsed<T>(
+  items: readonly T[],
+  idOf: (item: T) => string,
+  lastUsed: Readonly<Record<string, number>>,
+): readonly T[] {
+  const used: T[] = [];
+  const rest: T[] = [];
   for (const item of items) {
-    (lastUsed[item.id] === undefined ? rest : used).push(item);
+    (lastUsed[idOf(item)] === undefined ? rest : used).push(item);
   }
   if (used.length === 0) {
     return items;
   }
-  used.sort((a, b) => (lastUsed[b.id] ?? 0) - (lastUsed[a.id] ?? 0));
+  used.sort((a, b) => (lastUsed[idOf(b)] ?? 0) - (lastUsed[idOf(a)] ?? 0));
   return [...used, ...rest];
 }
 

@@ -104,6 +104,9 @@
   "listSearchUnknown": {
     "message": "Rechercher…"
   },
+  "listStillOpening": {
+    "message": "$1 encore en cours d’ouverture…"
+  },
   "listEmpty": {
     "message": "Aucun item."
   },
