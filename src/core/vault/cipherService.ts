@@ -43,6 +43,7 @@ import {
   EMPTY_CARD,
   maskNumber,
 } from './card.js';
+import type { PasskeyCredential } from './passkey.js';
 import {
   EMPTY_IDENTITY,
   fullName,
@@ -623,6 +624,72 @@ async function decryptSection<F extends string, V>(
     fields.map((field) => decryptStringOrNull(readField<string>(raw, field), itemKey, onError)),
   );
   return Object.fromEntries(fields.map((field, index) => [field, values[index] ?? null])) as V;
+}
+
+/**
+ * Decrypts an item's passkeys **including their private keys**.
+ *
+ * Kept apart from {@link decryptCipherDetails} on purpose. That function is
+ * called to show an item; this one is called to *sign* with it, and the
+ * difference is a private key in memory. `PasskeyView` deliberately omits
+ * `keyValue`, and this is the only place that does not.
+ *
+ * The caller is responsible for having satisfied the item's guard first: a
+ * passkey on a `reprompt` item must not be usable without the master password,
+ * and nothing in this layer can know whether that happened.
+ *
+ * @param cipher Raw item.
+ * @param keys The vault key alone, or the full keyring.
+ * @param onError Notification for each unreadable field.
+ * @returns One entry per passkey; entries whose private key is unreadable are
+ *   dropped, since a credential that cannot sign is not a credential.
+ */
+export async function decryptPasskeys(
+  cipher: CipherResponse,
+  keys: CipherKeys,
+  onError: (error: unknown) => void,
+): Promise<readonly PasskeyCredential[]> {
+  const baseKey = baseKeyFor(cipher, keys, onError);
+  if (baseKey === null) {
+    return [];
+  }
+
+  let itemKey: SymmetricCryptoKey;
+  try {
+    itemKey = await resolveItemKey(cipher, baseKey);
+  } catch (error) {
+    onError(error);
+    return [];
+  }
+
+  const login = readLogin(cipher);
+  const raw = readField<readonly Record<string, unknown>[]>(login, 'fido2Credentials') ?? [];
+
+  const decrypted = await Promise.all(
+    raw.map(async (entry) => {
+      const [credentialId, rpId, userHandle, keyValue, counter] = await Promise.all([
+        decryptStringOrNull(readField<string>(entry, 'credentialId'), itemKey, onError),
+        decryptStringOrNull(readField<string>(entry, 'rpId'), itemKey, onError),
+        decryptStringOrNull(readField<string>(entry, 'userHandle'), itemKey, onError),
+        decryptStringOrNull(readField<string>(entry, 'keyValue'), itemKey, onError),
+        decryptStringOrNull(readField<string>(entry, 'counter'), itemKey, onError),
+      ]);
+      if (credentialId === null || rpId === null || keyValue === null) {
+        return null;
+      }
+      return {
+        credentialId,
+        rpId,
+        userHandle,
+        keyValue,
+        // Stored as an encrypted string; absent or unreadable means zero, which
+        // is what a synced passkey reports anyway.
+        counter: Number.parseInt(counter ?? '0', 10) || 0,
+      } satisfies PasskeyCredential;
+    }),
+  );
+
+  return decrypted.filter((entry): entry is PasskeyCredential => entry !== null);
 }
 
 /**

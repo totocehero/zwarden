@@ -57,7 +57,7 @@ The cryptographic core is implemented and tested. The rest is in progress.
 - [x] `SymmetricCryptoKey` — 32/64-byte keys
 - [x] AES-256-CBC + HMAC-SHA256, encrypt-then-MAC
 - [x] Key derivation: PBKDF2-SHA256 and Argon2id
-- [x] 581 tests, including the RFC 4231 / 5869 / 6238 / 7914 vectors
+- [x] 606 tests, including the RFC 4231 / 5869 / 6238 / 7914 vectors
 - [x] **Interoperability validated against Vaultwarden 2026.6.0** —
       authentication, vault key decryption, and a complete write/read round trip
 - [x] API client: prelogin, authentication, session refresh, sync, item creation
@@ -131,6 +131,12 @@ The cryptographic core is implemented and tested. The rest is in progress.
       are the twenty decrypted before it draws. A vault of 500 items with a key
       of its own per item costs ~650 ms to decrypt whole; the list no longer
       waits for it
+- [~] Passkeys: the signing core is implemented and verified — an assertion is
+      checked the way a relying party checks it, with a real P-256 pair, and the
+      `r‖s` to DER conversion that silently breaks most implementations is
+      tested both ways round. The private key is decrypted by one function and
+      one only. **What remains is the page plumbing**: intercepting
+      `navigator.credentials.get()` and confirming with the user
 - [ ] Key derivation in the service worker (a popup with no key) — and, with it,
       the autofill shortcut
 - [ ] Automatic autofill (form detection, in-page suggestion)
@@ -176,7 +182,7 @@ in both directions:
 
 ```bash
 npm install
-npm test          # 581 tests
+npm test          # 606 tests
 npm run typecheck # strict TypeScript
 npm run lint      # ESLint: lost promises, loose comparisons
 npm run build
