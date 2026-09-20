@@ -24,6 +24,7 @@ import {
   buildAuthenticatorData,
   buildClientData,
   createCredential,
+  credentialIdMatches,
   derFromRawSignature,
   type PasskeyCredential,
   selectCredentials,
@@ -470,6 +471,18 @@ describe('createCredential', () => {
     expect(JSON.parse(created.clientDataJSON).type).toBe('webauthn.create');
   });
 
+  it('records the identifier in a form other clients can read', async () => {
+    const created = await createCredential(request);
+
+    // A UUID in the vault, its raw bytes to the site. Thirty-two random bytes
+    // would have been legible to one convention only, and which one this
+    // format uses is not something its documentation settles.
+    expect(created.storedCredentialId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
+    expect(credentialIdMatches(created.storedCredentialId, created.credentialId)).toBe(true);
+  });
+
   it('gives every credential a different identifier', async () => {
     const first = await createCredential(request);
     const second = await createCredential(request);
@@ -583,5 +596,71 @@ describe('storing a created passkey', () => {
   it('leaves an item alone when no passkey is being added', async () => {
     const payload = await buildCipherCreatePayload(EDIT, key);
     expect((payload['login'] as Record<string, unknown>)['fido2Credentials']).toBeNull();
+  });
+});
+
+/**
+ * Naming a credential.
+ *
+ * A site names credentials by their bytes, base64url. A vault stores the same
+ * identifier as a string, and which string is not something the format
+ * documentation settles — a UUID and a base64url encoding of the same sixteen
+ * bytes look nothing alike as text.
+ *
+ * Comparing the wrong pair matches nothing, offers no passkey, and is
+ * indistinguishable from a vault that holds none. That is the bug these tests
+ * exist for, found on a real site where the passkey was there all along.
+ */
+describe('credentialIdMatches', () => {
+  // The same sixteen bytes, written both ways.
+  const AS_UUID = '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0';
+  const AS_BASE64URL = 'Dx4tPEtaaXiHlqW0w9Lh8A';
+
+  it('sees one identifier through two spellings', () => {
+    expect(credentialIdMatches(AS_UUID, AS_BASE64URL)).toBe(true);
+    expect(credentialIdMatches(AS_BASE64URL, AS_UUID)).toBe(true);
+  });
+
+  it('matches a spelling with itself', () => {
+    expect(credentialIdMatches(AS_UUID, AS_UUID)).toBe(true);
+    expect(credentialIdMatches(AS_BASE64URL, AS_BASE64URL)).toBe(true);
+  });
+
+  it('does not match two different credentials', () => {
+    expect(credentialIdMatches(AS_UUID, 'ffffffff-4b5a-6978-8796-a5b4c3d2e1f0')).toBe(false);
+  });
+
+  it('does not match on length alone', () => {
+    expect(credentialIdMatches(AS_BASE64URL, 'Dx4tPEtaaXiHlqW0w9Lh8AAA')).toBe(false);
+  });
+
+  it('refuses what it cannot read as an identifier', () => {
+    expect(credentialIdMatches('', AS_UUID)).toBe(false);
+    expect(credentialIdMatches(AS_UUID, '')).toBe(false);
+  });
+
+  it('reads a UUID whatever its case', () => {
+    expect(credentialIdMatches(AS_UUID.toUpperCase(), AS_BASE64URL)).toBe(true);
+  });
+});
+
+describe('selectCredentials, against a real allowCredentials list', () => {
+  const uuidCredential = {
+    credentialId: '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0',
+    rpId: 'gandi.example',
+  };
+
+  it('finds a passkey the site named in the other spelling', () => {
+    // The failure reported from use: the passkey was in the vault, the site
+    // asked for it, and nothing was offered.
+    expect(
+      selectCredentials([uuidCredential], 'gandi.example', ['Dx4tPEtaaXiHlqW0w9Lh8A']),
+    ).toEqual([uuidCredential]);
+  });
+
+  it('still refuses a credential the site did not name', () => {
+    expect(selectCredentials([uuidCredential], 'gandi.example', ['AAAAAAAAAAAAAAAAAAAAAA'])).toEqual(
+      [],
+    );
   });
 });

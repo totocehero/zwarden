@@ -1540,7 +1540,12 @@ function App() {
    * would be looking at the name of a site they trust and clicking yes.
    */
   async function pickUpAssertion(open: OpenVault): Promise<void> {
-    if (!settings.passkeySignIn) {
+    // Read from storage, not from `settings`. This runs inside the very turn
+    // that loads the settings, before the state update has been applied, so
+    // the closure would still hold the defaults — and `passkeySignIn` defaults
+    // to false, which silently disabled the whole feature.
+    const { passkeySignIn } = await loadSettings();
+    if (!passkeySignIn) {
       return;
     }
 
@@ -1702,7 +1707,8 @@ function App() {
       });
 
       const addPasskey = {
-        credentialId: created.credentialId,
+        // The vault records the UUID spelling; the site was given the bytes.
+        credentialId: created.storedCredentialId,
         rpId: ask.rpId,
         rpName: ask.rpName,
         userHandle: toBase64Url(ask.userId),

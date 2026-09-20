@@ -82,7 +82,10 @@ export interface CreationRequest {
 
 /** A passkey just created: what the site gets, and what the vault keeps. */
 export interface CreatedCredential {
+  /** What the site is given, base64url — a credential identifier is bytes. */
   readonly credentialId: string;
+  /** The same bytes as the vault records them, as a UUID. */
+  readonly storedCredentialId: string;
   readonly clientDataJSON: string;
   /** CBOR, `none` attestation. What `credentials.create()` resolves with. */
   readonly attestationObject: Uint8Array;
@@ -111,6 +114,61 @@ const AAGUID = new Uint8Array(16);
 /** The only algorithm offered: ECDSA with SHA-256 over P-256. */
 export const ES256 = -7;
 
+/** A UUID as it is written down: eight-four-four-four-twelve hex digits. */
+const UUID_SHAPE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The raw bytes of a stored credential identifier, whichever way it was written.
+ *
+ * A site names credentials by their **bytes**, base64url, in
+ * `allowCredentials`. A vault stores that identifier as a string — and which
+ * string is not something the format documentation settles: an identifier
+ * written as a UUID is sixteen bytes of hexadecimal with dashes, while one
+ * written base64url is the bytes themselves.
+ *
+ * Comparing the wrong pair matches nothing, offers no passkey, and looks
+ * exactly like a vault that holds none — which is the failure this function
+ * exists to prevent. So both readings are accepted, and whichever the vault
+ * uses, the comparison lands.
+ *
+ * @returns The bytes, or `null` if the string is neither.
+ */
+export function credentialIdBytes(stored: string): Uint8Array | null {
+  if (UUID_SHAPE.test(stored)) {
+    const hex = stored.replace(/-/g, '');
+    const out = new Uint8Array(16);
+    for (let i = 0; i < 16; i += 1) {
+      out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+    }
+    return out;
+  }
+  try {
+    const bytes = fromBase64(stored);
+    return bytes.length === 0 ? null : bytes;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether a stored identifier is the one a site named.
+ *
+ * Compared on bytes, not on text: the same credential can be written as a UUID
+ * in one place and base64url in another, and two spellings of one identifier
+ * must not read as two credentials.
+ */
+export function credentialIdMatches(stored: string, wanted: string): boolean {
+  if (stored === wanted) {
+    return true;
+  }
+  const ours = credentialIdBytes(stored);
+  const theirs = credentialIdBytes(wanted);
+  if (ours === null || theirs === null || ours.length !== theirs.length) {
+    return false;
+  }
+  return ours.every((byte, index) => byte === theirs[index]);
+}
+
 /**
  * Which passkeys can answer this request.
  *
@@ -138,8 +196,9 @@ export function selectCredentials<T extends { readonly credentialId: string; rea
   if (allowed.length === 0) {
     return forParty;
   }
-  const wanted = new Set(allowed);
-  return forParty.filter((credential) => wanted.has(credential.credentialId));
+  return forParty.filter((credential) =>
+    allowed.some((id) => credentialIdMatches(credential.credentialId, id)),
+  );
 }
 
 /**
@@ -266,9 +325,17 @@ export async function createCredential(request: CreationRequest): Promise<Create
   const privateKey = new Uint8Array(await crypto.subtle.exportKey('pkcs8', pair.privateKey));
   const rawPublicKey = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey));
 
-  // Random, and long enough that two vaults never collide: the site stores
-  // this and hands it back in `allowCredentials`.
-  const credentialId = crypto.getRandomValues(new Uint8Array(32));
+  // A UUID, and stored as one.
+  //
+  // The site is handed its sixteen raw bytes, which is what a credential
+  // identifier is. Keeping the text form a UUID is what makes the credential
+  // legible to other clients: a vault that writes identifiers as UUIDs can
+  // read this one, and a vault that writes them base64url can read it too,
+  // since sixteen bytes are sixteen bytes. Thirty-two random bytes would have
+  // been readable by one convention only — and which one this format uses is
+  // not something its documentation settles.
+  const credentialUuid = crypto.randomUUID();
+  const credentialId = credentialIdBytes(credentialUuid)!;
 
   const rpIdHash = new Uint8Array(
     await crypto.subtle.digest('SHA-256', new TextEncoder().encode(request.rpId)),
@@ -287,7 +354,10 @@ export async function createCredential(request: CreationRequest): Promise<Create
   authData.set(attested, 37);
 
   return {
+    // What the site is told, and what the vault keeps, are two spellings of the
+    // same sixteen bytes.
     credentialId: toBase64Url(credentialId),
+    storedCredentialId: credentialUuid,
     clientDataJSON: buildClientData(request.challenge, request.origin, 'webauthn.create'),
     attestationObject: encodeCbor(
       new Map<string, CborValue>([
