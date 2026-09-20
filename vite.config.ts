@@ -16,9 +16,49 @@
  */
 
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vite';
+import { defineConfig, type PluginOption } from 'vite';
+
+/** The bundles injected into pages, which must declare nothing globally. */
+const CONTENT_SCRIPTS = new Set(['content.js', 'webauthnHook.js', 'webauthnBridge.js']);
+
+/**
+ * Wraps each content script in a function, so it declares nothing at all.
+ *
+ * A content script is injected as a classic script, not as a module, so its
+ * top-level `const` lands in a global scope it shares with others. Two of them
+ * share it in two different directions, and both went wrong:
+ *
+ * - every isolated-world script of an extension shares **one** scope, so the
+ *   detector and the passkey bridge — minified to `const a` and `const a` —
+ *   collided with each other;
+ * - a main-world script shares the **page's** scope, so the passkey hook
+ *   collided with the page itself and with every other extension injecting
+ *   there.
+ *
+ * The failure is a parse error: the script never runs, nothing it would have
+ * logged is logged, and it looks exactly like a script that was never injected.
+ * That cost several rounds of looking for the fault somewhere else.
+ *
+ * Rollup cannot emit one format for some entries and another for the rest, and
+ * a second build for three small files is more machinery than the problem
+ * deserves. These files import nothing — `scripts/check-content-scripts.mjs`
+ * holds them to it — so wrapping them is safe.
+ */
+function wrapContentScripts(): PluginOption {
+  return {
+    name: 'zwarden-wrap-content-scripts',
+    generateBundle(_options, bundle) {
+      for (const [name, chunk] of Object.entries(bundle)) {
+        if (CONTENT_SCRIPTS.has(name) && chunk.type === 'chunk') {
+          chunk.code = `(()=>{${chunk.code}})();`;
+        }
+      }
+    },
+  };
+}
 
 export default defineConfig({
+  plugins: [wrapContentScripts()],
   resolve: {
     alias: {
       '@core': fileURLToPath(new URL('./src/core', import.meta.url)),

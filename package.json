@@ -15,7 +15,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests",
-    "size": "node scripts/check-size.mjs"
+    "size": "node scripts/check-size.mjs && node scripts/check-content-scripts.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.287",
