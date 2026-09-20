@@ -250,6 +250,26 @@ describe('vaultMayAnswer', () => {
     expect(vaultMayAnswer(['bank.example'], 'bank.example')).toBe(true);
   });
 
+  it('lets a related party through, because the popup decides, not this', () => {
+    // The bug this was found by: a vault holding a passkey for
+    // `id.bank.example`, a site asking for `bank.example`. They are not the
+    // same relying party and `selectCredentials` will say so — but that
+    // refusal belongs to the popup. Declining here means no badge, no window
+    // and no explanation, which is how the feature died in silence.
+    expect(vaultMayAnswer(['id.bank.example'], 'bank.example')).toBe(true);
+    expect(vaultMayAnswer(['bank.example'], 'id.bank.example')).toBe(true);
+  });
+
+  it('still declines something unrelated', () => {
+    // Related means a label boundary, in one direction or the other. A name
+    // that merely ends the same way, or one that wears the party as a prefix,
+    // is a different site — and `validateAssertionAsk` would refuse it anyway
+    // a layer down.
+    expect(vaultMayAnswer(['bank.example'], 'evil-bank.example')).toBe(false);
+    expect(vaultMayAnswer(['bank.example'], 'bank.example.evil.test')).toBe(false);
+    expect(vaultMayAnswer(['bank.example'], 'other.example')).toBe(false);
+  });
+
   it('declines a party it holds nothing for', () => {
     // The case that was stalling real sign-ins: a hardware key registered with
     // a site the vault knows nothing about.

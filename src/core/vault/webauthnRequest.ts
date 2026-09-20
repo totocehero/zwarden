@@ -288,10 +288,18 @@ export function validateCreationAsk(
  * and most sign-ins use a hardware key or the platform authenticator, so most
  * ceremonies would be a ninety-second delay Zwarden added for nothing.
  *
- * **Permissive when it does not know.** A locked vault, or one opened by a
- * version that left no list, gives `null`, and the answer is yes: the ceremony
- * goes to the popup as before. Guessing no would quietly disable the feature
- * for anyone in that state, which is the failure nobody notices for weeks.
+ * **Never narrower than the real decision.** This is an optimisation, not a
+ * rule: the rule is `selectCredentials`, which has the credentials and the
+ * validated origin. Anything this declines is a ceremony nobody ever sees —
+ * no badge, no window, no explanation — so it declines only what it is sure
+ * about, and a party merely *related* to one the vault holds is let through.
+ *
+ * The first version compared for equality and was wrong exactly there: a vault
+ * holding a passkey for `id.bank.example` refused a site asking for
+ * `bank.example` before the popup could look, and the feature died in silence.
+ *
+ * Permissive for the same reason when it does not know: a locked vault, or one
+ * opened by a version that left no list, gives `null` and the answer is yes.
  *
  * @param parties Relying parties the vault holds a passkey for, or `null` if
  *   it has not said — which is not the same as an empty list.
@@ -311,5 +319,14 @@ export function vaultMayAnswer(
   if (rpId === null || rpId === '') {
     return true;
   }
-  return parties.includes(rpId.toLowerCase());
+  // Related is enough. A passkey registered for `id.bank.example` and a site
+  // asking for `bank.example` are not the same relying party, and `selectCredentials`
+  // is right to refuse them — but that refusal belongs to the popup, which has
+  // the credentials and the origin. Here it would only be a guess, and a guess
+  // that says no stops the ceremony before anyone can see it.
+  const wanted = rpId.toLowerCase();
+  return parties.some(
+    (party) =>
+      party === wanted || party.endsWith(`.${wanted}`) || wanted.endsWith(`.${party}`),
+  );
 }
