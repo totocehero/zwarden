@@ -425,6 +425,51 @@
   "repromptWrongPassword": {
     "message": "Mot de passe incorrect."
   },
+  "actionExport": {
+    "message": "Exporter"
+  },
+  "exportTitle": {
+    "message": "Export chiffré"
+  },
+  "exportIntro": {
+    "message": "Une copie de tout le coffre, dans un fichier, chiffrée avec une phrase de passe de votre choix. Il n’existe pas d’export en clair : un tel fichier finit dans un dossier de téléchargements, dans chaque sauvegarde, et sur le disque le jour où il est revendu."
+  },
+  "exportMaster": {
+    "message": "Mot de passe maître"
+  },
+  "exportMasterHint": {
+    "message": "Demandé une fois, pour que les éléments réglés sur « redemander » soient inclus. Sans lui, la sauvegarde manquerait précisément le plus important."
+  },
+  "exportPassphrase": {
+    "message": "Phrase de passe du fichier"
+  },
+  "exportPassphraseAgain": {
+    "message": "Phrase de passe, à nouveau"
+  },
+  "exportPassphraseHint": {
+    "message": "Longue plutôt que compliquée. Personne ne peut la retrouver pour vous : perdue, le fichier n’est plus que du bruit."
+  },
+  "exportMismatch": {
+    "message": "Les deux phrases de passe diffèrent."
+  },
+  "exportTooShort": {
+    "message": "Utilisez au moins douze caractères."
+  },
+  "exportWrongMaster": {
+    "message": "Mot de passe maître incorrect."
+  },
+  "exportRun": {
+    "message": "Exporter"
+  },
+  "exportWorking": {
+    "message": "Chiffrement du coffre…"
+  },
+  "exportDone": {
+    "message": "$1 élément(s) exportés."
+  },
+  "exportAlgorithm": {
+    "message": "Argon2id puis AES-256-GCM. Les paramètres voyagent en clair dans le fichier et sont authentifiés avec lui : les abaisser fait refuser l’ouverture, pas ouvrir plus faible."
+  },
   "actionHealth": {
     "message": "Santé"
   },

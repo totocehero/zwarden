@@ -114,15 +114,18 @@ const ARGON2_MAXIMUMS = {
   parallelism: 16,
 } as const;
 
+/** Argon2id parameters, the only branch that carries all three. */
+export type Argon2Config = {
+  readonly type: typeof KdfType.Argon2id;
+  readonly iterations: number;
+  readonly memoryMiB: number;
+  readonly parallelism: number;
+};
+
 /** Derivation parameters, as the server announces them. */
 export type KdfConfig =
   | { readonly type: typeof KdfType.PBKDF2_SHA256; readonly iterations: number }
-  | {
-      readonly type: typeof KdfType.Argon2id;
-      readonly iterations: number;
-      readonly memoryMiB: number;
-      readonly parallelism: number;
-    };
+  | Argon2Config;
 
 /** Thrown when the server announces dangerous or malformed KDF parameters. */
 export class WeakKdfError extends Error {
@@ -261,30 +264,81 @@ export async function deriveMasterKey(
     // email, not the raw email. Diverge and vaults become unreadable.
     const salt = await sha256(toUtf8Bytes(normalizeEmail(email)));
 
-    // A per-algorithm build (29 KB) rather than the package's monolithic ESM
-    // (212 KB once bundled). This UMD build exposes its functions either by name
-    // or under `default`, depending on the environment's CJS interop: we cover
-    // both. See `src/types/hash-wasm-argon2.d.ts`.
-    const umd = await import('hash-wasm/dist/argon2.umd.min.js');
-    const argon2id = umd.argon2id ?? umd.default?.argon2id;
-    if (argon2id === undefined) {
-      throw new Error('Unreadable Argon2 module: no argon2id export');
-    }
-
-    const derived = await argon2id({
-      password: passwordBytes,
-      salt,
-      parallelism: config.parallelism,
-      iterations: config.iterations,
-      memorySize: config.memoryMiB * 1024, // hash-wasm expects KiB
-      hashLength: 32,
-      outputType: 'binary',
-    });
-
-    return new SymmetricCryptoKey(derived);
+    return new SymmetricCryptoKey(await argon2Derive(passwordBytes, salt, config));
   } finally {
     // The encoded password has no further use once the key is derived.
     // Best-effort, like every erasure in JavaScript.
+    wipe(passwordBytes);
+  }
+}
+
+/**
+ * Runs Argon2id over already-encoded bytes.
+ *
+ * Extracted so that the vault's derivation and the export's share one call, one
+ * set of parameters and one WASM module. Two copies would be two chances to
+ * pass the memory in the wrong unit — `hash-wasm` counts kibibytes where the
+ * API and this codebase count mebibytes, which is exactly the kind of mistake
+ * that silently weakens a key rather than breaking it.
+ *
+ * @param passwordBytes The password, already normalised and encoded.
+ * @param salt Fixed-size salt.
+ * @param config Argon2id parameters, already validated by the caller.
+ * @returns 32 derived bytes.
+ */
+async function argon2Derive(
+  passwordBytes: Uint8Array,
+  salt: Uint8Array,
+  config: { readonly iterations: number; readonly memoryMiB: number; readonly parallelism: number },
+): Promise<Uint8Array> {
+  // A per-algorithm build (29 KB) rather than the package's monolithic ESM
+  // (212 KB once bundled). This UMD build exposes its functions either by name
+  // or under `default`, depending on the environment's CJS interop: we cover
+  // both. See `src/types/hash-wasm-argon2.d.ts`.
+  const umd = await import('hash-wasm/dist/argon2.umd.min.js');
+  const argon2id = umd.argon2id ?? umd.default?.argon2id;
+  if (argon2id === undefined) {
+    throw new Error('Unreadable Argon2 module: no argon2id export');
+  }
+
+  return argon2id({
+    password: passwordBytes,
+    salt,
+    parallelism: config.parallelism,
+    iterations: config.iterations,
+    memorySize: config.memoryMiB * 1024, // hash-wasm expects KiB
+    hashLength: 32,
+    outputType: 'binary',
+  });
+}
+
+/**
+ * Derives a key from a passphrase and a **random** salt.
+ *
+ * For anything that is not the vault: an export file, which has no account and
+ * no email to salt with, and every copy of which must derive to a different key
+ * even from the same passphrase.
+ *
+ * Argon2id only, and with no PBKDF2 alternative: the vault's KDF is dictated by
+ * the server for compatibility, this one is ours to choose, and there is no
+ * reason to offer the weaker option.
+ *
+ * @param passphrase The passphrase, in the clear.
+ * @param salt Random salt, 16 bytes or more.
+ * @param config Argon2id parameters.
+ * @returns 32 derived bytes.
+ * @throws {WeakKdfError} If the parameters fall outside the accepted bounds.
+ */
+export async function deriveFromPassphrase(
+  passphrase: string,
+  salt: Uint8Array,
+  config: Argon2Config,
+): Promise<Uint8Array> {
+  assertKdfIsAcceptable(config);
+  const passwordBytes = normalizePassword(passphrase);
+  try {
+    return await argon2Derive(passwordBytes, salt, config);
+  } finally {
     wipe(passwordBytes);
   }
 }

@@ -57,7 +57,7 @@ The cryptographic core is implemented and tested. The rest is in progress.
 - [x] `SymmetricCryptoKey` — 32/64-byte keys
 - [x] AES-256-CBC + HMAC-SHA256, encrypt-then-MAC
 - [x] Key derivation: PBKDF2-SHA256 and Argon2id
-- [x] 545 tests, including the RFC 4231 / 5869 / 6238 / 7914 vectors
+- [x] 560 tests, including the RFC 4231 / 5869 / 6238 / 7914 vectors
 - [x] **Interoperability validated against Vaultwarden 2026.6.0** —
       authentication, vault key decryption, and a complete write/read round trip
 - [x] API client: prelogin, authentication, session refresh, sync, item creation
@@ -104,6 +104,12 @@ The cryptographic core is implemented and tested. The rest is in progress.
       by the test suite, and loaded only for the users who read it — which is
       the whole argument against shipping 63 translations to everyone
 - [x] Filtering the list by item type, several types at once
+- [x] An encrypted export — Argon2id then AES-256-GCM, with the parameters
+      authenticated alongside the ciphertext so lowering them makes the file
+      refuse to open rather than open weaker. **There is no cleartext export**:
+      such a file ends up in a downloads folder, in every backup, and on the
+      drive when it is resold. Inside is Bitwarden's own import shape, because
+      a vault one cannot take elsewhere is one to be locked into
 - [x] A health report, computed entirely on the machine — reused passwords,
       weak ones, ones that merely repeat the site or the account, ones
       unchanged for a year, cards at their expiry date. No dictionary, no
@@ -164,7 +170,7 @@ in both directions:
 
 ```bash
 npm install
-npm test          # 545 tests
+npm test          # 560 tests
 npm run typecheck # strict TypeScript
 npm run lint      # ESLint: lost promises, loose comparisons
 npm run build

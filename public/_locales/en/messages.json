@@ -425,6 +425,51 @@
   "repromptWrongPassword": {
     "message": "Incorrect password."
   },
+  "actionExport": {
+    "message": "Export"
+  },
+  "exportTitle": {
+    "message": "Encrypted export"
+  },
+  "exportIntro": {
+    "message": "A copy of the whole vault, in one file, encrypted with a passphrase of your choosing. There is no unencrypted export: such a file ends up in a downloads folder, in every backup, and on the drive when it is resold."
+  },
+  "exportMaster": {
+    "message": "Master password"
+  },
+  "exportMasterHint": {
+    "message": "Asked once, so that items set to demand it again are included. Without it the backup would be missing exactly what matters most."
+  },
+  "exportPassphrase": {
+    "message": "Passphrase for the file"
+  },
+  "exportPassphraseAgain": {
+    "message": "Passphrase again"
+  },
+  "exportPassphraseHint": {
+    "message": "Long rather than complicated. Nobody can recover it for you: lose it and the file is noise."
+  },
+  "exportMismatch": {
+    "message": "The two passphrases differ."
+  },
+  "exportTooShort": {
+    "message": "Use at least twelve characters."
+  },
+  "exportWrongMaster": {
+    "message": "Wrong master password."
+  },
+  "exportRun": {
+    "message": "Export"
+  },
+  "exportWorking": {
+    "message": "Encrypting the vault…"
+  },
+  "exportDone": {
+    "message": "$1 item(s) exported."
+  },
+  "exportAlgorithm": {
+    "message": "Argon2id then AES-256-GCM. The parameters travel in clear inside the file and are authenticated with it: lowering them makes the file refuse to open, not open weaker."
+  },
   "actionHealth": {
     "message": "Health"
   },

@@ -227,6 +227,23 @@ export const MESSAGE_KEYS = [
   'repromptVerifying',
   'repromptWrongPassword',
 
+  // Encrypted export
+  'actionExport',
+  'exportTitle',
+  'exportIntro',
+  'exportMaster',
+  'exportMasterHint',
+  'exportPassphrase',
+  'exportPassphraseAgain',
+  'exportPassphraseHint',
+  'exportMismatch',
+  'exportTooShort',
+  'exportWrongMaster',
+  'exportRun',
+  'exportWorking',
+  'exportDone',
+  'exportAlgorithm',
+
   // Vault health
   'actionHealth',
   'healthTitle',
