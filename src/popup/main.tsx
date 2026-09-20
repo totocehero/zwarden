@@ -42,7 +42,7 @@ import { type EditForm, EMPTY_EDIT, EditItemForm } from './components/EditItemFo
 import type { RevealedContent } from './components/ItemRow.js';
 import { HealthPanel } from './components/HealthPanel.js';
 import { TypeFilter } from './components/TypeFilter.js';
-import { VaultHeader } from './components/VaultHeader.js';
+import { type MenuAction, VaultHeader } from './components/VaultHeader.js';
 import { chipsFor, ItemRow } from './components/ItemRow.js';
 import { RepromptGuard } from './components/RepromptGuard.js';
 import { SaveProposalBanner, type SaveProposal } from './components/SaveProposal.js';
@@ -1465,6 +1465,22 @@ function App() {
     }
   }
 
+  /**
+   * What the header's menu holds.
+   *
+   * Built here rather than in the header: the header knows how to show a menu,
+   * not what the vault can do. `undefined` renders an entry disabled — visible
+   * but out of reach — which is how a still-opening vault says "not yet"
+   * instead of rearranging its own menu under the cursor.
+   */
+  function menuActions(unlocked: boolean): readonly MenuAction[] {
+    return [
+      { key: 'health', label: 'actionHealth', run: unlocked ? () => void onCheckHealth() : undefined },
+      { key: 'settings', label: 'actionSettings', run: openOptions },
+      { key: 'lock', label: 'actionLock', run: onLock },
+    ];
+  }
+
   /** Opens the edit screen on a blank item, type still to be chosen. */
   function onNewItem(): void {
     setEditForm(EMPTY_EDIT);
@@ -1598,9 +1614,8 @@ function App() {
           canCreate={false}
           onNew={() => undefined}
           onGenerate={() => void generator.open('standalone')}
-          onHealth={undefined}
-          onOptions={openOptions}
-          onLock={onLock}
+          // No vault yet: only what does not need one is offered.
+          actions={menuActions(false)}
         />
         <main>
           <TypeFilter counts={rawCounts} selected={typeFilter} onSelect={setTypeFilter} />
@@ -1719,9 +1734,7 @@ function App() {
         canCreate
         onNew={onNewItem}
         onGenerate={() => void generator.open('standalone')}
-        onHealth={() => void onCheckHealth()}
-        onOptions={openOptions}
-        onLock={onLock}
+        actions={menuActions(true)}
       />
       <main>
         {reprompt.state !== null && (

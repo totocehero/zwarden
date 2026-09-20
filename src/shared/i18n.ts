@@ -74,6 +74,7 @@ export const MESSAGE_KEYS = [
   'actionUse',
   'actionCopy',
   'actionCopied',
+  'actionMenu',
 
   // Unlock screen
   'unlockServer',

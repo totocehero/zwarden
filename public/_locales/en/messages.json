@@ -47,6 +47,9 @@
   "actionCopied": {
     "message": "Copied!"
   },
+  "actionMenu": {
+    "message": "More"
+  },
   "unlockServer": {
     "message": "Server"
   },

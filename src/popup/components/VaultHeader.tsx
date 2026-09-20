@@ -7,55 +7,112 @@
  * five pixels taller than the title alone, so a header that gained its buttons
  * on arrival pushed the search box down just as the user reached for it.
  *
- * Creating an item is the only action here that needs the keys, so it is the
- * only one disabled while they are being made ready. Generating a password,
- * opening the settings and locking all work with a vault still closed — and
- * locking is a reasonable thing to want during a load one did not expect.
+ * ## Why only two actions are out in the open
+ *
+ * Four hundred and twenty pixels hold two labelled buttons and a title, and
+ * that is all. Creating and generating are the two one reaches for without
+ * thinking; the rest — the health report, the export, the settings, locking —
+ * are deliberate acts, and a deliberate act can afford one more click.
+ *
+ * The alternative tried first was letting five buttons wrap onto a second row.
+ * It worked and it looked like a mistake.
  */
 
-import { t } from '@shared/i18n.js';
+import { useEffect, useRef, useState } from 'preact/hooks';
+
+import { t, type MessageKey } from '@shared/i18n.js';
+
+import { IconMenu } from './Icons.js';
+
+/** One entry of the menu. A `null` action renders it disabled. */
+export interface MenuAction {
+  readonly key: string;
+  readonly label: MessageKey;
+  readonly run: (() => void) | undefined;
+}
 
 export function VaultHeader({
   canCreate,
   onNew,
   onGenerate,
-  onHealth,
-  onOptions,
-  onLock,
+  actions,
 }: {
   /** False while the vault is still opening: there is nothing to save into yet. */
   canCreate: boolean;
   onNew: () => void;
   onGenerate: () => void;
-  /** Absent while the vault is still opening: there is nothing to examine. */
-  onHealth: (() => void) | undefined;
-  onOptions: () => void;
-  onLock: () => void;
+  /** What the menu holds, in order. */
+  actions: readonly MenuAction[];
 }) {
+  const [open, setOpen] = useState(false);
+  const menu = useRef<HTMLDivElement | null>(null);
+
+  /**
+   * Closes on a click anywhere else, and on Escape.
+   *
+   * Registered only while the menu is open: a popup that listens to every click
+   * in order to do nothing is a popup that pays for a feature nobody is using.
+   */
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const onPointer = (event: MouseEvent): void => {
+      if (menu.current !== null && !menu.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
   return (
     <header>
       <h1>Zwarden</h1>
-      <div>
+      <div class="header-actions">
         <button class="quiet" title={t('newItemTitle')} disabled={!canCreate} onClick={onNew}>
           {t('newItem')}
         </button>
         <button class="quiet" title={t('editGeneratePassword')} onClick={onGenerate}>
           {t('actionGenerate')}
         </button>
-        <button
-          class="quiet"
-          title={t('healthTitle')}
-          disabled={onHealth === undefined}
-          onClick={onHealth}
-        >
-          {t('actionHealth')}
-        </button>
-        <button class="quiet" onClick={onOptions}>
-          {t('actionSettings')}
-        </button>
-        <button class="quiet" onClick={onLock}>
-          {t('actionLock')}
-        </button>
+        <div class="menu" ref={menu}>
+          <button
+            class="quiet menu-button"
+            title={t('actionMenu')}
+            aria-haspopup="menu"
+            aria-expanded={open}
+            onClick={() => setOpen(!open)}
+          >
+            <IconMenu />
+          </button>
+          {open && (
+            <div class="menu-items" role="menu">
+              {actions.map((action) => (
+                <button
+                  key={action.key}
+                  role="menuitem"
+                  disabled={action.run === undefined}
+                  onClick={() => {
+                    setOpen(false);
+                    action.run?.();
+                  }}
+                >
+                  {t(action.label)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );
