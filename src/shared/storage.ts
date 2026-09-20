@@ -322,12 +322,29 @@ const hasAction = typeof chrome !== 'undefined' && typeof chrome.action !== 'und
  * page.
  */
 export async function setSaveBadge(visible: boolean): Promise<void> {
+  await setBadge(visible ? 'save' : null);
+}
+
+/**
+ * What the icon is asking for, if anything.
+ *
+ * Two different things put a badge on this icon — a credential captured on a
+ * page, and a site waiting on a passkey — and they were wearing the same one.
+ * A user seeing it could not tell which, and neither could anyone reading a
+ * screenshot of it: an "alert appeared" meant either, which is how a passkey
+ * ceremony that never fired looked like one that did.
+ *
+ * `+` in green is something to save; `?` in blue is something to confirm.
+ */
+export async function setBadge(kind: 'save' | 'passkey' | null): Promise<void> {
   if (!hasAction) {
     return;
   }
-  await chrome.action.setBadgeText({ text: visible ? '+' : '' });
-  if (visible) {
-    await chrome.action.setBadgeBackgroundColor({ color: '#2f7d5b' });
+  await chrome.action.setBadgeText({ text: kind === null ? '' : kind === 'save' ? '+' : '?' });
+  if (kind !== null) {
+    await chrome.action.setBadgeBackgroundColor({
+      color: kind === 'save' ? '#2f7d5b' : '#4f8cff',
+    });
   }
 }
 

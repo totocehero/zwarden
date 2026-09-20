@@ -204,12 +204,21 @@ credentials.get = async function get(
     // Not a WebAuthn call at all — a federated or password credential.
     return originalGet(options);
   }
+  // One line per WebAuthn call, which is a rare event — not noise, and it is
+  // the only way to tell "the hook never ran" from "the hook declined" without
+  // guessing from a screenshot. The whole chain logs the same way.
+  console.debug('[zwarden] intercepted credentials.get', {
+    rpId: options.publicKey.rpId,
+    allowCredentials: (options.publicKey.allowCredentials ?? []).length,
+  });
   try {
     const assertion = await ask('get', serialiseOptions(options.publicKey));
+    console.debug('[zwarden] credentials.get answered', assertion === null ? 'nothing' : 'signed');
     // Nothing to offer, or the user said no: the browser takes over, and the
     // hardware key in their pocket still works.
     return assertion === null ? originalGet(options) : buildCredential(assertion);
-  } catch {
+  } catch (error) {
+    console.debug('[zwarden] credentials.get failed, falling back', error);
     return originalGet(options);
   }
 };

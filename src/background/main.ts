@@ -60,6 +60,7 @@ import {
   recordActivity,
   savePendingSave,
   scheduleClipboardWipe,
+  setBadge,
   setSaveBadge,
   shouldAutoLock,
   startAutoLockWatch,
@@ -573,9 +574,14 @@ async function onAssertionRequest(
   // nothing would make Zwarden a ninety-second delay on every sign-in done with
   // a hardware key — which is most of them.
   if (ceremony === 'get' && !(await canAnswerFor(options))) {
+    console.debug('[zwarden] declined before asking: no related passkey', {
+      rpId: (options as { rpId?: unknown }).rpId ?? '(the page\u2019s own host)',
+      known: await loadPasskeyParties(),
+    });
     port.postMessage({ result: null });
     return;
   }
+  console.debug('[zwarden] holding a', ceremony, 'ceremony for', origin);
 
   const id = crypto.randomUUID();
   waitingPages.set(id, port);
@@ -584,9 +590,10 @@ async function onAssertionRequest(
   await chrome.storage.session.set({
     [PENDING_ASSERTION_KEY]: { id, ceremony, origin, options, askedAt: Date.now() },
   });
-  // The same badge the save proposal uses: the decision is in the popup, and
-  // the icon is how the popup says it has something to decide.
-  await setSaveBadge(true);
+  // Its own badge, not the save proposal's. They were the same mark, and an
+  // "alert appeared" then meant either — which is how a ceremony that never
+  // fired looked exactly like one that did.
+  await setBadge('passkey');
 
   // A ceremony nobody answers must not hold the worker awake for ever.
   setTimeout(() => void forgetAssertion(id), ASSERTION_TIMEOUT_MS);
@@ -610,7 +617,7 @@ async function forgetAssertion(id: string): Promise<void> {
   const pending = stored[PENDING_ASSERTION_KEY] as { id?: string } | undefined;
   if (pending?.id === id) {
     await chrome.storage.session.remove(PENDING_ASSERTION_KEY);
-    await setSaveBadge(false);
+    await setBadge(null);
   }
 }
 
