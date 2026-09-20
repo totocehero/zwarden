@@ -51,7 +51,7 @@ import {
   CLIPBOARD_ALARM_NAME,
   loadGeneratorOptions,
   loadLastActivity,
-  loadNeverSaveHosts,
+  isNeverSaveHost,
   loadSettings,
   loadStoredSession,
   lockVault,
@@ -355,7 +355,7 @@ async function onCredentials(
   if (!offerToSave || (await loadStoredSession()) === null) {
     return;
   }
-  if ((await loadNeverSaveHosts()).includes(host)) {
+  if (await isNeverSaveHost(host)) {
     return;
   }
 

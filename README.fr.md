@@ -58,7 +58,7 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
 - [x] `SymmetricCryptoKey` — clés de 32/64 octets
 - [x] AES-256-CBC + HMAC-SHA256, encrypt-then-MAC
 - [x] Dérivation de clé : PBKDF2-SHA256 et Argon2id
-- [x] 422 tests, dont les vecteurs des RFC 4231 / 5869 / 6238 / 7914
+- [x] 431 tests, dont les vecteurs des RFC 4231 / 5869 / 6238 / 7914
 - [x] **Interopérabilité validée contre Vaultwarden 2026.6.0** —
       authentification, déchiffrement de la clé de coffre, et un aller-retour
       complet d'écriture/lecture
@@ -165,7 +165,7 @@ donc interopérables dans les deux sens :
 
 ```bash
 npm install
-npm test          # 422 tests
+npm test          # 431 tests
 npm run typecheck # TypeScript strict
 npm run lint      # ESLint : promesses perdues, comparaisons laxistes
 npm run build
@@ -183,6 +183,9 @@ qui divergeraient à la première correction.
 - [`docs/EXTENSION.md`](docs/EXTENSION.md) — les décisions d'ergonomie et de
   sécurité de l'extension : déverrouillage, cycle de verrouillage, les deux vues
   de popup, les règles de remplissage.
+- [`docs/STORAGE.md`](docs/STORAGE.md) — ce qui est stocké où, et ce qu'obtient
+  réellement un attaquant qui atteint chaque espace. Écrit à l'envers, depuis
+  les capacités de l'attaquant plutôt que depuis la liste des fonctions.
 
 ## Licence
 

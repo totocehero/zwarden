@@ -17,6 +17,7 @@
 import type { KdfConfig } from '../core/crypto/kdf.js';
 import { KdfType } from '../core/crypto/kdf.js';
 import type { SyncResponse } from '../core/api/models.js';
+import { toBase64 } from '../core/crypto/encoding.js';
 import {
   DEFAULT_PASSWORD_OPTIONS,
   type PasswordOptions,
@@ -304,9 +305,45 @@ export async function setSaveBadge(visible: boolean): Promise<void> {
 // --- Sites never to offer on -------------------------------------------------
 
 const NEVER_SAVE_KEY = 'neverSaveHosts';
+const NEVER_SAVE_SALT_KEY = 'neverSaveSalt';
 
-/** Hosts for which the user asked that nothing be offered any more. */
-export async function loadNeverSaveHosts(): Promise<readonly string[]> {
+/**
+ * Hosts are stored **hashed**, never in clear.
+ *
+ * This list lives on disk, unencrypted, like everything in `storage.local` — a
+ * plain list of hostnames is a list of the sites the user holds an account on,
+ * readable by anyone holding the drive and needing no vault at all
+ * (`docs/STORAGE.md` §3.B).
+ *
+ * The salt buys nothing against someone who has the file, since they have the
+ * salt too, and that is not its job. What changes is the question the attacker
+ * can ask: **enumerate** the list becomes **confirm** a host already guessed.
+ * Turning a disclosure into an oracle is a real reduction, and since the lookup
+ * is an exact match, hashing costs nothing in function.
+ *
+ * It is not a defence against someone working through a list of popular sites.
+ * It is the removal of a free gift.
+ */
+async function neverSaveDigest(host: string, salt: string): Promise<string> {
+  const bytes = new TextEncoder().encode(`${salt}:${host.trim().toLowerCase()}`);
+  const digest = await crypto.subtle.digest('SHA-256', bytes as BufferSource);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** The per-install salt, created on first use. */
+async function neverSaveSalt(): Promise<string> {
+  const stored = await chrome.storage.local.get(NEVER_SAVE_SALT_KEY);
+  const existing = stored[NEVER_SAVE_SALT_KEY];
+  if (typeof existing === 'string' && existing !== '') {
+    return existing;
+  }
+  const fresh = toBase64(crypto.getRandomValues(new Uint8Array(16)));
+  await chrome.storage.local.set({ [NEVER_SAVE_SALT_KEY]: fresh });
+  return fresh;
+}
+
+/** The stored entries, hashed or — for a list written before this — in clear. */
+async function loadNeverSaveEntries(): Promise<readonly string[]> {
   if (!hasLocal) {
     return [];
   }
@@ -315,23 +352,47 @@ export async function loadNeverSaveHosts(): Promise<readonly string[]> {
   return Array.isArray(value) ? value.filter((h): h is string => typeof h === 'string') : [];
 }
 
+/**
+ * Whether the user asked that nothing be offered on this host.
+ *
+ * A membership test rather than a getter, so no caller ever holds the list. It
+ * could not be a getter anyway now that the entries are hashed — which is a
+ * good sign about the shape rather than a constraint to work around.
+ *
+ * Entries written before hashing existed are plain hostnames; they are still
+ * matched, so nobody's exclusions are silently forgotten on upgrade.
+ */
+export async function isNeverSaveHost(host: string): Promise<boolean> {
+  const entries = await loadNeverSaveEntries();
+  if (entries.length === 0) {
+    return false;
+  }
+  if (entries.includes(host)) {
+    return true;
+  }
+  return entries.includes(await neverSaveDigest(host, await neverSaveSalt()));
+}
+
 export async function addNeverSaveHost(host: string): Promise<void> {
   if (!hasLocal) {
     return;
   }
-  const hosts = await loadNeverSaveHosts();
-  if (!hosts.includes(host)) {
-    await chrome.storage.local.set({ [NEVER_SAVE_KEY]: [...hosts, host] });
+  const entries = await loadNeverSaveEntries();
+  const digest = await neverSaveDigest(host, await neverSaveSalt());
+  if (!entries.includes(digest) && !entries.includes(host)) {
+    await chrome.storage.local.set({ [NEVER_SAVE_KEY]: [...entries, digest] });
   }
 }
 
 /** Empties the exclusion list. @returns How many hosts were forgotten. */
 export async function clearNeverSaveHosts(): Promise<number> {
-  const hosts = await loadNeverSaveHosts();
-  if (hasLocal && hosts.length > 0) {
-    await chrome.storage.local.remove(NEVER_SAVE_KEY);
+  const entries = await loadNeverSaveEntries();
+  if (hasLocal && entries.length > 0) {
+    // The salt goes with them: keeping it would let the next list be tested
+    // against digests captured from this one.
+    await chrome.storage.local.remove([NEVER_SAVE_KEY, NEVER_SAVE_SALT_KEY]);
   }
-  return hosts.length;
+  return entries.length;
 }
 
 // --- Generator options -------------------------------------------------------
