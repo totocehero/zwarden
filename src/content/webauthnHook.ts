@@ -17,12 +17,20 @@
  * cases would make every passkey sign-in on the machine depend on this
  * extension being right.
  *
- * ## What it cannot do
+ * ## Passing for a `PublicKeyCredential`
  *
- * The object handed back is shaped like a `PublicKeyCredential` but is not one:
- * that interface cannot be constructed. Sites that read the fields — nearly all
- * of them — are satisfied; a site that tests `instanceof` is not, and will fall
- * back to its own flow.
+ * The interface cannot be constructed, so what is handed back is an ordinary
+ * object — and a plain object is not enough. Real relying-party libraries test
+ * `instanceof PublicKeyCredential`, or call `toJSON()`, and answer a failure
+ * with something unhelpful: Gandi says "the U2F service is unavailable", which
+ * sends the user to wait for a service that is working perfectly.
+ *
+ * So the native prototypes are put on it. That alone would make things worse —
+ * the getters on those prototypes read internal slots this object does not
+ * have, and would throw on the first property access — which is why every
+ * field is defined as an **own** property first. An own data property shadows
+ * an inherited accessor, so reads never reach the getter that would throw,
+ * while `instanceof` sees what it expects.
  */
 
 /**
@@ -111,23 +119,71 @@ function ask(ceremony: Ceremony, options: Json): Promise<Json | null> {
   });
 }
 
+/**
+ * Gives an object the prototype of a native interface, safely.
+ *
+ * Only ever called on objects whose fields are already **own** properties: the
+ * getters on these prototypes read internal slots, and would throw on anything
+ * that does not have them. Own properties shadow them, so nothing inherited is
+ * ever reached — the prototype is there for `instanceof` and for nothing else.
+ */
+function wearing<T extends object>(value: T, prototype: object | undefined): T {
+  if (prototype !== undefined) {
+    try {
+      Object.setPrototypeOf(value, prototype);
+    } catch {
+      // An environment that refuses it: the object still works, it simply does
+      // not answer `instanceof`.
+    }
+  }
+  return value;
+}
+
 /** Builds what the page expects `credentials.get()` to resolve with. */
 function buildCredential(assertion: Json): Credential {
-  const rawId = fromBase64Url(assertion['credentialId'] as string);
+  const credentialId = assertion['credentialId'] as string;
+  const rawId = fromBase64Url(credentialId);
   const userHandle = assertion['userHandle'];
-  return {
-    id: assertion['credentialId'] as string,
-    rawId,
-    type: 'public-key',
-    authenticatorAttachment: 'platform',
-    response: {
-      clientDataJSON: fromBase64Url(assertion['clientDataJSON'] as string),
-      authenticatorData: fromBase64Url(assertion['authenticatorData'] as string),
-      signature: fromBase64Url(assertion['signature'] as string),
+  const clientDataJSON = assertion['clientDataJSON'] as string;
+  const authenticatorData = assertion['authenticatorData'] as string;
+  const signature = assertion['signature'] as string;
+
+  const response = wearing(
+    {
+      clientDataJSON: fromBase64Url(clientDataJSON),
+      authenticatorData: fromBase64Url(authenticatorData),
+      signature: fromBase64Url(signature),
       userHandle: typeof userHandle === 'string' ? fromBase64Url(userHandle) : null,
     },
-    getClientExtensionResults: () => ({}),
-  } as unknown as Credential;
+    (globalThis as { AuthenticatorAssertionResponse?: { prototype: object } })
+      .AuthenticatorAssertionResponse?.prototype,
+  );
+
+  return wearing(
+    {
+      id: credentialId,
+      rawId,
+      type: 'public-key',
+      authenticatorAttachment: 'platform',
+      response,
+      getClientExtensionResults: () => ({}),
+      // Newer libraries prefer this to reading the fields themselves.
+      toJSON: () => ({
+        id: credentialId,
+        rawId: credentialId,
+        type: 'public-key',
+        authenticatorAttachment: 'platform',
+        clientExtensionResults: {},
+        response: {
+          clientDataJSON,
+          authenticatorData,
+          signature,
+          userHandle: typeof userHandle === 'string' ? userHandle : null,
+        },
+      }),
+    },
+    (globalThis as { PublicKeyCredential?: { prototype: object } }).PublicKeyCredential?.prototype,
+  ) as unknown as Credential;
 }
 
 /** Reduces a registration's options the same way. */
@@ -150,15 +206,14 @@ function serialiseCreation(options: PublicKeyCredentialCreationOptions): Json {
 
 /** Builds what the page expects `credentials.create()` to resolve with. */
 function buildRegistration(created: Json): Credential {
-  const rawId = fromBase64Url(created['credentialId'] as string);
-  return {
-    id: created['credentialId'] as string,
-    rawId,
-    type: 'public-key',
-    authenticatorAttachment: 'platform',
-    response: {
-      clientDataJSON: fromBase64Url(created['clientDataJSON'] as string),
-      attestationObject: fromBase64Url(created['attestationObject'] as string),
+  const credentialId = created['credentialId'] as string;
+  const rawId = fromBase64Url(credentialId);
+  const clientDataJSON = created['clientDataJSON'] as string;
+  const attestationObject = created['attestationObject'] as string;
+  const response = wearing(
+    {
+      clientDataJSON: fromBase64Url(clientDataJSON),
+      attestationObject: fromBase64Url(attestationObject),
       // Sites commonly call these. Answering what is true is better than
       // omitting them and being read as `undefined` by code expecting a
       // function.
@@ -169,8 +224,29 @@ function buildRegistration(created: Json): Credential {
       getPublicKey: () => null,
       getAuthenticatorData: () => fromBase64Url(created['authenticatorData'] as string),
     },
-    getClientExtensionResults: () => ({}),
-  } as unknown as Credential;
+    (globalThis as { AuthenticatorAttestationResponse?: { prototype: object } })
+      .AuthenticatorAttestationResponse?.prototype,
+  );
+
+  return wearing(
+    {
+      id: credentialId,
+      rawId,
+      type: 'public-key',
+      authenticatorAttachment: 'platform',
+      response,
+      getClientExtensionResults: () => ({}),
+      toJSON: () => ({
+        id: credentialId,
+        rawId: credentialId,
+        type: 'public-key',
+        authenticatorAttachment: 'platform',
+        clientExtensionResults: {},
+        response: { clientDataJSON, attestationObject, transports: ['internal', 'hybrid'] },
+      }),
+    },
+    (globalThis as { PublicKeyCredential?: { prototype: object } }).PublicKeyCredential?.prototype,
+  ) as unknown as Credential;
 }
 
 /**
