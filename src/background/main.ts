@@ -45,6 +45,7 @@
  */
 
 import { generatePassword } from '@core/generator/password.js';
+import { vaultMayAnswer } from '@core/vault/webauthnRequest.js';
 import { applyToolbarIcon, variantFor } from '@shared/theme.js';
 import {
   AUTOLOCK_ALARM_NAME,
@@ -52,6 +53,7 @@ import {
   loadGeneratorOptions,
   loadLastActivity,
   isNeverSaveHost,
+  loadPasskeyParties,
   loadSettings,
   hasStoredSession,
   lockVault,
@@ -563,6 +565,18 @@ async function onAssertionRequest(
     return;
   }
 
+  // Can this vault answer at all? The popup leaves the list of relying parties
+  // behind when it opens the vault, precisely so this question can be settled
+  // here, without keys and without waking anybody.
+  //
+  // Holding the page until somebody opens the popup to find out there was
+  // nothing would make Zwarden a ninety-second delay on every sign-in done with
+  // a hardware key — which is most of them.
+  if (ceremony === 'get' && !(await canAnswerFor(options))) {
+    port.postMessage({ result: null });
+    return;
+  }
+
   const id = crypto.randomUUID();
   waitingPages.set(id, port);
   port.onDisconnect.addListener(() => void forgetAssertion(id));
@@ -576,6 +590,15 @@ async function onAssertionRequest(
 
   // A ceremony nobody answers must not hold the worker awake for ever.
   setTimeout(() => void forgetAssertion(id), ASSERTION_TIMEOUT_MS);
+}
+
+/** Whether this vault can answer for the party a page is asking about. */
+async function canAnswerFor(options: unknown): Promise<boolean> {
+  const claimed = (options as { rpId?: unknown }).rpId;
+  return vaultMayAnswer(
+    await loadPasskeyParties(),
+    typeof claimed === 'string' ? claimed : null,
+  );
 }
 
 /** Drops a pending ceremony, however it ended. */

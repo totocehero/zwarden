@@ -14,6 +14,7 @@ import {
   mayClaimRelyingParty,
   validateAssertionAsk,
   validateCreationAsk,
+  vaultMayAnswer,
   WebAuthnRefusal,
 } from '../src/core/vault/webauthnRequest.js';
 
@@ -232,5 +233,48 @@ describe('validateCreationAsk', () => {
 
   it('falls back to the relying party id when the site gives no name', () => {
     expect(ask({ rp: { id: 'bank.example' } }).rpName).toBe('bank.example');
+  });
+});
+
+/**
+ * Whether the vault can answer at all, asked by the service worker.
+ *
+ * The worker has no keys, so the popup leaves the list of relying parties
+ * behind. Without it every ceremony is held open until somebody opens the
+ * popup to find out there was nothing to offer — and most sign-ins use a
+ * hardware key, so most ceremonies would be ninety seconds of delay that
+ * Zwarden added and nobody asked for.
+ */
+describe('vaultMayAnswer', () => {
+  it('answers for a party the vault holds', () => {
+    expect(vaultMayAnswer(['bank.example'], 'bank.example')).toBe(true);
+  });
+
+  it('declines a party it holds nothing for', () => {
+    // The case that was stalling real sign-ins: a hardware key registered with
+    // a site the vault knows nothing about.
+    expect(vaultMayAnswer(['bank.example'], 'gandi.example')).toBe(false);
+  });
+
+  it('declines everything when the vault holds no passkey at all', () => {
+    expect(vaultMayAnswer([], 'bank.example')).toBe(false);
+  });
+
+  it('says yes when it has not been told, rather than guessing no', () => {
+    // A locked vault, or one opened by a version that left no list. Guessing no
+    // would disable the feature for anyone in that state, silently, and nobody
+    // would notice for weeks.
+    expect(vaultMayAnswer(null, 'bank.example')).toBe(true);
+  });
+
+  it('defers when the site named no party', () => {
+    // It then means the page's own host, which this layer does not know. The
+    // popup validates the origin and settles it.
+    expect(vaultMayAnswer(['bank.example'], null)).toBe(true);
+    expect(vaultMayAnswer(['bank.example'], '')).toBe(true);
+  });
+
+  it('does not care about case', () => {
+    expect(vaultMayAnswer(['bank.example'], 'Bank.Example')).toBe(true);
   });
 });

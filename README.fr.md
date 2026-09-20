@@ -58,7 +58,7 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
 - [x] `SymmetricCryptoKey` — clés de 32/64 octets
 - [x] AES-256-CBC + HMAC-SHA256, encrypt-then-MAC
 - [x] Dérivation de clé : PBKDF2-SHA256 et Argon2id
-- [x] 674 tests, dont les vecteurs des RFC 4231 / 5869 / 6238 / 7914
+- [x] 680 tests, dont les vecteurs des RFC 4231 / 5869 / 6238 / 7914
 - [x] **Interopérabilité validée contre Vaultwarden 2026.6.0** —
       authentification, déchiffrement de la clé de coffre, et un aller-retour
       complet d'écriture/lecture
@@ -197,7 +197,7 @@ donc interopérables dans les deux sens :
 
 ```bash
 npm install
-npm test          # 674 tests
+npm test          # 680 tests
 npm run typecheck # TypeScript strict
 npm run lint      # ESLint : promesses perdues, comparaisons laxistes
 npm run build

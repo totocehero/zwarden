@@ -121,6 +121,7 @@ import {
   loadLastUsed,
   clearPendingAssertion,
   loadPendingAssertion,
+  savePasskeyParties,
   loadPendingSave,
   loadRememberToken,
   loadSettings,
@@ -1539,14 +1540,24 @@ function App() {
    * would be looking at the name of a site they trust and clicking yes.
    */
   async function pickUpAssertion(open: OpenVault): Promise<void> {
+    if (!settings.passkeySignIn) {
+      return;
+    }
+
+    // Computed on every opening, before anything else, and left where the
+    // service worker can read it. That worker has no keys and cannot work out
+    // whether this vault can answer for a site; without this list it must hold
+    // every ceremony open until somebody opens this window to find out there
+    // was nothing to offer — which is most ceremonies, since most sign-ins use
+    // a hardware key, and it makes Zwarden a ninety-second delay on all of
+    // them.
+    const views = await passkeyViews(open);
+    await savePasskeyParties(views.map((view) => view.rpId));
+
     const pending = await loadPendingAssertion();
     if (pending === null) {
       return;
     }
-    // Matched on metadata alone, and needed by both ceremonies: signing picks
-    // from it, registering refuses on it.
-    const views = await passkeyViews(open);
-
     if (pending.ceremony === 'create') {
       try {
         const ask = validateCreationAsk(

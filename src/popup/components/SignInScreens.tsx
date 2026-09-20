@@ -8,6 +8,8 @@
  * the entry, and it is `App` that calls `unlock()`.
  */
 
+import { useState } from 'preact/hooks';
+
 import { t } from '@shared/i18n.js';
 import { IconEye } from './Icons.js';
 
@@ -148,6 +150,8 @@ export function TwoFactorScreen({
   onBack: () => void;
   onOptions: () => void;
 }) {
+  const [showCode, setShowCode] = useState(false);
+
   return (
     <div>
       <Header onOptions={onOptions} />
@@ -174,14 +178,33 @@ export function TwoFactorScreen({
             </label>
             <label>
               {t('twoFaCode')}
-              <input
-                type="text"
-                autocomplete="one-time-code"
-                autofocus
-                value={code}
-                onInput={(e) => onCode(e.currentTarget.value)}
-                required
-              />
+              {/* Masked, like the master password above it.
+
+                  A YubiKey in OTP mode types forty-four characters into this
+                  field, and they stood in the clear: on screen, in a
+                  screenshot, over a shoulder, in a screen share. A one-time
+                  code is spent once, which makes the exposure small — it does
+                  not make it nothing, and nothing was gained by it. A six-digit
+                  code one wants to check before submitting is what the eye is
+                  for. */}
+              <div class="password-field">
+                <input
+                  type={showCode ? 'text' : 'password'}
+                  autocomplete="one-time-code"
+                  autofocus
+                  value={code}
+                  onInput={(e) => onCode(e.currentTarget.value)}
+                  required
+                />
+                <button
+                  type="button"
+                  class="eye"
+                  title={showCode ? t('editHide') : t('editShow')}
+                  onClick={() => setShowCode(!showCode)}
+                >
+                  <IconEye struck={showCode} />
+                </button>
+              </div>
             </label>
             <label class="row">
               <input

@@ -278,3 +278,38 @@ export function validateCreationAsk(
     requiresVerification: selection['userVerification'] !== 'discouraged',
   };
 }
+
+/**
+ * Whether a vault holding passkeys for `parties` can answer for `rpId`.
+ *
+ * Asked by the service worker, which has no keys: the popup leaves the list
+ * behind when it opens the vault. Without this, every ceremony has to be held
+ * open until somebody opens the popup to discover there was nothing to offer —
+ * and most sign-ins use a hardware key or the platform authenticator, so most
+ * ceremonies would be a ninety-second delay Zwarden added for nothing.
+ *
+ * **Permissive when it does not know.** A locked vault, or one opened by a
+ * version that left no list, gives `null`, and the answer is yes: the ceremony
+ * goes to the popup as before. Guessing no would quietly disable the feature
+ * for anyone in that state, which is the failure nobody notices for weeks.
+ *
+ * @param parties Relying parties the vault holds a passkey for, or `null` if
+ *   it has not said — which is not the same as an empty list.
+ * @param rpId The party claimed, or `null` when the site named none and it
+ *   therefore means its own host, which this layer does not know.
+ */
+export function vaultMayAnswer(
+  parties: readonly string[] | null,
+  rpId: string | null,
+): boolean {
+  if (parties === null) {
+    return true;
+  }
+  if (parties.length === 0) {
+    return false;
+  }
+  if (rpId === null || rpId === '') {
+    return true;
+  }
+  return parties.includes(rpId.toLowerCase());
+}

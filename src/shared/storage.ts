@@ -732,11 +732,47 @@ export async function clearStoredSession(): Promise<void> {
   if (hasSession) {
     // Both entries, always together: a key outliving its session would be a key
     // nothing could use and nothing would clear.
-    await chrome.storage.session.remove([SESSION_KEY, VAULT_KEY_KEY]);
+    await chrome.storage.session.remove([SESSION_KEY, VAULT_KEY_KEY, PASSKEY_PARTIES_KEY]);
   }
   // And the other half. Either alone is inert, so this is belt and braces —
   // but a sealing key left behind outlives its purpose, and those accumulate.
   await forgetSealingKey();
+}
+
+// --- Which sites the vault can answer for ------------------------------------
+
+const PASSKEY_PARTIES_KEY = 'passkeyRelyingParties';
+
+/**
+ * The relying parties the vault holds a passkey for.
+ *
+ * Written by the popup when it opens the vault, read by the service worker,
+ * which has no keys and could not work it out. Without it the worker must hold
+ * every ceremony open until somebody opens the popup to discover there was
+ * nothing to offer — which is most ceremonies, since most sign-ins use a
+ * hardware key or the platform authenticator, and it makes Zwarden a delay on
+ * all of them.
+ *
+ * It lives in session memory beside the vault key and dies with it. What it
+ * adds is a list of domain names in clear where the vault itself is encrypted;
+ * that is a real, small exposure, and it buys the difference between a sign-in
+ * that works and one that stalls for ninety seconds.
+ */
+export async function savePasskeyParties(parties: readonly string[]): Promise<void> {
+  if (hasSession) {
+    await chrome.storage.session.set({ [PASSKEY_PARTIES_KEY]: [...new Set(parties)] });
+  }
+}
+
+/** The stored list, or `null` when the vault has not said — which is not the
+ *  same as an empty list, and must not be treated as "we have nothing". */
+export async function loadPasskeyParties(): Promise<readonly string[] | null> {
+  if (!hasSession) {
+    return null;
+  }
+  const stored = await chrome.storage.session.get(PASSKEY_PARTIES_KEY);
+  const value = stored[PASSKEY_PARTIES_KEY];
+  return Array.isArray(value) ? value.filter((p): p is string => typeof p === 'string') : null;
 }
 
 // --- A page waiting on a passkey ---------------------------------------------
