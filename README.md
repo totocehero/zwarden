@@ -1,5 +1,7 @@
 # Zwarden
 
+*[Français](README.fr.md)*
+
 An open-source browser password manager, compatible with
 [Vaultwarden](https://github.com/dani-garcia/vaultwarden) and the Bitwarden API.
 
@@ -62,10 +64,12 @@ The cryptographic core is implemented and tested. The rest is in progress.
       and deletion — without ever seeing a key or a password
 - [x] Vault layer: the unlock orchestrator (`unlock()`, memory hygiene included)
       and item decryption (per-item key, partial views, case tolerance)
-- [ ] Service worker and the locking life cycle
-- [ ] Popup (unlock, list, search, copy) — two switchable views:
-      "Bitwarden-like" (the classic layout, nothing to relearn for people
-      migrating) and "Zwarden" (filtered on the active tab, keyboard-driven)
+- [x] Service worker and the locking life cycle — inactivity, system session
+      lock, browser close
+- [x] Popup: unlock, list, search, copy
+- [ ] Two switchable popup views: "Bitwarden-like" (the classic layout, nothing
+      to relearn for people migrating) and "Zwarden" (filtered on the active
+      tab, keyboard-driven). One view today, the second still to come
 - [x] Organisation vaults: RSA private key and organisation keys unwrapped,
       shared items readable
 - [x] Tags: folders and collections decrypted, filtering chips (phase 1 of 3 —
@@ -150,7 +154,7 @@ in both directions:
 
 ```bash
 npm install
-npm test          # 301 tests
+npm test          # 422 tests
 npm run typecheck # strict TypeScript
 npm run lint      # ESLint: lost promises, loose comparisons
 npm run build
