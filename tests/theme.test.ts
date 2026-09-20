@@ -9,6 +9,11 @@
  * Firefox's `theme_icons` uses the same counter-intuitive convention — the keys
  * name the icon's own colour, not the background it suits — so the manifest is
  * checked against the same rule rather than trusted to a reader's attention.
+ *
+ * The third drawing, `-outline`, answers the two places where no swap is
+ * possible and is therefore checked too: it is the one the manifest must
+ * declare, and pointing either of those keys back at the plain white file is a
+ * change that looks like tidying and ships an invisible icon.
  */
 
 import { readFileSync } from 'node:fs';
@@ -24,7 +29,11 @@ interface ThemeIcon {
 }
 
 const manifest = JSON.parse(readFileSync('public/manifest.json', 'utf8')) as {
-  action: { theme_icons?: readonly ThemeIcon[] };
+  icons: Readonly<Record<string, string>>;
+  action: {
+    theme_icons?: readonly ThemeIcon[];
+    default_icon: Readonly<Record<string, string>>;
+  };
 };
 
 describe('variantFor', () => {
@@ -55,5 +64,41 @@ describe('manifest theme_icons', () => {
 
     expect(entry?.light).toBe(`images/icon${size}.png`);
     expect(entry?.dark).toBe(`images/icon${size}-dark.png`);
+  });
+});
+
+/**
+ * Where the browser paints an icon we cannot swap.
+ *
+ * Two surfaces, and neither accepts a theme variant:
+ *
+ * - `action.default_icon`, which Chrome shows between launching the browser and
+ *   waking the service worker that would call `setIcon` — precisely the moment
+ *   one looks for the extension one just installed;
+ * - `icons`, the card on `chrome://extensions` and the store listing, which has
+ *   no theme mechanism at all.
+ *
+ * Both must therefore carry the outlined drawing, which reads on either
+ * background. Choosing the white one for the majority on a light theme, or the
+ * dark one for the majority on a dark theme, is a coin toss dressed as a
+ * decision — hence a third drawing, and hence this test.
+ */
+describe('icons the browser paints unswapped', () => {
+  it.each(['16', '32', '48', '128'])('advertises the outlined drawing at size %s', (size) => {
+    expect(manifest.icons[size]).toBe(`images/icon${size}-outline.png`);
+  });
+
+  it.each(['16', '32'])('falls back to the outlined drawing at size %s', (size) => {
+    expect(manifest.action.default_icon[size]).toBe(`images/icon${size}-outline.png`);
+  });
+
+  /**
+   * The swap itself still uses the two clean drawings: an outline is insurance
+   * against not knowing the background, and once the background is known it is
+   * only noise.
+   */
+  it('leaves the swapped icons unoutlined', () => {
+    const swapped = (manifest.action.theme_icons ?? []).flatMap((i) => [i.light, i.dark]);
+    expect(swapped.filter((path) => path.includes('outline'))).toEqual([]);
   });
 });

@@ -18,6 +18,21 @@
  * Firefox's `theme_icons` uses the opposite convention, and mixing the two is
  * how one ships an invisible icon.
  *
+ * ## The third drawing
+ *
+ * A swap needs someone to swap, and two surfaces have nobody: `default_icon`,
+ * which Chrome paints between launching the browser and waking the worker, and
+ * `manifest.icons` — the card on `chrome://extensions`, the store listing —
+ * which accepts no theme variant at all. Choosing white there loses the users on
+ * a light theme, choosing dark loses the others; it is a coin toss dressed as a
+ * decision.
+ *
+ * Hence `icon*-outline.png`: the white drawing with a dark rim, readable on
+ * either background. It is the manifest's answer, never `setIcon`'s — once the
+ * background is known the rim is only noise. The rim is dilated in place, so the
+ * glyph keeps its size and the swap moves nothing; `scripts/make-icons.py`
+ * derives all three drawings from the one source.
+ *
  * ## Who decides
  *
  * A service worker has no DOM and therefore no `matchMedia`. Chrome provides

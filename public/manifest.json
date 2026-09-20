@@ -6,17 +6,17 @@
   "description": "__MSG_appDescription__",
   "minimum_chrome_version": "120",
   "icons": {
-    "16": "images/icon16.png",
-    "32": "images/icon32.png",
-    "48": "images/icon48.png",
-    "128": "images/icon128.png"
+    "16": "images/icon16-outline.png",
+    "32": "images/icon32-outline.png",
+    "48": "images/icon48-outline.png",
+    "128": "images/icon128-outline.png"
   },
   "action": {
     "default_popup": "src/popup/index.html",
     "default_title": "__MSG_appName__",
     "default_icon": {
-      "16": "images/icon16.png",
-      "32": "images/icon32.png"
+      "16": "images/icon16-outline.png",
+      "32": "images/icon32-outline.png"
     },
     "theme_icons": [
       {
