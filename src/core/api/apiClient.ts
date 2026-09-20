@@ -377,6 +377,38 @@ export class ApiClient {
   }
 
   /**
+   * Moves an item to the trash, where it can be recovered.
+   *
+   * Preferred over {@link ApiClient.deleteCipher} everywhere a person is
+   * clicking: the official clients keep a trashed item for thirty days and can
+   * restore it, so a misclick costs a trip to the web vault rather than a
+   * password that no longer exists anywhere.
+   *
+   * A 404 is treated as success, as it is for the permanent deletion: the item
+   * is not there, which is what was wanted.
+   *
+   * @param accessToken Access token.
+   * @param cipherId Item identifier.
+   * @throws {ApiError} If the server refuses for any other reason.
+   */
+  async trashCipher(accessToken: string, cipherId: string): Promise<void> {
+    const url = `${this.baseUrl}/api/ciphers/${encodeURIComponent(cipherId)}/delete`;
+    const response = await this.fetchFn(url, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
+
+    if (!response.ok && response.status !== 404) {
+      throw new ApiError(
+        'Failed to move the item to the trash',
+        response.status,
+        await response.text(),
+      );
+    }
+  }
+
+  /**
    * Permanently deletes an item, bypassing the trash.
    *
    * A 404 is treated as success: the item no longer exists, the intent is

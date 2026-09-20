@@ -464,6 +464,18 @@
   "healthDisclaimer": {
     "message": "A “weak” verdict is reliable; the absence of one is not a certificate. This is an estimate computed on this machine, with no dictionary and no network."
   },
+  "healthDelete": {
+    "message": "Move to the trash"
+  },
+  "healthDeleteConfirm": {
+    "message": "Confirm"
+  },
+  "healthDeleteHint": {
+    "message": "Deleted items go to the trash and can be restored from the web vault for thirty days."
+  },
+  "healthDeleted": {
+    "message": "$1 moved to the trash"
+  },
   "healthReasonShort": {
     "message": "too short"
   },

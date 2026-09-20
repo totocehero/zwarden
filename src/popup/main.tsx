@@ -1466,6 +1466,45 @@ function App() {
   }
 
   /**
+   * Moves an item to the trash, from the health report.
+   *
+   * The trash and not the permanent deletion: the official clients keep a
+   * trashed item for thirty days, so a misclick on a list one is skimming costs
+   * a trip to the web vault rather than a password that exists nowhere any
+   * more.
+   *
+   * Not queued when the server is unreachable, unlike an edit. A held deletion
+   * would have to decide what to do about an item changed in the meantime, and
+   * "delete it anyway" is the wrong answer often enough that the honest
+   * behaviour is to fail visibly and let the user try again.
+   */
+  async function onTrashItem(cipherId: string): Promise<void> {
+    if (vault === null) {
+      return;
+    }
+    const name = vault.items.find((i) => i.id === cipherId)?.name ?? cipherId;
+    setError(null);
+    setBusy(t('statusSaving'));
+    try {
+      const auth = await authorize();
+      await auth.client.trashCipher(auth.accessToken, cipherId);
+      await refreshAfterWrite(auth, vault.userKey);
+      // The report described a vault that no longer holds this item: the row
+      // goes, rather than staying until the panel is reopened.
+      setHealth((current) =>
+        current === null
+          ? null
+          : { ...current, stale: current.stale.filter((f) => f.id !== cipherId) },
+      );
+      setError(t('healthDeleted', name));
+    } catch (err) {
+      setError(messageFor(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /**
    * What the header's menu holds.
    *
    * Built here rather than in the header: the header knows how to show a menu,
@@ -1691,7 +1730,17 @@ function App() {
 
   // --- Vault health ---------------------------------------------------------
   if (health !== null) {
-    return <HealthPanel report={health} onBack={() => setHealth(null)} />;
+    return (
+      <div>
+        <HealthPanel
+          report={health}
+          onBack={() => setHealth(null)}
+          onDelete={(id) => void onTrashItem(id)}
+        />
+        {busy !== null && <p class="status">{busy}</p>}
+        {error !== null && <p class="error">{error}</p>}
+      </div>
+    );
   }
 
   // --- Edit screen ----------------------------------------------------------

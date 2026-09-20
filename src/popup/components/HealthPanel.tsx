@@ -12,6 +12,8 @@
  * finds the obviously bad and does not certify the rest.
  */
 
+import { useState } from 'preact/hooks';
+
 import { t, type MessageKey } from '@shared/i18n.js';
 import type { HealthReport, HealthSubject } from '@core/vault/health.js';
 import { findingCount } from '@core/vault/health.js';
@@ -28,13 +30,53 @@ const REASONS: Readonly<Record<StrengthReason, MessageKey>> = {
   ok: 'healthReasonEntropy',
 };
 
+/** One row of a finding group. */
+interface FindingRow {
+  readonly key: string;
+  readonly name: string;
+  readonly detail?: string;
+  /** The item to discard, when the row offers it. */
+  readonly deletable?: string;
+}
+
+/**
+ * The discard button, which asks twice.
+ *
+ * Two clicks rather than a dialog: the popup is four hundred and twenty pixels
+ * wide and an overlay to confirm one row would cover the list it came from. The
+ * second click is the confirmation, and moving away from the row cancels it —
+ * so a misclick costs nothing and does not need undoing.
+ */
+function DiscardButton({ onDelete }: { onDelete: () => void }) {
+  const [armed, setArmed] = useState(false);
+
+  return (
+    <button
+      class={`chip health-discard${armed ? ' chip-on' : ''}`}
+      title={t('healthDelete')}
+      onMouseLeave={() => setArmed(false)}
+      onBlur={() => setArmed(false)}
+      onClick={() => {
+        if (armed) {
+          onDelete();
+        }
+        setArmed(!armed);
+      }}
+    >
+      {armed ? t('healthDeleteConfirm') : t('healthDelete')}
+    </button>
+  );
+}
+
 /** One group of findings, or nothing when there are none. */
 function Finding({
   title,
   rows,
+  onDelete,
 }: {
   title: string;
-  rows: readonly { readonly key: string; readonly name: string; readonly detail?: string }[];
+  rows: readonly FindingRow[];
+  onDelete?: (id: string) => void;
 }) {
   if (rows.length === 0) {
     return null;
@@ -46,6 +88,9 @@ function Finding({
         <div key={row.key} class="health-row">
           <span class="health-name">{row.name}</span>
           {row.detail !== undefined && <span class="health-detail">{row.detail}</span>}
+          {row.deletable !== undefined && onDelete !== undefined && (
+            <DiscardButton onDelete={() => onDelete(row.deletable!)} />
+          )}
         </div>
       ))}
     </section>
@@ -58,9 +103,13 @@ const joined = (items: readonly HealthSubject[]): string => items.map((i) => i.n
 export function HealthPanel({
   report,
   onBack,
+  onDelete,
 }: {
   report: HealthReport;
   onBack: () => void;
+  /** Moves an item to the trash. Offered on the stale list, which is the one
+   *  read to decide what is no longer worth keeping. */
+  onDelete: (id: string) => void;
 }) {
   const total = findingCount(report);
 
@@ -101,8 +150,11 @@ export function HealthPanel({
             key: finding.id,
             name: finding.name,
             detail: t('healthStaleDetail', String(finding.days)),
+            deletable: finding.id,
           }))}
+          onDelete={onDelete}
         />
+        {report.stale.length > 0 && <p class="hint-diag">{t('healthDeleteHint')}</p>}
         <Finding
           title={t('healthExpiring')}
           rows={report.expiring.map((finding) => ({

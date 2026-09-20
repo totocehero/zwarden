@@ -815,3 +815,23 @@ button.menu-button {
   background: var(--accent);
   color: #fff;
 }
+
+/* Discarding an item from the health report. */
+
+button.health-discard {
+  flex: none;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+}
+
+button.health-discard:hover {
+  border-color: var(--error);
+  color: var(--error);
+}
+
+/* Armed: the next click is the one that acts, and it says so. */
+button.health-discard.chip-on {
+  border-color: var(--error);
+  background: var(--error);
+  color: #fff;
+}

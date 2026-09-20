@@ -183,7 +183,9 @@ export function buildHealthReport(
     reused: [...byPassword.values()].filter((g) => g.length > 1).map((items) => ({ items })),
     weak,
     echoing,
-    stale,
+    // Oldest first. This list is read to decide what to throw away, and the
+    // thing most likely to be thrown away is the thing untouched the longest.
+    stale: [...stale].sort((a, b) => b.days - a.days),
     expiring,
   };
 }

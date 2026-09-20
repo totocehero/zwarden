@@ -464,6 +464,18 @@
   "healthDisclaimer": {
     "message": "Un verdict « faible » est fiable ; son absence n’est pas un certificat. C’est une estimation calculée sur cette machine, sans dictionnaire ni réseau."
   },
+  "healthDelete": {
+    "message": "Mettre à la corbeille"
+  },
+  "healthDeleteConfirm": {
+    "message": "Confirmer"
+  },
+  "healthDeleteHint": {
+    "message": "Les éléments supprimés vont à la corbeille et sont restaurables depuis le coffre web pendant trente jours."
+  },
+  "healthDeleted": {
+    "message": "$1 mis à la corbeille"
+  },
   "healthReasonShort": {
     "message": "trop court"
   },

@@ -203,3 +203,19 @@ describe('findingCount', () => {
     expect(findingCount(buildHealthReport([item()], NOW))).toBe(0);
   });
 });
+
+describe('the order findings come back in', () => {
+  it('puts the oldest password at the top of the stale list', () => {
+    // This list is read to decide what to throw away, and the likeliest
+    // candidate is the one untouched the longest.
+    const report = buildHealthReport(
+      [
+        item({ id: 'recent', passwordUpdatedAt: '2025-06-01T00:00:00Z' }),
+        item({ id: 'ancient', passwordUpdatedAt: '2019-01-01T00:00:00Z' }),
+        item({ id: 'middling', passwordUpdatedAt: '2022-01-01T00:00:00Z' }),
+      ],
+      NOW,
+    );
+    expect(report.stale.map((f) => f.id)).toEqual(['ancient', 'middling', 'recent']);
+  });
+});

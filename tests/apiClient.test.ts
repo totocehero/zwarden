@@ -368,6 +368,54 @@ describe('deleteCipher', () => {
   });
 });
 
+/**
+ * The trash, not the permanent deletion.
+ *
+ * Everywhere a person is clicking, an item should be recoverable: the official
+ * clients keep a trashed item for thirty days. A misclick on a list one is
+ * skimming should cost a trip to the web vault, not a password that exists
+ * nowhere any more.
+ */
+describe('trashCipher', () => {
+  it('asks the server to trash rather than to destroy', async () => {
+    const calls: { url: string; method: string }[] = [];
+    const client = clientWith((url, init) => {
+      calls.push({ url: String(url), method: String(init?.method) });
+      return new Response('', { status: 200 });
+    });
+
+    await client.trashCipher('token', 'id-1');
+
+    expect(calls[0]!.method).toBe('PUT');
+    expect(calls[0]!.url).toMatch(/\/api\/ciphers\/id-1\/delete$/);
+  });
+
+  it('escapes an identifier rather than pasting it into the path', () => {
+    const calls: string[] = [];
+    const client = clientWith((url) => {
+      calls.push(String(url));
+      return new Response('', { status: 200 });
+    });
+
+    return client.trashCipher('token', 'a/../b').then(() => {
+      expect(calls[0]).toContain('a%2F..%2Fb');
+    });
+  });
+
+  it('treats a 404 as success (idempotence)', async () => {
+    const client = clientWith(() => new Response('', { status: 404 }));
+    await expect(client.trashCipher('token', 'unknown-id')).resolves.toBeUndefined();
+  });
+
+  it('surfaces other failures', async () => {
+    const client = clientWith(() => new Response('forbidden', { status: 403 }));
+
+    const error = await client.trashCipher('token', 'id').catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(403);
+  });
+});
+
 describe('server URL normalisation', () => {
   const base = { deviceIdentifier: 'id-1', fetchFn: (async () => new Response('{}')) as typeof fetch };
 
