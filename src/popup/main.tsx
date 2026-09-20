@@ -1558,10 +1558,10 @@ function App() {
     // them.
     const views = await passkeyViews(open);
     await savePasskeyParties(views.map((view) => view.rpId));
-    console.debug('[zwarden] passkeys this vault can answer for', views.map((v) => v.rpId));
+    console.log('[zwarden] passkeys this vault can answer for', views.map((v) => v.rpId));
 
     const pending = await loadPendingAssertion();
-    console.debug('[zwarden] ceremony waiting?', pending === null ? 'none' : pending.ceremony);
+    console.log('[zwarden] ceremony waiting?', pending === null ? 'none' : pending.ceremony);
     if (pending === null) {
       // The badge may still be up from a ceremony that has since gone. Better
       // to say so than to leave the user looking for something to click.
@@ -1612,7 +1612,7 @@ function App() {
     }
 
     const choices = selectCredentials(views, ask.rpId, ask.allowCredentials);
-    console.debug('[zwarden] matching for', ask.rpId, {
+    console.log('[zwarden] matching for', ask.rpId, {
       asked: ask.allowCredentials,
       held: views.map((v) => ({ rpId: v.rpId, credentialId: v.credentialId })),
       matched: choices.length,

@@ -70,11 +70,11 @@ window.addEventListener('message', (event: MessageEvent) => {
   // The worker dying, the vault locking, the popup being dismissed: whatever
   // the reason, silence means "we have nothing", and the page recovers.
   port.onDisconnect.addListener(() => {
-    console.debug('[zwarden] the extension closed the channel without answering');
+    console.log('[zwarden] the extension closed the channel without answering');
     answer(null);
   });
 
-  console.debug('[zwarden] relaying a', data['ceremony'], 'ceremony to the extension');
+  console.log('[zwarden] relaying a', data['ceremony'], 'ceremony to the extension');
   port.postMessage({
     type: 'webauthn-request',
     ceremony: data['ceremony'],

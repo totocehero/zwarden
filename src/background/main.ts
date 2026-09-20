@@ -574,14 +574,14 @@ async function onAssertionRequest(
   // nothing would make Zwarden a ninety-second delay on every sign-in done with
   // a hardware key — which is most of them.
   if (ceremony === 'get' && !(await canAnswerFor(options))) {
-    console.debug('[zwarden] declined before asking: no related passkey', {
+    console.log('[zwarden] declined before asking: no related passkey', {
       rpId: (options as { rpId?: unknown }).rpId ?? '(the page\u2019s own host)',
       known: await loadPasskeyParties(),
     });
     port.postMessage({ result: null });
     return;
   }
-  console.debug('[zwarden] holding a', ceremony, 'ceremony for', origin);
+  console.log('[zwarden] holding a', ceremony, 'ceremony for', origin);
 
   const id = crypto.randomUUID();
   waitingPages.set(id, port);

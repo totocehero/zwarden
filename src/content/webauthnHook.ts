@@ -193,6 +193,11 @@ Object.defineProperty(window, 'zwardenPasskeyHook', {
   configurable: true,
 });
 
+// Announced at `log` level, not `debug`: Chrome's console hides `debug` behind
+// a filter nobody thinks to lift, so a diagnostic written there is a diagnostic
+// that reads as silence — which is exactly the answer it was meant to rule out.
+console.log('[zwarden] passkey hook installed on', window.location.origin);
+
 const credentials = navigator.credentials;
 const originalGet = credentials.get.bind(credentials);
 const originalCreate = credentials.create.bind(credentials);
@@ -207,18 +212,18 @@ credentials.get = async function get(
   // One line per WebAuthn call, which is a rare event — not noise, and it is
   // the only way to tell "the hook never ran" from "the hook declined" without
   // guessing from a screenshot. The whole chain logs the same way.
-  console.debug('[zwarden] intercepted credentials.get', {
+  console.log('[zwarden] intercepted credentials.get', {
     rpId: options.publicKey.rpId,
     allowCredentials: (options.publicKey.allowCredentials ?? []).length,
   });
   try {
     const assertion = await ask('get', serialiseOptions(options.publicKey));
-    console.debug('[zwarden] credentials.get answered', assertion === null ? 'nothing' : 'signed');
+    console.log('[zwarden] credentials.get answered', assertion === null ? 'nothing' : 'signed');
     // Nothing to offer, or the user said no: the browser takes over, and the
     // hardware key in their pocket still works.
     return assertion === null ? originalGet(options) : buildCredential(assertion);
   } catch (error) {
-    console.debug('[zwarden] credentials.get failed, falling back', error);
+    console.log('[zwarden] credentials.get failed, falling back', error);
     return originalGet(options);
   }
 };
