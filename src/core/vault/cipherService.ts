@@ -356,6 +356,29 @@ function readLogin(cipher: CipherResponse): Record<string, unknown> | undefined 
 }
 
 /**
+ * Counts the items of each type, **without decrypting anything**.
+ *
+ * An item's `type` travels in clear — it has to, since the server routes on it —
+ * so this answers "how many cards does this vault hold" the moment the cached
+ * sync is read, tens of milliseconds before the first name is decrypted.
+ *
+ * That is what lets the type filter appear with real counts while the list is
+ * still being decrypted, instead of arriving after it and shifting the layout
+ * under a cursor already moving.
+ *
+ * @param ciphers Raw items, typically `sync.ciphers`.
+ * @returns Item count per type. Types absent from the vault are absent here.
+ */
+export function countTypes(ciphers: readonly CipherResponse[]): ReadonlyMap<number, number> {
+  const counts = new Map<number, number>();
+  for (const cipher of ciphers) {
+    const type = readField<number>(cipher, 'type') ?? 0;
+    counts.set(type, (counts.get(type) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/**
  * Decrypts an item's list view.
  *
  * Never rejects: an item whose own key is unreadable yields a view with `null`

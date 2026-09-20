@@ -710,3 +710,10 @@ button.chip-type-filter.chip-on {
   background: var(--accent);
   color: #fff;
 }
+
+/* A disabled control says "not yet", not "broken": dimmed, and it does not
+   pretend to be clickable. */
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

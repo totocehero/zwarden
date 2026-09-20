@@ -101,6 +101,9 @@
   "listSearch": {
     "message": "Rechercher parmi $1 item(s)…"
   },
+  "listSearchUnknown": {
+    "message": "Rechercher…"
+  },
   "listEmpty": {
     "message": "Aucun item."
   },

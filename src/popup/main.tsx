@@ -41,6 +41,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { type EditForm, EMPTY_EDIT, EditItemForm } from './components/EditItemForm.js';
 import type { RevealedContent } from './components/ItemRow.js';
 import { TypeFilter } from './components/TypeFilter.js';
+import { VaultHeader } from './components/VaultHeader.js';
 import { chipsFor, ItemRow } from './components/ItemRow.js';
 import { RepromptGuard } from './components/RepromptGuard.js';
 import { SaveProposalBanner, type SaveProposal } from './components/SaveProposal.js';
@@ -66,6 +67,7 @@ import {
   type PasskeyView,
   buildCipherCreatePayload,
   buildCipherUpdatePayload,
+  countTypes,
   decideProposal,
   decryptCipherDetails,
   decryptCipherList,
@@ -246,6 +248,15 @@ function toEditValues<F extends string>(
   >;
 }
 
+/** The total held by a per-type count. */
+function countOf(counts: ReadonlyMap<number, number>): number {
+  let total = 0;
+  for (const n of counts.values()) {
+    total += n;
+  }
+  return total;
+}
+
 /** How long a revealed password stays on screen before being hidden again. */
 const REVEAL_HIDE_MS = 20_000;
 
@@ -291,6 +302,14 @@ function App() {
    * visible reason, and the cost of setting it again is one click.
    */
   const [typeFilter, setTypeFilter] = useState<ReadonlySet<number>>(new Set());
+  /**
+   * Item count per type, read from the raw sync before anything is decrypted.
+   *
+   * Lets the filter appear with true counts while the list is still being
+   * decrypted, rather than arriving after it and shifting the layout under a
+   * cursor already on its way.
+   */
+  const [rawCounts, setRawCounts] = useState<ReadonlyMap<number, number>>(new Map());
   const [showPassword, setShowPassword] = useState(false);
   const [proposal, setProposal] = useState<SaveProposal | null>(null);
   const reprompt = useReprompt(messageFor);
@@ -419,6 +438,9 @@ function App() {
     if (stored.cachedSync === null) {
       return false;
     }
+    // Before decrypting: the types are in clear, so the filter can be drawn
+    // while the names are still being worked through.
+    setRawCounts(countTypes(stored.cachedSync.ciphers ?? []));
     try {
       await showVault(stored.cachedSync, userKey, false);
       setInitializing(false);
@@ -1284,13 +1306,36 @@ function App() {
   }
 
   // --- Initialising: neither sign-in screen nor list until we know ----------
+  //
+  // The filter and the search box are drawn straight away, with real counts —
+  // the types come from the raw sync, which costs no decryption. Waiting for the
+  // list to render them would move two controls into place just as the user
+  // reaches for them, and would throw away whatever they had started typing.
   if (vault === null && initializing) {
     return (
       <div>
-        <header>
-          <h1>Zwarden</h1>
-        </header>
+        <VaultHeader
+          canCreate={false}
+          onNew={() => undefined}
+          onGenerate={() => void generator.open('standalone')}
+          onOptions={openOptions}
+          onLock={onLock}
+        />
         <main>
+          <TypeFilter counts={rawCounts} selected={typeFilter} onSelect={setTypeFilter} />
+          <input
+            class="search"
+            type="search"
+            // A cold start has no cached sync and therefore no count. Better a
+            // placeholder that says nothing than one that says zero.
+            placeholder={
+              countOf(rawCounts) === 0
+                ? t('listSearchUnknown')
+                : t('listSearch', String(countOf(rawCounts)))
+            }
+            value={filter}
+            onInput={(e) => setFilter(e.currentTarget.value)}
+          />
           <p class="status">{busy ?? t('listOpening')}</p>
         </main>
       </div>
@@ -1384,6 +1429,10 @@ function App() {
 
   // Counted over the whole vault, not over what is visible: a chip whose count
   // changed as it was clicked would be reporting the filter, not the vault.
+  //
+  // Recounted from the decrypted items rather than kept from `rawCounts`, which
+  // only described the cache: the network refresh that follows can add or remove
+  // items, and a count frozen at opening would drift.
   const typeCounts = useMemo(() => {
     const counts = new Map<number, number>();
     for (const item of vault.items) {
@@ -1394,27 +1443,13 @@ function App() {
 
   return (
     <div>
-      <header>
-        <h1>Zwarden</h1>
-        <div>
-          <button class="quiet" title={t('newItemTitle')} onClick={onNewItem}>
-            {t('newItem')}
-          </button>
-          <button
-            class="quiet"
-            title={t('editGeneratePassword')}
-            onClick={() => void generator.open('standalone')}
-          >
-            {t('actionGenerate')}
-          </button>
-          <button class="quiet" onClick={openOptions}>
-            {t('actionSettings')}
-          </button>
-          <button class="quiet" onClick={onLock}>
-            {t('actionLock')}
-          </button>
-        </div>
-      </header>
+      <VaultHeader
+        canCreate
+        onNew={onNewItem}
+        onGenerate={() => void generator.open('standalone')}
+        onOptions={openOptions}
+        onLock={onLock}
+      />
       <main>
         {reprompt.state !== null && (
           <RepromptGuard

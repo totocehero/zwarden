@@ -34,6 +34,7 @@ import {
   type CipherOverview,
   buildCipherCreatePayload,
   buildCipherUpdatePayload,
+  countTypes,
   decryptCipherDetails,
   decryptCipherList,
   decryptCipherOverview,
@@ -1196,5 +1197,47 @@ describe('rewriting preserves what it does not edit', () => {
     const payload = await buildCipherUpdatePayload(cipher, { ...EDIT, card }, key, false);
     const keys = Object.keys(payload['card'] as Record<string, unknown>);
     expect(keys.filter((name) => name.toLowerCase() === 'number')).toHaveLength(1);
+  });
+});
+
+/**
+ * Counting by type without decrypting.
+ *
+ * An item's `type` travels in clear — the server routes on it — so the count is
+ * available the moment the cache is read. That is what lets the type filter
+ * appear with true counts while the names are still being decrypted, rather
+ * than landing afterwards and moving the controls under the cursor.
+ */
+describe('countTypes', () => {
+  it('counts each type', () => {
+    const counts = countTypes([
+      { id: 'a', type: 1 },
+      { id: 'b', type: 1 },
+      { id: 'c', type: 3 },
+    ] as unknown as CipherResponse[]);
+    expect(counts.get(1)).toBe(2);
+    expect(counts.get(3)).toBe(1);
+  });
+
+  it('omits the types the vault does not hold', () => {
+    const counts = countTypes([{ id: 'a', type: 1 }] as unknown as CipherResponse[]);
+    expect(counts.has(3)).toBe(false);
+    expect(counts.size).toBe(1);
+  });
+
+  it('reads the field in either casing, as the rest of the layer does', () => {
+    const counts = countTypes([{ Id: 'a', Type: 4 }] as unknown as CipherResponse[]);
+    expect(counts.get(4)).toBe(1);
+  });
+
+  it('counts an item with no type rather than dropping it', () => {
+    // Type 0 is no filter chip, but the item still exists and the total must
+    // say so.
+    const counts = countTypes([{ id: 'a' }] as unknown as CipherResponse[]);
+    expect(counts.get(0)).toBe(1);
+  });
+
+  it('gives an empty count for an empty vault', () => {
+    expect(countTypes([]).size).toBe(0);
   });
 });

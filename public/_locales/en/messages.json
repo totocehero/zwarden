@@ -101,6 +101,9 @@
   "listSearch": {
     "message": "Search $1 item(s)…"
   },
+  "listSearchUnknown": {
+    "message": "Search…"
+  },
   "listEmpty": {
     "message": "No items."
   },
