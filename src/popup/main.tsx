@@ -40,6 +40,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
 import { type EditForm, EMPTY_EDIT, EditItemForm } from './components/EditItemForm.js';
 import type { RevealedContent } from './components/ItemRow.js';
+import { HealthPanel } from './components/HealthPanel.js';
 import { TypeFilter } from './components/TypeFilter.js';
 import { VaultHeader } from './components/VaultHeader.js';
 import { chipsFor, ItemRow } from './components/ItemRow.js';
@@ -84,6 +85,7 @@ import { buildVaultKeys, destroyVaultKeys } from '@core/vault/keyring.js';
 import { type VaultLabels, decryptLabels } from '@core/vault/labels.js';
 import { matchesOrigin } from '@core/vault/uriMatch.js';
 import { decideReplay, isUnreachable } from '@core/vault/offlineQueue.js';
+import { buildHealthReport, type HealthReport } from '@core/vault/health.js';
 import {
   clearWriteQueue,
   enqueueWrite,
@@ -352,6 +354,8 @@ function App() {
    * many could not be applied because the item changed elsewhere.
    */
   const [queued, setQueued] = useState({ pending: 0, held: 0 });
+  /** The health report, while its screen is open. */
+  const [health, setHealth] = useState<HealthReport | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [proposal, setProposal] = useState<SaveProposal | null>(null);
   const reprompt = useReprompt(messageFor);
@@ -1413,6 +1417,54 @@ function App() {
     setError(n === 0 ? null : t('queueDiscarded', String(n)));
   }
 
+  /**
+   * Examines the vault and opens the report.
+   *
+   * Every password has to be decrypted for this, which is why it happens on an
+   * explicit gesture and not on opening: it is exactly the work the list was
+   * just taught to avoid. Items guarded by `reprompt` are handed over
+   * untouched — `buildHealthReport` skips them, and says how many.
+   */
+  async function onCheckHealth(): Promise<void> {
+    if (vault === null) {
+      return;
+    }
+    setError(null);
+    setBusy(t('healthChecking'));
+    try {
+      const open = vault;
+      const inputs = await Promise.all(
+        open.items.map(async (item) => {
+          const cipher = open.raw.get(item.id);
+          // A guarded item is never decrypted, not even to be counted.
+          const details =
+            item.reprompt || cipher === undefined
+              ? null
+              : await decryptCipherDetails(cipher, open.keys, () => undefined);
+          const login = cipher === undefined ? undefined : readField<unknown>(cipher, 'login');
+          return {
+            id: item.id,
+            name: item.name,
+            username: item.username,
+            uris: item.uris,
+            type: item.type,
+            reprompt: item.reprompt,
+            password: details?.password ?? null,
+            // Not encrypted — a date the server keeps in clear, so reading it
+            // costs nothing and asks nothing of the guard.
+            passwordUpdatedAt: readField<string>(login, 'passwordRevisionDate') ?? null,
+            card: details?.card ?? null,
+          };
+        }),
+      );
+      setHealth(buildHealthReport(inputs, new Date()));
+    } catch (err) {
+      setError(messageFor(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   /** Opens the edit screen on a blank item, type still to be chosen. */
   function onNewItem(): void {
     setEditForm(EMPTY_EDIT);
@@ -1546,6 +1598,7 @@ function App() {
           canCreate={false}
           onNew={() => undefined}
           onGenerate={() => void generator.open('standalone')}
+          onHealth={undefined}
           onOptions={openOptions}
           onLock={onLock}
         />
@@ -1621,6 +1674,11 @@ function App() {
     );
   }
 
+  // --- Vault health ---------------------------------------------------------
+  if (health !== null) {
+    return <HealthPanel report={health} onBack={() => setHealth(null)} />;
+  }
+
   // --- Edit screen ----------------------------------------------------------
   if (editing !== null || creating) {
     return (
@@ -1661,6 +1719,7 @@ function App() {
         canCreate
         onNew={onNewItem}
         onGenerate={() => void generator.open('standalone')}
+        onHealth={() => void onCheckHealth()}
         onOptions={openOptions}
         onLock={onLock}
       />

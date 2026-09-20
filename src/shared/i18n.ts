@@ -226,6 +226,27 @@ export const MESSAGE_KEYS = [
   'repromptVerifying',
   'repromptWrongPassword',
 
+  // Vault health
+  'actionHealth',
+  'healthTitle',
+  'healthChecking',
+  'healthAllGood',
+  'healthGuarded',
+  'healthReused',
+  'healthReusedDetail',
+  'healthWeak',
+  'healthEchoing',
+  'healthStale',
+  'healthStaleDetail',
+  'healthExpiring',
+  'healthDisclaimer',
+  'healthReasonShort',
+  'healthReasonNotorious',
+  'healthReasonRepeated',
+  'healthReasonSequence',
+  'healthReasonSingleClass',
+  'healthReasonEntropy',
+
   // Offline write queue
   'queueSavedOffline',
   'queuePending',

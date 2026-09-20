@@ -19,6 +19,7 @@ export function VaultHeader({
   canCreate,
   onNew,
   onGenerate,
+  onHealth,
   onOptions,
   onLock,
 }: {
@@ -26,6 +27,8 @@ export function VaultHeader({
   canCreate: boolean;
   onNew: () => void;
   onGenerate: () => void;
+  /** Absent while the vault is still opening: there is nothing to examine. */
+  onHealth: (() => void) | undefined;
   onOptions: () => void;
   onLock: () => void;
 }) {
@@ -38,6 +41,14 @@ export function VaultHeader({
         </button>
         <button class="quiet" title={t('editGeneratePassword')} onClick={onGenerate}>
           {t('actionGenerate')}
+        </button>
+        <button
+          class="quiet"
+          title={t('healthTitle')}
+          disabled={onHealth === undefined}
+          onClick={onHealth}
+        >
+          {t('actionHealth')}
         </button>
         <button class="quiet" onClick={onOptions}>
           {t('actionSettings')}

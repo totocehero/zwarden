@@ -422,6 +422,63 @@
   "repromptWrongPassword": {
     "message": "Mot de passe incorrect."
   },
+  "actionHealth": {
+    "message": "Santé"
+  },
+  "healthTitle": {
+    "message": "Santé du coffre"
+  },
+  "healthChecking": {
+    "message": "Examen du coffre…"
+  },
+  "healthAllGood": {
+    "message": "Rien à signaler — $1 élément(s) examinés."
+  },
+  "healthGuarded": {
+    "message": "$1 élément(s) n’ont pas été examinés : ils redemandent le mot de passe maître, et un agrégat en dirait autant qu’une copie."
+  },
+  "healthReused": {
+    "message": "Mots de passe réutilisés"
+  },
+  "healthReusedDetail": {
+    "message": "$1 éléments partagent un mot de passe"
+  },
+  "healthWeak": {
+    "message": "Mots de passe faibles"
+  },
+  "healthEchoing": {
+    "message": "Mots de passe qui reprennent le site ou le compte"
+  },
+  "healthStale": {
+    "message": "Mots de passe inchangés depuis longtemps"
+  },
+  "healthStaleDetail": {
+    "message": "$1 jours"
+  },
+  "healthExpiring": {
+    "message": "Cartes arrivées à échéance"
+  },
+  "healthDisclaimer": {
+    "message": "Un verdict « faible » est fiable ; son absence n’est pas un certificat. C’est une estimation calculée sur cette machine, sans dictionnaire ni réseau."
+  },
+  "healthReasonShort": {
+    "message": "trop court"
+  },
+  "healthReasonNotorious": {
+    "message": "parmi les plus utilisés au monde"
+  },
+  "healthReasonRepeated": {
+    "message": "un seul caractère répété"
+  },
+  "healthReasonSequence": {
+    "message": "une suite au clavier"
+  },
+  "healthReasonSingleClass": {
+    "message": "uniquement des lettres, ou des chiffres"
+  },
+  "healthReasonEntropy": {
+    "message": "pas assez varié"
+  },
   "queueSavedOffline": {
     "message": "Enregistré sur cet appareil — sera envoyé dès que le serveur sera joignable."
   },

@@ -422,6 +422,63 @@
   "repromptWrongPassword": {
     "message": "Incorrect password."
   },
+  "actionHealth": {
+    "message": "Health"
+  },
+  "healthTitle": {
+    "message": "Vault health"
+  },
+  "healthChecking": {
+    "message": "Examining the vault…"
+  },
+  "healthAllGood": {
+    "message": "Nothing to report — $1 item(s) examined."
+  },
+  "healthGuarded": {
+    "message": "$1 item(s) were not examined: they ask for the master password again, and an aggregate would say as much as a copy."
+  },
+  "healthReused": {
+    "message": "Passwords used more than once"
+  },
+  "healthReusedDetail": {
+    "message": "$1 items share one password"
+  },
+  "healthWeak": {
+    "message": "Weak passwords"
+  },
+  "healthEchoing": {
+    "message": "Passwords that repeat the site or the account"
+  },
+  "healthStale": {
+    "message": "Passwords unchanged for a long time"
+  },
+  "healthStaleDetail": {
+    "message": "$1 days"
+  },
+  "healthExpiring": {
+    "message": "Cards at their expiry date"
+  },
+  "healthDisclaimer": {
+    "message": "A “weak” verdict is reliable; the absence of one is not a certificate. This is an estimate computed on this machine, with no dictionary and no network."
+  },
+  "healthReasonShort": {
+    "message": "too short"
+  },
+  "healthReasonNotorious": {
+    "message": "among the most used in the world"
+  },
+  "healthReasonRepeated": {
+    "message": "one character repeated"
+  },
+  "healthReasonSequence": {
+    "message": "a run on the keyboard"
+  },
+  "healthReasonSingleClass": {
+    "message": "letters only, or digits only"
+  },
+  "healthReasonEntropy": {
+    "message": "not varied enough"
+  },
   "queueSavedOffline": {
     "message": "Saved on this device — it will be sent when the server can be reached."
   },

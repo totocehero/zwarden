@@ -741,3 +741,35 @@ button:disabled {
 .queue-banner.queue-held > p:first-child {
   color: var(--warn);
 }
+
+/* The vault's health report. */
+
+/* Five buttons in 420 pixels: they wrap rather than overflow, and the header
+   grows by a row instead of pushing anything off the edge. */
+header > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  justify-content: flex-end;
+}
+
+.health-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.health-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.health-detail {
+  flex: none;
+  color: var(--text-2);
+  font-size: 11px;
+}

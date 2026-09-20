@@ -58,7 +58,7 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
 - [x] `SymmetricCryptoKey` — clés de 32/64 octets
 - [x] AES-256-CBC + HMAC-SHA256, encrypt-then-MAC
 - [x] Dérivation de clé : PBKDF2-SHA256 et Argon2id
-- [x] 475 tests, dont les vecteurs des RFC 4231 / 5869 / 6238 / 7914
+- [x] 524 tests, dont les vecteurs des RFC 4231 / 5869 / 6238 / 7914
 - [x] **Interopérabilité validée contre Vaultwarden 2026.6.0** —
       authentification, déchiffrement de la clé de coffre, et un aller-retour
       complet d'écriture/lecture
@@ -114,6 +114,12 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
       le lisent — ce qui est tout l'argument contre la livraison de 63
       traductions à tout le monde
 - [x] Filtrage de la liste par type d'élément, plusieurs types à la fois
+- [x] Un rapport de santé, calculé entièrement sur la machine — mots de passe
+      réutilisés, faibles, ceux qui reprennent simplement le site ou le compte,
+      ceux inchangés depuis un an, cartes arrivées à échéance. Aucun
+      dictionnaire, aucun réseau, aucun tiers. Les éléments gardés par
+      `reprompt` ne sont **pas examinés** et le rapport dit combien, un agrégat
+      sur un mot de passe en disant autant qu'une copie
 - [x] Édition hors ligne : une écriture que le serveur n'a jamais reçue est mise
       de côté — déjà chiffrée, jamais l'édition en clair — et envoyée dès qu'il
       est joignable. Une écriture en attente n'est **jamais rejouée par-dessus
@@ -170,7 +176,7 @@ donc interopérables dans les deux sens :
 
 ```bash
 npm install
-npm test          # 475 tests
+npm test          # 524 tests
 npm run typecheck # TypeScript strict
 npm run lint      # ESLint : promesses perdues, comparaisons laxistes
 npm run build
