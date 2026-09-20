@@ -16,7 +16,7 @@
  * change that looks like tidying and ships an invisible icon.
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
@@ -100,5 +100,33 @@ describe('icons the browser paints unswapped', () => {
   it('leaves the swapped icons unoutlined', () => {
     const swapped = (manifest.action.theme_icons ?? []).flatMap((i) => [i.light, i.dark]);
     expect(swapped.filter((path) => path.includes('outline'))).toEqual([]);
+  });
+});
+
+/**
+ * The paths the icon swap uses.
+ *
+ * Relative paths resolve against the **calling page**, not against the
+ * extension root. The swap runs from two places — the service worker at the
+ * root, and the popup at `src/popup/index.html` — so a relative path worked
+ * from one and failed from the other, with Chrome logging
+ * `Could not load action icon` and keeping the icon it already had. The only
+ * symptom was a swap that quietly did not happen.
+ */
+describe('icon paths', () => {
+  const paths = readFileSync('src/shared/theme.ts', 'utf8')
+    .split('\n')
+    .filter((line) => line.includes('images/icon'))
+    .map((line) => /'([^']+)'/.exec(line)?.[1] ?? '');
+
+  it('names every icon from the extension root', () => {
+    expect(paths.length).toBeGreaterThan(0);
+    expect(paths.filter((path) => !path.startsWith('/images/'))).toEqual([]);
+  });
+
+  it('points at files that exist', () => {
+    for (const path of paths) {
+      expect(existsSync(`public${path}`)).toBe(true);
+    }
   });
 });

@@ -51,19 +51,26 @@ export type IconVariant = 'light' | 'dark';
  *
  * `light` is the white drawing, for a dark toolbar; `dark` is the dark drawing,
  * for a light one.
+ *
+ * **Absolute, from the extension root.** They were relative, and that worked
+ * from the service worker — which sits at the root — and failed from the popup,
+ * which lives at `src/popup/index.html` and resolved them to
+ * `src/popup/images/…`. Chrome reported four `Could not load action icon` and
+ * kept the icon it had, so the only visible symptom was a swap that silently
+ * did not happen.
  */
 const ICONS: Readonly<Record<IconVariant, Readonly<Record<number, string>>>> = {
   light: {
-    16: 'images/icon16.png',
-    32: 'images/icon32.png',
-    48: 'images/icon48.png',
-    128: 'images/icon128.png',
+    16: '/images/icon16.png',
+    32: '/images/icon32.png',
+    48: '/images/icon48.png',
+    128: '/images/icon128.png',
   },
   dark: {
-    16: 'images/icon16-dark.png',
-    32: 'images/icon32-dark.png',
-    48: 'images/icon48-dark.png',
-    128: 'images/icon128-dark.png',
+    16: '/images/icon16-dark.png',
+    32: '/images/icon32-dark.png',
+    48: '/images/icon48-dark.png',
+    128: '/images/icon128-dark.png',
   },
 };
 
