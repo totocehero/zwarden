@@ -57,7 +57,7 @@ The cryptographic core is implemented and tested. The rest is in progress.
 - [x] `SymmetricCryptoKey` — 32/64-byte keys
 - [x] AES-256-CBC + HMAC-SHA256, encrypt-then-MAC
 - [x] Key derivation: PBKDF2-SHA256 and Argon2id
-- [x] 560 tests, including the RFC 4231 / 5869 / 6238 / 7914 vectors
+- [x] 581 tests, including the RFC 4231 / 5869 / 6238 / 7914 vectors
 - [x] **Interoperability validated against Vaultwarden 2026.6.0** —
       authentication, vault key decryption, and a complete write/read round trip
 - [x] API client: prelogin, authentication, session refresh, sync, item creation
@@ -104,6 +104,12 @@ The cryptographic core is implemented and tested. The rest is in progress.
       by the test suite, and loaded only for the users who read it — which is
       the whole argument against shipping 63 translations to everyone
 - [x] Filtering the list by item type, several types at once
+- [x] Optional breach checking against Have I Been Pwned, **off by default**
+      and the only thing here that talks to anyone but your own server. The
+      password never leaves and neither does its full hash: five hex characters
+      of its SHA-1 go out, some eight hundred suffixes come back, and the
+      comparison happens locally. What it does leak is written out in the
+      settings rather than summarised into reassurance
 - [x] An encrypted export — Argon2id then AES-256-GCM, with the parameters
       authenticated alongside the ciphertext so lowering them makes the file
       refuse to open rather than open weaker. **There is no cleartext export**:
@@ -170,7 +176,7 @@ in both directions:
 
 ```bash
 npm install
-npm test          # 560 tests
+npm test          # 581 tests
 npm run typecheck # strict TypeScript
 npm run lint      # ESLint: lost promises, loose comparisons
 npm run build

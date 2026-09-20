@@ -58,7 +58,7 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
 - [x] `SymmetricCryptoKey` — clés de 32/64 octets
 - [x] AES-256-CBC + HMAC-SHA256, encrypt-then-MAC
 - [x] Dérivation de clé : PBKDF2-SHA256 et Argon2id
-- [x] 560 tests, dont les vecteurs des RFC 4231 / 5869 / 6238 / 7914
+- [x] 581 tests, dont les vecteurs des RFC 4231 / 5869 / 6238 / 7914
 - [x] **Interopérabilité validée contre Vaultwarden 2026.6.0** —
       authentification, déchiffrement de la clé de coffre, et un aller-retour
       complet d'écriture/lecture
@@ -114,6 +114,12 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
       le lisent — ce qui est tout l'argument contre la livraison de 63
       traductions à tout le monde
 - [x] Filtrage de la liste par type d'élément, plusieurs types à la fois
+- [x] Vérification optionnelle des fuites auprès de Have I Been Pwned,
+      **désactivée par défaut** et seule chose ici qui parle à quelqu'un
+      d'autre que votre serveur. Le mot de passe ne sort pas, ni son empreinte
+      complète : cinq caractères hexadécimaux de son SHA-1 partent, quelque
+      huit cents suffixes reviennent, la comparaison se fait localement. Ce que
+      ça laisse fuir est écrit dans les paramètres, pas résumé en rassurance
 - [x] Un export chiffré — Argon2id puis AES-256-GCM, les paramètres
       authentifiés avec le chiffré : les abaisser fait refuser l'ouverture
       plutôt qu'ouvrir plus faible. **Il n'existe pas d'export en clair** : un
@@ -183,7 +189,7 @@ donc interopérables dans les deux sens :
 
 ```bash
 npm install
-npm test          # 560 tests
+npm test          # 581 tests
 npm run typecheck # TypeScript strict
 npm run lint      # ESLint : promesses perdues, comparaisons laxistes
 npm run build

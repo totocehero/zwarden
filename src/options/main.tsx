@@ -16,6 +16,7 @@ import { useEffect } from 'preact/hooks';
 
 import { ActionsSection, DeviceSection } from './components/ActionSections.js';
 import {
+  BreachSection,
   InterfaceSection,
   SaveSection,
   SecuritySection,
@@ -52,6 +53,7 @@ function App() {
         />
         <SecuritySection settings={s.settings} patch={s.patch} />
         <SaveSection settings={s.settings} patch={s.patch} />
+        <BreachSection settings={s.settings} patch={s.patch} />
 
         <button type="submit">{t('actionSave')}</button>
         <p class="status">{s.status}</p>

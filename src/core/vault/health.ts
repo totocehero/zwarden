@@ -76,6 +76,13 @@ export interface StaleFinding extends HealthSubject {
   readonly days: number;
 }
 
+/** A password the corpus has seen in a public breach. */
+export interface BreachFinding extends HealthSubject {
+  /** How many times it appears. A number, because "once" and "nine million
+   *  times" are not the same news. */
+  readonly seen: number;
+}
+
 /** A card at or near its expiry date. */
 export interface ExpiryFinding extends HealthSubject {
   readonly expired: boolean;
@@ -92,6 +99,16 @@ export interface HealthReport {
   readonly echoing: readonly HealthSubject[];
   readonly stale: readonly StaleFinding[];
   readonly expiring: readonly ExpiryFinding[];
+  /**
+   * Passwords the breach corpus knows.
+   *
+   * Empty when the check is switched off, which is the default — and
+   * {@link HealthReport.breachChecked} is what tells the two apart, since "no
+   * breached passwords" and "nobody asked" look identical otherwise.
+   */
+  readonly breached: readonly BreachFinding[];
+  /** Whether the corpus was consulted at all. */
+  readonly breachChecked: boolean;
 }
 
 /** After how long a password is worth revisiting, by default. */
@@ -170,13 +187,20 @@ function daysSince(iso: string | null, now: Date): number | null {
 export function buildHealthReport(
   items: readonly HealthItem[],
   now: Date,
-  staleAfterDays: number = STALE_AFTER_DAYS,
+  options: {
+    readonly staleAfterDays?: number;
+    /** Password → appearances, from `breachCheck.ts`. Absent means not asked. */
+    readonly breached?: ReadonlyMap<string, number>;
+  } = {},
 ): HealthReport {
+  const staleAfterDays = options.staleAfterDays ?? STALE_AFTER_DAYS;
+  const breachedPasswords = options.breached;
   const byPassword = new Map<string, HealthSubject[]>();
   const weak: WeakFinding[] = [];
   const echoing: HealthSubject[] = [];
   const stale: StaleFinding[] = [];
   const expiring: ExpiryFinding[] = [];
+  const breached: BreachFinding[] = [];
   let checked = 0;
   let guarded = 0;
 
@@ -215,6 +239,11 @@ export function buildHealthReport(
       echoing.push(subject(item));
     }
 
+    const seen = breachedPasswords?.get(password);
+    if (seen !== undefined && seen > 0) {
+      breached.push({ ...subject(item), seen });
+    }
+
     const age = daysSince(item.passwordUpdatedAt, now);
     if (age !== null && age >= staleAfterDays) {
       stale.push({ ...subject(item), days: age });
@@ -233,6 +262,10 @@ export function buildHealthReport(
     // thing most likely to be thrown away is the thing untouched the longest.
     stale: [...stale].sort((a, b) => b.days - a.days),
     expiring,
+    // The most-seen first: a password in nine million records is a different
+    // emergency from one in three.
+    breached: breached.sort((a, b) => b.seen - a.seen),
+    breachChecked: breachedPasswords !== undefined,
   };
 }
 
@@ -243,6 +276,7 @@ export function findingCount(report: HealthReport): number {
     report.weak.length +
     report.echoing.length +
     report.stale.length +
-    report.expiring.length
+    report.expiring.length +
+    report.breached.length
   );
 }

@@ -119,6 +119,40 @@ export function InterfaceSection({
   );
 }
 
+/**
+ * Breach checking: the one switch that lets the extension talk to a third
+ * party.
+ *
+ * Its own section, and off by default. The hint does not summarise the
+ * trade-off into reassurance — it says what is sent, what cannot be learnt from
+ * it, and what can. A user who reads it and declines has made the right
+ * decision as surely as one who accepts.
+ */
+export function BreachSection({
+  settings,
+  patch,
+}: {
+  settings: AppSettings;
+  patch: PatchSettings;
+}) {
+  return (
+    <section>
+      <h2>{t('settingsBreachSection')}</h2>
+      <div class="fields">
+        <label class="row">
+          <input
+            type="checkbox"
+            checked={settings.breachCheckEnabled}
+            onInput={(e) => patch({ breachCheckEnabled: e.currentTarget.checked })}
+          />
+          {t('settingsBreachEnable')}
+        </label>
+        <p class="hint">{t('settingsBreachHint')}</p>
+      </div>
+    </section>
+  );
+}
+
 export function SecuritySection({
   settings,
   patch,

@@ -87,6 +87,7 @@ import { type VaultLabels, decryptLabels } from '@core/vault/labels.js';
 import { matchesOrigin } from '@core/vault/uriMatch.js';
 import { decideReplay, isUnreachable } from '@core/vault/offlineQueue.js';
 import { buildHealthReport, type HealthReport } from '@core/vault/health.js';
+import { checkPasswords } from '@core/vault/breachCheck.js';
 import { type ExportPayload, type ExportedItem, sealExport } from '@core/vault/exportFile.js';
 import {
   clearWriteQueue,
@@ -1483,7 +1484,18 @@ function App() {
           };
         }),
       );
-      setHealth(buildHealthReport(inputs, new Date()));
+      // The corpus is consulted only if the user asked for it to be, and only
+      // as part of a report they explicitly requested. Never on opening, never
+      // in the background.
+      let breached: ReadonlyMap<string, number> | undefined;
+      if (settings.breachCheckEnabled) {
+        const passwords = inputs
+          .map((input) => input.password)
+          .filter((password): password is string => password !== null && password !== '');
+        setBusy(t('healthBreachChecking', String(new Set(passwords).size)));
+        breached = await checkPasswords(passwords);
+      }
+      setHealth(buildHealthReport(inputs, new Date(), breached === undefined ? {} : { breached }));
     } catch (err) {
       setError(messageFor(err));
     } finally {

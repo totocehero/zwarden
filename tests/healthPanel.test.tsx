@@ -34,6 +34,8 @@ function report(patch: Partial<HealthReport> = {}): HealthReport {
     echoing: [],
     stale: [],
     expiring: [],
+    breached: [],
+    breachChecked: false,
     ...patch,
   };
 }

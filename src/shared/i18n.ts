@@ -227,6 +227,15 @@ export const MESSAGE_KEYS = [
   'repromptVerifying',
   'repromptWrongPassword',
 
+  // Breach checking
+  'settingsBreachSection',
+  'settingsBreachEnable',
+  'settingsBreachHint',
+  'healthBreached',
+  'healthBreachedDetail',
+  'healthBreachOff',
+  'healthBreachChecking',
+
   // Encrypted export
   'actionExport',
   'exportTitle',

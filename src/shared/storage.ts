@@ -60,6 +60,15 @@ export interface AppSettings {
    * browser" is one choice among the others, not a mode layered over them.
    */
   readonly language: string;
+  /**
+   * Ask Have I Been Pwned whether a password has appeared in a public breach.
+   *
+   * **Off by default**, and the only setting that lets the extension talk to
+   * anyone but the user's own server. What it sends and what it leaks is laid
+   * out in `breachCheck.ts` and repeated in the settings page rather than
+   * summarised into reassurance.
+   */
+  readonly breachCheckEnabled: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -72,6 +81,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   offerToSave: true,
   clipboardClearSeconds: 30,
   language: '',
+  breachCheckEnabled: false,
 };
 
 const hasLocal = typeof chrome !== 'undefined' && typeof chrome.storage?.local !== 'undefined';
@@ -108,6 +118,7 @@ export async function loadSettings(): Promise<AppSettings> {
     'offerToSave',
     'clipboardClearSeconds',
     'language',
+    'breachCheckEnabled',
   ]);
   return {
     serverUrl: readString(stored, 'serverUrl', DEFAULT_SETTINGS.serverUrl),
@@ -123,6 +134,11 @@ export async function loadSettings(): Promise<AppSettings> {
       DEFAULT_SETTINGS.clipboardClearSeconds,
     ),
     language: readString(stored, 'language', DEFAULT_SETTINGS.language),
+    breachCheckEnabled: readBoolean(
+      stored,
+      'breachCheckEnabled',
+      DEFAULT_SETTINGS.breachCheckEnabled,
+    ),
   };
 }
 

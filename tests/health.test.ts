@@ -165,7 +165,7 @@ describe('stale passwords', () => {
     const report = buildHealthReport(
       [item({ passwordUpdatedAt: '2026-06-01T00:00:00Z' })],
       NOW,
-      30,
+      { staleAfterDays: 30 },
     );
     expect(report.stale).toHaveLength(1);
   });
@@ -265,5 +265,62 @@ describe('openableUri', () => {
   it('gives nothing when there is nothing to give', () => {
     expect(openableUri([])).toBeNull();
     expect(openableUri(['', '   '])).toBeNull();
+  });
+});
+
+/**
+ * Breach findings.
+ *
+ * The report must tell "nobody asked" from "nothing found": they look the same
+ * in an empty list, and only one of them means the vault is clean.
+ */
+describe('breaches', () => {
+  it('names an item whose password the corpus knows', () => {
+    const report = buildHealthReport([item({ password: 'hunter2' })], NOW, {
+      breached: new Map([['hunter2', 9_659_365]]),
+    });
+
+    expect(report.breached).toHaveLength(1);
+    expect(report.breached[0]!.seen).toBe(9_659_365);
+    expect(report.breachChecked).toBe(true);
+  });
+
+  it('puts the most-seen first', () => {
+    // A password in nine million records is a different emergency from one in
+    // three.
+    const report = buildHealthReport(
+      [item({ id: 'a', password: 'rare' }), item({ id: 'b', password: 'common' })],
+      NOW,
+      { breached: new Map([['rare', 3], ['common', 9_000_000]]) },
+    );
+    expect(report.breached.map((f) => f.id)).toEqual(['b', 'a']);
+  });
+
+  it('says nobody asked when the check is off', () => {
+    const report = buildHealthReport([item({ password: 'hunter2' })], NOW);
+    expect(report.breached).toEqual([]);
+    expect(report.breachChecked).toBe(false);
+  });
+
+  it('says the corpus was asked even when it found nothing', () => {
+    // The distinction the panel needs: an empty list under "not checked" and an
+    // empty list under "checked, clean" are opposite news.
+    const report = buildHealthReport([item()], NOW, { breached: new Map() });
+    expect(report.breached).toEqual([]);
+    expect(report.breachChecked).toBe(true);
+  });
+
+  it('never lets a breached password into the report', () => {
+    const report = buildHealthReport([item({ password: 'hunter2' })], NOW, {
+      breached: new Map([['hunter2', 5]]),
+    });
+    expect(JSON.stringify(report)).not.toContain('hunter2');
+  });
+
+  it('leaves guarded items out of this too', () => {
+    const report = buildHealthReport([item({ reprompt: true, password: 'hunter2' })], NOW, {
+      breached: new Map([['hunter2', 5]]),
+    });
+    expect(report.breached).toEqual([]);
   });
 });

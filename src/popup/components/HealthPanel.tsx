@@ -183,6 +183,18 @@ export function HealthPanel({
       <main>
         {total === 0 && <p class="empty">{t('healthAllGood', String(report.checked))}</p>}
 
+        {/* First: it is the one finding no amount of local cleverness could
+            have produced, and the one that is already someone else's problem. */}
+        <Finding
+          title={t('healthBreached')}
+          rows={report.breached.map((finding) => ({
+            key: finding.id,
+            name: finding.name,
+            detail: t('healthBreachedDetail', finding.seen.toLocaleString()),
+            uri: finding.uri,
+          }))}
+          onOpen={onOpen}
+        />
         <Finding
           title={t('healthReused')}
           rows={report.reused.map((group, index) => ({
@@ -234,6 +246,7 @@ export function HealthPanel({
           onOpen={onOpen}
         />
 
+        {!report.breachChecked && <p class="hint-diag">{t('healthBreachOff')}</p>}
         {report.guarded > 0 && (
           <p class="hint-diag">{t('healthGuarded', String(report.guarded))}</p>
         )}

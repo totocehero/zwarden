@@ -425,6 +425,27 @@
   "repromptWrongPassword": {
     "message": "Incorrect password."
   },
+  "settingsBreachSection": {
+    "message": "Breach checking"
+  },
+  "settingsBreachEnable": {
+    "message": "Check passwords against Have I Been Pwned"
+  },
+  "settingsBreachHint": {
+    "message": "Off by default, and the only thing in Zwarden that talks to anyone but your own server. Your password never leaves, nor does its full hash: only the first five hex characters of its SHA-1 are sent, and the server answers with the eight hundred or so suffixes beginning with them, which are compared here. It cannot tell which one you asked about. What it does see is your IP address, that you run a password manager, and when you checked — and roughly how many passwords you hold, if you check them all at once. The answer is padded so its size says nothing either. It runs only when you ask for the health report, never on its own."
+  },
+  "healthBreached": {
+    "message": "Passwords found in public breaches"
+  },
+  "healthBreachedDetail": {
+    "message": "seen $1 times"
+  },
+  "healthBreachOff": {
+    "message": "Breach checking is off. It can be switched on in the settings — read what it sends before you do."
+  },
+  "healthBreachChecking": {
+    "message": "Asking about $1 distinct password(s)…"
+  },
   "actionExport": {
     "message": "Export"
   },

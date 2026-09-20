@@ -425,6 +425,27 @@
   "repromptWrongPassword": {
     "message": "Mot de passe incorrect."
   },
+  "settingsBreachSection": {
+    "message": "Vérification des fuites"
+  },
+  "settingsBreachEnable": {
+    "message": "Vérifier les mots de passe auprès de Have I Been Pwned"
+  },
+  "settingsBreachHint": {
+    "message": "Désactivé par défaut, et la seule chose dans Zwarden qui parle à quelqu’un d’autre que votre propre serveur. Votre mot de passe ne sort pas, ni son empreinte complète : seuls les cinq premiers caractères hexadécimaux de son SHA-1 sont envoyés, et le serveur répond avec les quelque huit cents suffixes qui commencent par eux, comparés ici. Il ne peut pas savoir lequel vous demandiez. Ce qu’il voit en revanche : votre adresse IP, le fait que vous utilisiez un gestionnaire de mots de passe, et le moment où vous avez vérifié — ainsi que le nombre approximatif de mots de passe que vous détenez, si vous les vérifiez tous d’un coup. La réponse est rembourrée pour que sa taille ne dise rien non plus. Cela ne tourne que lorsque vous demandez le rapport de santé, jamais de soi-même."
+  },
+  "healthBreached": {
+    "message": "Mots de passe trouvés dans des fuites publiques"
+  },
+  "healthBreachedDetail": {
+    "message": "vu $1 fois"
+  },
+  "healthBreachOff": {
+    "message": "La vérification des fuites est désactivée. Elle s’active dans les paramètres — lisez ce qu’elle envoie avant."
+  },
+  "healthBreachChecking": {
+    "message": "Interrogation sur $1 mot(s) de passe distincts…"
+  },
   "actionExport": {
     "message": "Exporter"
   },
