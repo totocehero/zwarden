@@ -231,13 +231,13 @@
     "message": "Identifiant"
   },
   "typeCard": {
-    "message": "Carte bancaire"
+    "message": "CB"
   },
   "typeIdentity": {
     "message": "Identité"
   },
   "typeNote": {
-    "message": "Note sécurisée"
+    "message": "Note"
   },
   "typeSshKey": {
     "message": "Clé SSH"
