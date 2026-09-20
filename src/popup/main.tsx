@@ -40,6 +40,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
 import { type EditForm, EMPTY_EDIT, EditItemForm } from './components/EditItemForm.js';
 import type { RevealedContent } from './components/ItemRow.js';
+import { type AssertionChoice, AssertionScreen } from './components/AssertionScreen.js';
 import { ExportScreen } from './components/ExportScreen.js';
 import { HealthPanel } from './components/HealthPanel.js';
 import { TypeFilter } from './components/TypeFilter.js';
@@ -64,6 +65,7 @@ import {
   type SyncResponse,
 } from '@core/api/models.js';
 import { SymmetricCryptoKey } from '@core/crypto/symmetricCryptoKey.js';
+import { toBase64Url } from '@core/crypto/encoding.js';
 import { digitsOf, EMPTY_CARD_EDIT } from '@core/vault/card.js';
 import { EMPTY_IDENTITY_EDIT, fullName } from '@core/vault/identity.js';
 import {
@@ -78,6 +80,7 @@ import {
   decideProposal,
   decryptCipherDetails,
   decryptCipherList,
+  decryptPasskeys,
   findSaveCandidate,
   reuseByRevision,
   sortCiphersByLastUsed,
@@ -88,6 +91,8 @@ import { matchesOrigin } from '@core/vault/uriMatch.js';
 import { decideReplay, isUnreachable } from '@core/vault/offlineQueue.js';
 import { buildHealthReport, type HealthReport } from '@core/vault/health.js';
 import { checkPasswords } from '@core/vault/breachCheck.js';
+import { selectCredentials, signAssertion } from '@core/vault/passkey.js';
+import { type AssertionAsk, validateAssertionAsk, WebAuthnRefusal } from '@core/vault/webauthnRequest.js';
 import { type ExportPayload, type ExportedItem, sealExport } from '@core/vault/exportFile.js';
 import {
   clearWriteQueue,
@@ -108,6 +113,8 @@ import {
   clearRememberToken,
   getDeviceId,
   loadLastUsed,
+  clearPendingAssertion,
+  loadPendingAssertion,
   loadPendingSave,
   loadRememberToken,
   loadSettings,
@@ -365,6 +372,14 @@ function App() {
   const [exportMaster, setExportMaster] = useState('');
   const [exportPassphrase, setExportPassphrase] = useState('');
   const [exportConfirmation, setExportConfirmation] = useState('');
+  /** The passkey ceremony a page is waiting on, once it has been validated. */
+  const [assertion, setAssertion] = useState<{
+    readonly id: string;
+    readonly ask: AssertionAsk;
+    readonly choices: readonly AssertionChoice[];
+  } | null>(null);
+  const [assertionChoice, setAssertionChoice] = useState<string | null>(null);
+  const [assertionPassword, setAssertionPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [proposal, setProposal] = useState<SaveProposal | null>(null);
   const reprompt = useReprompt(messageFor);
@@ -658,6 +673,7 @@ function App() {
     // Both of these need the whole vault: a save candidate missed because its
     // item was still encrypted would offer to create a duplicate.
     await evaluatePending(items, raw, keys, onDecryptError);
+    await pickUpAssertion({ userKey, keys, raw, labels, errors, items, pending: 0 });
 
     // Active tab: strict origin for "Fill", domain for the pre-filled filter —
     // without overwriting a search already typed, and only if it matches
@@ -808,6 +824,8 @@ function App() {
     setExportMaster('');
     setExportPassphrase('');
     setExportConfirmation('');
+    setAssertion(null);
+    setAssertionPassword('');
     reprompt.cancel();
   }
 
@@ -1503,6 +1521,139 @@ function App() {
     }
   }
 
+  /**
+   * Picks up a page waiting on a passkey, if there is one.
+   *
+   * Runs once the vault is open, because answering needs keys — a locked vault
+   * simply leaves the page waiting until the user unlocks, which is the same
+   * position they would be in with any other authenticator.
+   *
+   * The request is validated **before anything is shown**: whether this page
+   * may ask for this relying party is not a question to put to the user, who
+   * would be looking at the name of a site they trust and clicking yes.
+   */
+  async function pickUpAssertion(open: OpenVault): Promise<void> {
+    const pending = await loadPendingAssertion();
+    if (pending === null) {
+      return;
+    }
+    let ask: AssertionAsk;
+    try {
+      ask = validateAssertionAsk(pending.options, pending.origin);
+    } catch (error) {
+      // Refused outright, and the page is told nothing beyond "we have
+      // nothing" — it falls back to the browser.
+      await answerAssertion(pending.id, null);
+      setError(error instanceof WebAuthnRefusal ? t('assertionRefused') : messageFor(error));
+      return;
+    }
+
+    // Matched on metadata alone. Only the credential actually used has its
+    // private key decrypted, and only once the user has said yes.
+    const views = await Promise.all(
+      open.items
+        .filter((item) => item.hasPasskey)
+        .map(async (item) => {
+          const cipher = open.raw.get(item.id);
+          if (cipher === undefined) {
+            return [];
+          }
+          const details = await decryptCipherDetails(cipher, open.keys, () => undefined);
+          return details.passkeys
+            .filter((view) => view.credentialId !== null && view.rpId !== null)
+            .map((view) => ({
+              itemId: item.id,
+              credentialId: view.credentialId!,
+              rpId: view.rpId!,
+              label: view.userName === null ? (item.name ?? item.id) : `${item.name ?? item.id} — ${view.userName}`,
+            }));
+        }),
+    );
+
+    const choices = selectCredentials(views.flat(), ask.rpId, ask.allowCredentials);
+    setAssertion({ id: pending.id, ask, choices });
+    setAssertionChoice(choices[0]?.credentialId ?? null);
+    setAssertionPassword('');
+  }
+
+  /** Hands the verdict to the service worker, which carries it to the page. */
+  async function answerAssertion(id: string, payload: unknown): Promise<void> {
+    await clearPendingAssertion();
+    await chrome.runtime.sendMessage({ type: 'assertion-answer', id, assertion: payload });
+  }
+
+  /** Signs, and lets the page in. */
+  async function onConfirmAssertion(event: Event): Promise<void> {
+    event.preventDefault();
+    if (vault === null || assertion === null || assertionChoice === null) {
+      return;
+    }
+    const choice = assertion.choices.find((c) => c.credentialId === assertionChoice);
+    const cipher = choice === undefined ? undefined : vault.raw.get(choice.itemId);
+    if (choice === undefined || cipher === undefined) {
+      return;
+    }
+
+    setError(null);
+    setBusy(t('assertionWorking'));
+    try {
+      let verified = false;
+      if (assertion.ask.requiresVerification) {
+        const stored = await loadStoredSession();
+        if (stored === null) {
+          throw new Error(t('errorSessionExpired'));
+        }
+        const masterKey = await deriveMasterKey(assertionPassword, stored.email, stored.kdfConfig);
+        try {
+          verified = await verifyLocalPasswordHash(
+            masterKey,
+            assertionPassword,
+            stored.localPasswordHash,
+          );
+        } finally {
+          masterKey.destroy();
+        }
+        if (!verified) {
+          setError(t('exportWrongMaster'));
+          return;
+        }
+      }
+
+      // The one call that decrypts a private key, on the one credential the
+      // user has just chosen.
+      const credentials = await decryptPasskeys(cipher, vault.keys, () => undefined);
+      const credential = credentials.find((c) => c.credentialId === choice.credentialId);
+      if (credential === undefined) {
+        throw new Error(t('errorItemNotFound'));
+      }
+
+      const signed = await signAssertion(credential, { ...assertion.ask, userVerified: verified });
+      await answerAssertion(assertion.id, {
+        credentialId: signed.credentialId,
+        clientDataJSON: toBase64Url(new TextEncoder().encode(signed.clientDataJSON)),
+        authenticatorData: toBase64Url(signed.authenticatorData),
+        signature: toBase64Url(signed.signature),
+        userHandle: signed.userHandle,
+      });
+      void noteUsage(vault.items.find((i) => i.id === choice.itemId)!);
+      setAssertion(null);
+      window.close();
+    } catch (err) {
+      setError(messageFor(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  /** Declines, and lets the browser take over. */
+  async function onDeclineAssertion(): Promise<void> {
+    if (assertion !== null) {
+      await answerAssertion(assertion.id, null);
+    }
+    setAssertion(null);
+    setAssertionPassword('');
+  }
+
   /** How short a passphrase may not be. Long beats complicated. */
   const MIN_PASSPHRASE = 12;
 
@@ -1909,6 +2060,28 @@ function App() {
         onToggleShowPassword={() => setShowPassword(!showPassword)}
         onSubmit={() => void attemptUnlock()}
         onOptions={openOptions}
+      />
+    );
+  }
+
+  // --- A page waiting on a passkey ------------------------------------------
+  //
+  // Before every other screen: a ceremony is a page held open, waiting, and
+  // anything else shown first would be the extension ignoring it.
+  if (assertion !== null) {
+    return (
+      <AssertionScreen
+        origin={assertion.ask.origin}
+        choices={assertion.choices}
+        chosen={assertionChoice}
+        needsVerification={assertion.ask.requiresVerification}
+        masterPassword={assertionPassword}
+        busy={busy}
+        error={error}
+        onChoose={setAssertionChoice}
+        onMasterPassword={setAssertionPassword}
+        onConfirm={(e) => void onConfirmAssertion(e)}
+        onDecline={() => void onDeclineAssertion()}
       />
     );
   }

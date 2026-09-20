@@ -58,7 +58,7 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
 - [x] `SymmetricCryptoKey` — clés de 32/64 octets
 - [x] AES-256-CBC + HMAC-SHA256, encrypt-then-MAC
 - [x] Dérivation de clé : PBKDF2-SHA256 et Argon2id
-- [x] 606 tests, dont les vecteurs des RFC 4231 / 5869 / 6238 / 7914
+- [x] 630 tests, dont les vecteurs des RFC 4231 / 5869 / 6238 / 7914
 - [x] **Interopérabilité validée contre Vaultwarden 2026.6.0** —
       authentification, déchiffrement de la clé de coffre, et un aller-retour
       complet d'écriture/lecture
@@ -143,13 +143,14 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
       montre la popup sont les vingt déchiffrées avant qu'elle ne dessine. Un
       coffre de 500 éléments avec une clé propre à chacun coûte ~650 ms à
       déchiffrer en entier ; la liste ne l'attend plus
-- [~] Passkeys : le cœur de signature est implémenté et vérifié — une
-      assertion est contrôlée comme un site la contrôle, avec une vraie paire
-      P-256, et la conversion `r‖s` vers DER qui casse silencieusement la
-      plupart des implémentations est testée dans les deux sens. La clé privée
-      n'est déchiffrée que par une seule fonction. **Reste la plomberie côté
-      page** : intercepter `navigator.credentials.get()` et confirmer avec
-      l'utilisateur
+- [x] Passkeys : se connecter avec celles du coffre. Le site qu'une page a le
+      droit de réclamer est vérifié ici, puisque intercepter
+      `navigator.credentials.get()` retire cette vérification au navigateur.
+      Désactivé par défaut — c'est la seule fonctionnalité qui place du code
+      dans chaque page, et encore : le remplacement d'une fonction, rien de
+      dessiné, la confirmation dans la popup. Quand Zwarden n'a rien à
+      proposer, le navigateur reprend la main et une clé matérielle marche
+      toujours
 - [ ] Dérivation de clé dans le service worker (une popup sans clé) — et, avec
       elle, le raccourci de remplissage
 - [ ] Remplissage automatique (détection de formulaire, suggestion dans la page)
@@ -196,7 +197,7 @@ donc interopérables dans les deux sens :
 
 ```bash
 npm install
-npm test          # 606 tests
+npm test          # 630 tests
 npm run typecheck # TypeScript strict
 npm run lint      # ESLint : promesses perdues, comparaisons laxistes
 npm run build

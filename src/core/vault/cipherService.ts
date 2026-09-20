@@ -319,6 +319,14 @@ function orderByLastUsed<T>(
  * WebAuthn ceremony.
  */
 export interface PasskeyView {
+  /**
+   * The credential's own identifier, base64url.
+   *
+   * Metadata, not a secret — the site names it in `allowCredentials`. Carried
+   * here so a ceremony can be matched to an item **without** decrypting any
+   * private key: only the credential actually chosen has its key read.
+   */
+  readonly credentialId: string | null;
   /** The site's domain (RP ID), for example `npmjs.com`. */
   readonly rpId: string | null;
   /** The associated account identifier at the site. */
@@ -570,11 +578,12 @@ export async function decryptCipherDetails(
     decryptStringOrNull(readField<string>(login, 'totp'), itemKey, onError),
     decryptStringOrNull(readField<string>(cipher, 'notes'), itemKey, onError),
     ...rawPasskeys.map(async (entry): Promise<PasskeyView> => {
-      const [rpId, userName] = await Promise.all([
+      const [credentialId, rpId, userName] = await Promise.all([
+        decryptStringOrNull(readField<string>(entry, 'credentialId'), itemKey, onError),
         decryptStringOrNull(readField<string>(entry, 'rpId'), itemKey, onError),
         decryptStringOrNull(readField<string>(entry, 'userName'), itemKey, onError),
       ]);
-      return { rpId, userName };
+      return { credentialId, rpId, userName };
     }),
   ]);
 

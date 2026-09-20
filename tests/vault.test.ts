@@ -168,7 +168,11 @@ describe('cipherService', () => {
     expect(view.hasPasskey).toBe(true);
 
     const details = await decryptCipherDetails(cipher, userKey, (e) => errors.push(e));
-    expect(details.passkeys).toEqual([{ rpId: 'npmjs.com', userName: 'ada' }]);
+    // The credential identifier travels with the metadata: it is what lets a
+    // ceremony be matched to an item without any private key being decrypted.
+    expect(details.passkeys).toEqual([
+      { credentialId: 'uuid-credential', rpId: 'npmjs.com', userName: 'ada' },
+    ]);
     expect(errors).toHaveLength(0);
 
     // The private key is never exposed by the views.

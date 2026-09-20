@@ -69,6 +69,15 @@ export interface AppSettings {
    * summarised into reassurance.
    */
   readonly breachCheckEnabled: boolean;
+  /**
+   * Answer passkey sign-ins with the vault.
+   *
+   * **Off by default.** It is the one feature that puts code inside every page
+   * visited — a replacement for `navigator.credentials.get`, and nothing else:
+   * no element, no style, no interface. The confirmation happens in the popup,
+   * like every other decision here.
+   */
+  readonly passkeySignIn: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -82,6 +91,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   clipboardClearSeconds: 30,
   language: '',
   breachCheckEnabled: false,
+  passkeySignIn: false,
 };
 
 const hasLocal = typeof chrome !== 'undefined' && typeof chrome.storage?.local !== 'undefined';
@@ -119,6 +129,7 @@ export async function loadSettings(): Promise<AppSettings> {
     'clipboardClearSeconds',
     'language',
     'breachCheckEnabled',
+    'passkeySignIn',
   ]);
   return {
     serverUrl: readString(stored, 'serverUrl', DEFAULT_SETTINGS.serverUrl),
@@ -139,6 +150,7 @@ export async function loadSettings(): Promise<AppSettings> {
       'breachCheckEnabled',
       DEFAULT_SETTINGS.breachCheckEnabled,
     ),
+    passkeySignIn: readBoolean(stored, 'passkeySignIn', DEFAULT_SETTINGS.passkeySignIn),
   };
 }
 
@@ -725,6 +737,54 @@ export async function clearStoredSession(): Promise<void> {
   // And the other half. Either alone is inert, so this is belt and braces —
   // but a sealing key left behind outlives its purpose, and those accumulate.
   await forgetSealingKey();
+}
+
+// --- A page waiting on a passkey ---------------------------------------------
+
+const PENDING_ASSERTION_KEY = 'pendingAssertion';
+
+/** What a page is waiting for, as the service worker recorded it. */
+export interface PendingAssertion {
+  readonly id: string;
+  /**
+   * The page's origin **as the browser reported it**, never as the page said.
+   * Everything that stops one site asking for another's passkey rests on this.
+   */
+  readonly origin: string;
+  /** The `publicKey` options the page passed, serialised. Untrusted. */
+  readonly options: Record<string, unknown>;
+  readonly askedAt: number;
+}
+
+/** The ceremony in progress, or `null`. */
+export async function loadPendingAssertion(): Promise<PendingAssertion | null> {
+  if (!hasSession) {
+    return null;
+  }
+  const stored = await chrome.storage.session.get(PENDING_ASSERTION_KEY);
+  const value = stored[PENDING_ASSERTION_KEY] as Partial<PendingAssertion> | undefined;
+  if (
+    value === undefined ||
+    typeof value.id !== 'string' ||
+    typeof value.origin !== 'string' ||
+    typeof value.options !== 'object' ||
+    value.options === null
+  ) {
+    return null;
+  }
+  return {
+    id: value.id,
+    origin: value.origin,
+    options: value.options,
+    askedAt: typeof value.askedAt === 'number' ? value.askedAt : 0,
+  };
+}
+
+/** Forgets it. The worker clears its own copy when the page goes away. */
+export async function clearPendingAssertion(): Promise<void> {
+  if (hasSession) {
+    await chrome.storage.session.remove(PENDING_ASSERTION_KEY);
+  }
 }
 
 // --- Auto-lock ---------------------------------------------------------------

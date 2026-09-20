@@ -38,6 +38,11 @@ export default defineConfig({
         options: 'src/options/index.html',
         background: 'src/background/main.ts',
         content: 'src/content/detector.ts',
+        // Two entries, because they run in two different JavaScript worlds:
+        // the hook replaces a function in the page's own context, the bridge
+        // is the only one that can reach `chrome.runtime`.
+        webauthnHook: 'src/content/webauthnHook.ts',
+        webauthnBridge: 'src/content/webauthnBridge.ts',
         offscreen: 'src/offscreen/main.ts',
       },
       output: {
@@ -47,6 +52,10 @@ export default defineConfig({
           }
           if (chunk.name === 'content') {
             return 'content.js';
+          }
+          if (chunk.name.startsWith('webauthn')) {
+            // At the root and unhashed: the worker registers them by path.
+            return `${chunk.name}.js`;
           }
           // Named at the root: `offscreen.html`, copied from `public/`,
           // references it by a relative path.

@@ -425,6 +425,45 @@
   "repromptWrongPassword": {
     "message": "Mot de passe incorrect."
   },
+  "settingsPasskeySection": {
+    "message": "Connexion par passkey"
+  },
+  "settingsPasskeyEnable": {
+    "message": "Répondre aux connexions par passkey avec le coffre"
+  },
+  "settingsPasskeyHint": {
+    "message": "Désactivé par défaut. C’est la seule fonctionnalité qui place du code dans chaque page visitée — le remplacement d’une fonction du navigateur, et rien d’autre : aucun élément, aucun style, aucune interface. La confirmation se fait dans la popup, comme toute autre décision ici. Quand Zwarden n’a rien à proposer, ou que vous refusez, le navigateur reprend la main et votre clé matérielle fonctionne exactement comme avant."
+  },
+  "assertionTitle": {
+    "message": "Se connecter par passkey"
+  },
+  "assertionAsks": {
+    "message": "$1 vous demande de vous connecter."
+  },
+  "assertionChoose": {
+    "message": "Passkey à utiliser"
+  },
+  "assertionNone": {
+    "message": "Aucune passkey de ce coffre ne répond pour ce site. Le navigateur va reprendre la main."
+  },
+  "assertionVerify": {
+    "message": "Mot de passe maître"
+  },
+  "assertionVerifyHint": {
+    "message": "Ce site demande que vous soyez vérifié, pas seulement présent."
+  },
+  "assertionConfirm": {
+    "message": "Se connecter"
+  },
+  "assertionDecline": {
+    "message": "Refuser"
+  },
+  "assertionRefused": {
+    "message": "Refusé : cette page n’a pas le droit de demander cette passkey."
+  },
+  "assertionWorking": {
+    "message": "Signature…"
+  },
   "settingsBreachSection": {
     "message": "Vérification des fuites"
   },

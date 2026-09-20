@@ -76,18 +76,23 @@ const FLAG_BACKED_UP = 0x10;
 /**
  * Which passkeys can answer this request.
  *
- * @param credentials Every passkey the vault holds.
+ * Generic over the shape, so the choice can be made from metadata alone: the
+ * private key of the credential actually used is decrypted afterwards, and the
+ * others never are.
+ *
+ * @param credentials Every passkey the vault holds — full credentials, or the
+ *   metadata views that carry no private key.
  * @param rpId The relying party asking.
  * @param allowed The `allowCredentials` list, base64url ids — empty or absent
  *   means the site will take any credential it has for that party, which is
  *   what a passwordless sign-in looks like.
  * @returns The candidates, in the order they were given.
  */
-export function selectCredentials(
-  credentials: readonly PasskeyCredential[],
+export function selectCredentials<T extends { readonly credentialId: string; readonly rpId: string }>(
+  credentials: readonly T[],
   rpId: string,
   allowed: readonly string[] = [],
-): readonly PasskeyCredential[] {
+): readonly T[] {
   // The relying party must match exactly. A passkey for `example.com` must
   // never answer `evil-example.com`, and a prefix or suffix test is how that
   // happens.

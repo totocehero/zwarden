@@ -153,6 +153,39 @@ export function BreachSection({
   );
 }
 
+/**
+ * Passkey sign-in: the one switch that puts code inside every page.
+ *
+ * Its own section, off by default, and the hint is precise about what "inside
+ * the page" means here — one browser function replaced, and nothing drawn. A
+ * user weighing that deserves the distinction, since most extensions that
+ * claim it inject an interface as well.
+ */
+export function PasskeySection({
+  settings,
+  patch,
+}: {
+  settings: AppSettings;
+  patch: PatchSettings;
+}) {
+  return (
+    <section>
+      <h2>{t('settingsPasskeySection')}</h2>
+      <div class="fields">
+        <label class="row">
+          <input
+            type="checkbox"
+            checked={settings.passkeySignIn}
+            onInput={(e) => patch({ passkeySignIn: e.currentTarget.checked })}
+          />
+          {t('settingsPasskeyEnable')}
+        </label>
+        <p class="hint">{t('settingsPasskeyHint')}</p>
+      </div>
+    </section>
+  );
+}
+
 export function SecuritySection({
   settings,
   patch,

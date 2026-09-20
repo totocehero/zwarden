@@ -298,7 +298,11 @@ describe('decryptPasskeys', () => {
     // `PasskeyView` carries the metadata and nothing else. Showing an item must
     // not put a private key in memory.
     expect(JSON.stringify(details)).not.toContain('cGtjczgtYnl0ZXM');
-    expect(details.passkeys[0]).toEqual({ rpId: 'example.org', userName: null });
+    expect(details.passkeys[0]).toEqual({
+      credentialId: 'cred-1',
+      rpId: 'example.org',
+      userName: null,
+    });
   });
 
   it('drops a credential whose private key will not decrypt', async () => {

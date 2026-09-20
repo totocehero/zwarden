@@ -425,6 +425,45 @@
   "repromptWrongPassword": {
     "message": "Incorrect password."
   },
+  "settingsPasskeySection": {
+    "message": "Passkey sign-in"
+  },
+  "settingsPasskeyEnable": {
+    "message": "Answer passkey sign-ins with the vault"
+  },
+  "settingsPasskeyHint": {
+    "message": "Off by default. This is the one feature that puts code inside every page you visit — a replacement for one browser function, and nothing else: no element, no style, no interface. The confirmation happens in the popup, like every other decision here. When Zwarden has nothing to offer, or you decline, the browser takes over and your hardware key works exactly as before."
+  },
+  "assertionTitle": {
+    "message": "Sign in with a passkey"
+  },
+  "assertionAsks": {
+    "message": "$1 is asking you to sign in."
+  },
+  "assertionChoose": {
+    "message": "Passkey to use"
+  },
+  "assertionNone": {
+    "message": "No passkey in this vault answers for this site. The browser will take over."
+  },
+  "assertionVerify": {
+    "message": "Master password"
+  },
+  "assertionVerifyHint": {
+    "message": "This site asks that you be verified, not merely present."
+  },
+  "assertionConfirm": {
+    "message": "Sign in"
+  },
+  "assertionDecline": {
+    "message": "Decline"
+  },
+  "assertionRefused": {
+    "message": "Refused: this page may not ask for that passkey."
+  },
+  "assertionWorking": {
+    "message": "Signing…"
+  },
   "settingsBreachSection": {
     "message": "Breach checking"
   },

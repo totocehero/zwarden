@@ -912,3 +912,15 @@ button.health-discard {
   min-width: 9.5em;
   text-align: center;
 }
+
+/* A page waiting on a passkey. */
+
+.assertion-origin {
+  margin: 0 0 10px;
+  padding: 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--panel);
+  font-size: 12px;
+  word-break: break-all;
+}

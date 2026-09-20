@@ -163,6 +163,7 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
 async function resync(): Promise<void> {
   await syncToolbarIcon();
   await applyDetectorRegistration();
+  await applyPasskeyRegistration();
   if (!(await hasStoredSession())) {
     await lockVault();
     return;
@@ -374,6 +375,11 @@ chrome.runtime.onMessage.addListener((message: unknown, sender) => {
   ) {
     void onCredentials(message as CredentialsMessage, sender);
   }
+  // The popup's verdict on a passkey ceremony, on its way back to the page.
+  const body = message as { type?: unknown; id?: unknown; assertion?: unknown } | null;
+  if (body?.type === 'assertion-answer' && typeof body.id === 'string') {
+    void answerAssertion(body.id, body.assertion);
+  }
   // No async response expected: do not return `true`.
   return false;
 });
@@ -418,4 +424,163 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && 'offerToSave' in changes) {
     void applyDetectorRegistration();
   }
+  if (area === 'local' && 'passkeySignIn' in changes) {
+    void applyPasskeyRegistration();
+  }
 });
+
+// --- Passkey sign-in ---------------------------------------------------------
+
+const PASSKEY_HOOK_ID = 'zwarden-passkey-hook';
+const PASSKEY_BRIDGE_ID = 'zwarden-passkey-bridge';
+const PASSKEY_PORT = 'zwarden-webauthn';
+
+/** Where the popup reads what a page is waiting for. */
+const PENDING_ASSERTION_KEY = 'pendingAssertion';
+
+/** How long a ceremony is held before it is let go. */
+const ASSERTION_TIMEOUT_MS = 90_000;
+
+/**
+ * Registers, or removes, the two halves of the passkey hook.
+ *
+ * Two scripts because they live in two worlds: the hook replaces
+ * `navigator.credentials.get` in the page's own context, which is the only
+ * place that function exists, and the bridge is the only one that can reach
+ * `chrome.runtime`.
+ *
+ * Both at `document_start`: a page may call for an assertion before it has
+ * finished loading, and a hook installed afterwards would have missed it.
+ *
+ * Off unless asked for, like the detector. This is the one thing Zwarden puts
+ * inside a page, and a user who never signs in with a passkey should carry
+ * none of it.
+ */
+async function applyPasskeyRegistration(): Promise<void> {
+  if (typeof chrome.scripting?.getRegisteredContentScripts !== 'function') {
+    return;
+  }
+  const { passkeySignIn } = await loadSettings();
+  const ids = [PASSKEY_HOOK_ID, PASSKEY_BRIDGE_ID];
+  const existing = await chrome.scripting.getRegisteredContentScripts({ ids });
+
+  if (passkeySignIn && existing.length === 0) {
+    await chrome.scripting.registerContentScripts([
+      {
+        id: PASSKEY_HOOK_ID,
+        js: ['webauthnHook.js'],
+        // The page's own world: an isolated script cannot replace a function
+        // the page will call.
+        world: 'MAIN',
+        // HTTPS only. WebAuthn is a secure-context feature, and an assertion
+        // answered over plain HTTP is a signature handed to whoever is on the
+        // wire — `validateAssertionAsk` refuses it too, one layer down.
+        matches: ['https://*/*'],
+        allFrames: false,
+        runAt: 'document_start',
+        persistAcrossSessions: true,
+      },
+      {
+        id: PASSKEY_BRIDGE_ID,
+        js: ['webauthnBridge.js'],
+        world: 'ISOLATED',
+        matches: ['https://*/*'],
+        allFrames: false,
+        runAt: 'document_start',
+        persistAcrossSessions: true,
+      },
+    ]);
+  } else if (!passkeySignIn && existing.length > 0) {
+    await chrome.scripting.unregisterContentScripts({ ids });
+  }
+}
+
+/**
+ * The page waiting on an answer, held by request identifier.
+ *
+ * In memory and not in storage, on purpose: a `chrome.runtime.Port` cannot be
+ * serialised, and while one is open the service worker is not killed. The port
+ * is therefore both the address to answer at and the thing keeping this code
+ * alive long enough to answer.
+ */
+const waitingPages = new Map<string, chrome.runtime.Port>();
+
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== PASSKEY_PORT) {
+    return;
+  }
+  port.onMessage.addListener((message: unknown) => {
+    const body = message as { type?: unknown; options?: unknown } | null;
+    if (body?.type === 'assertion-request') {
+      void onAssertionRequest(port, body.options);
+    }
+  });
+});
+
+/**
+ * Takes a page's request and puts it where the popup will find it.
+ *
+ * The **origin is taken from the sender**, never from the message: a page that
+ * could name its own origin could name any, and the whole protection against a
+ * site asking for another site's passkey rests on that one value being the
+ * browser's word rather than the page's.
+ */
+async function onAssertionRequest(port: chrome.runtime.Port, options: unknown): Promise<void> {
+  const sender = port.sender;
+  const origin = sender?.origin ?? (sender?.url === undefined ? null : originOf(sender.url));
+  if (origin === null || typeof options !== 'object' || options === null) {
+    port.postMessage({ assertion: null });
+    return;
+  }
+
+  const id = crypto.randomUUID();
+  waitingPages.set(id, port);
+  port.onDisconnect.addListener(() => void forgetAssertion(id));
+
+  await chrome.storage.session.set({
+    [PENDING_ASSERTION_KEY]: { id, origin, options, askedAt: Date.now() },
+  });
+  // The same badge the save proposal uses: the decision is in the popup, and
+  // the icon is how the popup says it has something to decide.
+  await setSaveBadge(true);
+
+  // A ceremony nobody answers must not hold the worker awake for ever.
+  setTimeout(() => void forgetAssertion(id), ASSERTION_TIMEOUT_MS);
+}
+
+/** Drops a pending ceremony, however it ended. */
+async function forgetAssertion(id: string): Promise<void> {
+  if (!waitingPages.delete(id)) {
+    return;
+  }
+  const stored = await chrome.storage.session.get(PENDING_ASSERTION_KEY);
+  const pending = stored[PENDING_ASSERTION_KEY] as { id?: string } | undefined;
+  if (pending?.id === id) {
+    await chrome.storage.session.remove(PENDING_ASSERTION_KEY);
+    await setSaveBadge(false);
+  }
+}
+
+/** The origin of a URL, or `null` if it has none worth having. */
+function originOf(url: string): string | null {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Carries the popup's answer back down to the page.
+ *
+ * `null` means "we have nothing" — a declined confirmation, a locked vault, a
+ * request refused. The hook then calls the browser's own `credentials.get`,
+ * and the user's hardware key works as it always did.
+ */
+async function answerAssertion(id: string, assertion: unknown): Promise<void> {
+  const port = waitingPages.get(id);
+  if (port !== undefined) {
+    port.postMessage({ assertion: assertion ?? null });
+  }
+  await forgetAssertion(id);
+}

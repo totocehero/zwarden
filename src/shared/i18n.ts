@@ -227,6 +227,21 @@ export const MESSAGE_KEYS = [
   'repromptVerifying',
   'repromptWrongPassword',
 
+  // Passkey sign-in
+  'settingsPasskeySection',
+  'settingsPasskeyEnable',
+  'settingsPasskeyHint',
+  'assertionTitle',
+  'assertionAsks',
+  'assertionChoose',
+  'assertionNone',
+  'assertionVerify',
+  'assertionVerifyHint',
+  'assertionConfirm',
+  'assertionDecline',
+  'assertionRefused',
+  'assertionWorking',
+
   // Breach checking
   'settingsBreachSection',
   'settingsBreachEnable',
