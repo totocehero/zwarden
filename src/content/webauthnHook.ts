@@ -173,6 +173,26 @@ function buildRegistration(created: Json): Credential {
   } as unknown as Credential;
 }
 
+/**
+ * A marker saying the hook is installed.
+ *
+ * The only property this adds to a page, and it exists to answer one question
+ * that is otherwise unanswerable from outside: *is the hook here at all?* When
+ * a site shows the browser's own prompt instead of Zwarden's, the cause is
+ * almost always that this script never ran — the tab was open before the
+ * setting was switched on, the sign-in lives in an iframe, or the registration
+ * failed. Typing `window.zwardenPasskeyHook` in the page console separates
+ * those from a bug in the signing.
+ *
+ * Non-enumerable, so it does not show up in an `Object.keys(window)` or in a
+ * page's own inventory of globals.
+ */
+Object.defineProperty(window, 'zwardenPasskeyHook', {
+  value: 1,
+  enumerable: false,
+  configurable: true,
+});
+
 const credentials = navigator.credentials;
 const originalGet = credentials.get.bind(credentials);
 const originalCreate = credentials.create.bind(credentials);

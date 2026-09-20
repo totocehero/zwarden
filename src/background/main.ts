@@ -402,17 +402,17 @@ async function applyDetectorRegistration(): Promise<void> {
 
   if (offerToSave && existing.length === 0) {
     await chrome.scripting.registerContentScripts([
-      {
-        id: DETECTOR_SCRIPT_ID,
-        js: ['content.js'],
-        // Same hosts as the manifest permissions, main frame only: iframes are
-        // explicitly out of scope (§4).
-        matches: ['https://*/*', 'http://localhost/*', 'http://127.0.0.1/*'],
-        allFrames: false,
-        runAt: 'document_idle',
-        persistAcrossSessions: true,
-      },
-    ]);
+        {
+          id: DETECTOR_SCRIPT_ID,
+          js: ['content.js'],
+          // Same hosts as the manifest permissions, main frame only: iframes are
+          // explicitly out of scope (§4).
+          matches: ['https://*/*', 'http://localhost/*', 'http://127.0.0.1/*'],
+          allFrames: false,
+          runAt: 'document_idle',
+          persistAcrossSessions: true,
+        },
+      ]);
   } else if (!offerToSave && existing.length > 0) {
     await chrome.scripting.unregisterContentScripts({ ids: [DETECTOR_SCRIPT_ID] });
   }
@@ -464,7 +464,25 @@ async function applyPasskeyRegistration(): Promise<void> {
   const ids = [PASSKEY_HOOK_ID, PASSKEY_BRIDGE_ID];
   const existing = await chrome.scripting.getRegisteredContentScripts({ ids });
 
-  if (passkeySignIn && existing.length === 0) {
+  if (!passkeySignIn) {
+    if (existing.length > 0) {
+      await chrome.scripting.unregisterContentScripts({ ids });
+    }
+    return;
+  }
+  if (existing.length === ids.length) {
+    return;
+  }
+  // Partially registered — one half there, the other not. Registering would be
+  // refused for the duplicate identifier and the missing half would stay
+  // missing, for ever and in silence. Clearing first is the only way out.
+  if (existing.length > 0) {
+    await chrome.scripting.unregisterContentScripts({
+      ids: existing.map((script) => script.id),
+    });
+  }
+
+  try {
     await chrome.scripting.registerContentScripts([
       {
         id: PASSKEY_HOOK_ID,
@@ -476,6 +494,10 @@ async function applyPasskeyRegistration(): Promise<void> {
         // answered over plain HTTP is a signature handed to whoever is on the
         // wire — `validateAssertionAsk` refuses it too, one layer down.
         matches: ['https://*/*'],
+        // Main frame only, as §4 has it for the detector. A sign-in inside an
+        // iframe is therefore **not** intercepted and the browser handles it —
+        // a real limitation, and the first thing to check when a site shows its
+        // own prompt instead of ours.
         allFrames: false,
         runAt: 'document_start',
         persistAcrossSessions: true,
@@ -490,8 +512,11 @@ async function applyPasskeyRegistration(): Promise<void> {
         persistAcrossSessions: true,
       },
     ]);
-  } else if (!passkeySignIn && existing.length > 0) {
-    await chrome.scripting.unregisterContentScripts({ ids });
+  } catch (error) {
+    // Said out loud. A registration that fails silently leaves the feature
+    // switched on in the settings and absent from every page, which is the
+    // worst of both: the user believes it works and has no way to find out.
+    console.error('[zwarden] could not install the passkey hook:', error);
   }
 }
 

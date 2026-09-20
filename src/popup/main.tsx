@@ -1589,6 +1589,14 @@ function App() {
     }
 
     const choices = selectCredentials(views, ask.rpId, ask.allowCredentials);
+    if (choices.length === 0) {
+      // Nothing to offer. Answered **at once** so the page falls back to the
+      // browser now rather than after the ninety-second timeout: a user staring
+      // at a stalled sign-in has no way to tell a slow extension from a broken
+      // one, and it was the extension holding the ceremony open for nothing.
+      await answerAssertion(pending.id, null);
+      return;
+    }
     setAssertion({ kind: 'get', id: pending.id, ask, choices });
     setAssertionChoice(choices[0]?.credentialId ?? null);
     setAssertionPassword('');
