@@ -13,30 +13,14 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-/** A `chrome.storage.local` faithful enough for what is exercised here. */
-function fakeStorage(): { data: Record<string, unknown> } {
-  const data: Record<string, unknown> = {};
-  const local = {
-    get: vi.fn(async (keys: string | string[] | null) => {
-      if (keys === null) return { ...data };
-      const list = Array.isArray(keys) ? keys : [keys];
-      return Object.fromEntries(list.filter((k) => k in data).map((k) => [k, data[k]]));
-    }),
-    set: vi.fn(async (patch: Record<string, unknown>) => Object.assign(data, patch)),
-    remove: vi.fn(async (keys: string | string[]) => {
-      for (const k of Array.isArray(keys) ? keys : [keys]) delete data[k];
-    }),
-  };
-  (globalThis as unknown as { chrome: unknown }).chrome = { storage: { local } };
-  return { data };
-}
+import { fakeChromeStorage } from './support/fakes.js';
 
 describe('never-save hosts', () => {
   let store: { data: Record<string, unknown> };
 
   beforeEach(async () => {
     vi.resetModules();
-    store = fakeStorage();
+    store = fakeChromeStorage();
   });
 
   /** Imported after the stub is in place: the module reads `chrome` at load. */
@@ -75,7 +59,7 @@ describe('never-save hosts', () => {
     const first = (store.data['neverSaveHosts'] as string[])[0];
 
     vi.resetModules();
-    const second = fakeStorage();
+    const second = fakeChromeStorage();
     const fresh = await import('../src/shared/storage.js');
     await fresh.addNeverSaveHost('bank.example');
 

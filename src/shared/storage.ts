@@ -18,6 +18,7 @@ import type { KdfConfig } from '../core/crypto/kdf.js';
 import { KdfType } from '../core/crypto/kdf.js';
 import type { SyncResponse } from '../core/api/models.js';
 import { toBase64 } from '../core/crypto/encoding.js';
+import { forgetSealingKey, openVaultKey, sealVaultKey } from './keyGuard.js';
 import {
   DEFAULT_PASSWORD_OPTIONS,
   type PasswordOptions,
@@ -593,11 +594,18 @@ const SESSION_KEY = 'session';
  * extension has, waiting to be collected — and possibly paged to swap in the
  * meantime (`docs/STORAGE.md` §1).
  *
- * Splitting the entry does not make the string wipeable. Nothing can, under
- * MV3: a non-extractable `CryptoKey` would solve it outright, and
- * `chrome.storage` cannot hold one. What it does is confine the key to the one
- * context that decrypts — the popup — and keep it out of the service worker
- * entirely.
+ * Splitting the entry confines the key to the one context that decrypts — the
+ * popup — and keeps it out of the service worker entirely.
+ *
+ * ## And the entry itself holds ciphertext
+ *
+ * What is stored under this key is **sealed**, not the vault key: AES-GCM under
+ * a non-extractable `CryptoKey` kept in IndexedDB (`keyGuard.ts`). The two
+ * halves are useless apart, and closing the browser purges this one, leaving
+ * the half on disk inert.
+ *
+ * So the plaintext key no longer sits resident for the whole browser session.
+ * It exists in the popup's heap, while the popup is open, and nowhere else.
  */
 const VAULT_KEY_KEY = 'vaultKey';
 
@@ -613,15 +621,32 @@ export async function loadVaultKey(): Promise<string | null> {
     return null;
   }
   const stored = await chrome.storage.session.get(VAULT_KEY_KEY);
-  const value = stored[VAULT_KEY_KEY];
-  return typeof value === 'string' && value !== '' ? value : null;
+  const sealed = stored[VAULT_KEY_KEY];
+  if (typeof sealed !== 'string' || sealed === '') {
+    return null;
+  }
+  // A seal that will not open means locked. Failing closed here costs one
+  // unlock; failing open would mean storing the key in clear, which is the one
+  // thing this path exists to avoid.
+  return openVaultKey(sealed);
 }
 
-/** Stores the vault key for the session. */
-export async function saveVaultKey(userKeyB64: string): Promise<void> {
-  if (hasSession) {
-    await chrome.storage.session.set({ [VAULT_KEY_KEY]: userKeyB64 });
+/**
+ * Seals the vault key for the session.
+ *
+ * @returns `false` if it could not be sealed — no key is then stored, and the
+ *   vault will ask to be unlocked again rather than be kept in clear.
+ */
+export async function saveVaultKey(userKeyB64: string): Promise<boolean> {
+  if (!hasSession) {
+    return false;
   }
+  const sealed = await sealVaultKey(userKeyB64);
+  if (sealed === null) {
+    return false;
+  }
+  await chrome.storage.session.set({ [VAULT_KEY_KEY]: sealed });
+  return true;
 }
 
 /**
@@ -681,6 +706,9 @@ export async function clearStoredSession(): Promise<void> {
     // nothing could use and nothing would clear.
     await chrome.storage.session.remove([SESSION_KEY, VAULT_KEY_KEY]);
   }
+  // And the other half. Either alone is inert, so this is belt and braces —
+  // but a sealing key left behind outlives its purpose, and those accumulate.
+  await forgetSealingKey();
 }
 
 // --- Auto-lock ---------------------------------------------------------------

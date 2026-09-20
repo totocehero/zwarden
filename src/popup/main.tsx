@@ -673,6 +673,8 @@ function App() {
     // The session survives the popup closing, until the browser closes, the
     // inactivity deadline passes, or a manual lock. The sync is cached for an
     // immediate display the next time it opens.
+    // Sealed, not stored in clear. If it cannot be sealed nothing is kept and
+    // the next opening asks for the master password again — the honest failure.
     await saveVaultKey(result.userKey.toBase64());
     await saveStoredSession({
       accessToken: result.session.accessToken,

@@ -19,26 +19,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { KdfType } from '../src/core/crypto/kdf.js';
 
-/** A `chrome.storage.session` that records which keys were asked for. */
-function fakeSession(): { data: Record<string, unknown>; reads: string[] } {
-  const data: Record<string, unknown> = {};
-  const reads: string[] = [];
-  const area = {
-    get: vi.fn(async (keys: string | string[] | null) => {
-      const list = keys === null ? Object.keys(data) : Array.isArray(keys) ? keys : [keys];
-      reads.push(...list);
-      return Object.fromEntries(list.filter((k) => k in data).map((k) => [k, data[k]]));
-    }),
-    set: vi.fn(async (patch: Record<string, unknown>) => Object.assign(data, patch)),
-    remove: vi.fn(async (keys: string | string[]) => {
-      for (const k of Array.isArray(keys) ? keys : [keys]) delete data[k];
-    }),
-  };
-  (globalThis as unknown as { chrome: unknown }).chrome = {
-    storage: { session: area, local: area },
-  };
-  return { data, reads };
-}
+import { fakeChromeStorage, fakeIndexedDb, withoutIndexedDb } from './support/fakes.js';
 
 const SESSION = {
   accessToken: 'access',
@@ -56,20 +37,34 @@ describe('the vault key lives apart from the session', () => {
 
   beforeEach(() => {
     vi.resetModules();
-    store = fakeSession();
+    store = fakeChromeStorage();
+    fakeIndexedDb();
   });
 
   async function load() {
     return import('../src/shared/storage.js');
   }
 
-  it('stores the key under its own entry, not inside the session', async () => {
+  it('stores the key under its own entry, and sealed', async () => {
     const { saveStoredSession, saveVaultKey } = await load();
     await saveStoredSession(SESSION);
-    await saveVaultKey('dmF1bHQta2V5');
 
+    expect(await saveVaultKey('dmF1bHQta2V5')).toBe(true);
     expect(JSON.stringify(store.data['session'])).not.toContain('dmF1bHQta2V5');
-    expect(store.data['vaultKey']).toBe('dmF1bHQta2V5');
+    // Under its own entry, and there as ciphertext rather than as the key.
+    expect(typeof store.data['vaultKey']).toBe('string');
+    expect(store.data['vaultKey']).not.toBe('dmF1bHQta2V5');
+  });
+
+  it('keeps nothing at all when the key cannot be sealed', async () => {
+    withoutIndexedDb();
+    const { loadVaultKey, saveVaultKey } = await load();
+
+    // Fail closed: one extra unlock, rather than a silent fallback to storing
+    // the key in clear.
+    expect(await saveVaultKey('dmF1bHQta2V5')).toBe(false);
+    expect(store.data['vaultKey']).toBeUndefined();
+    expect(await loadVaultKey()).toBeNull();
   });
 
   it('hands the key back to the one caller that decrypts', async () => {

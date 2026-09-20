@@ -41,7 +41,8 @@ wishes it were:
   written to disk, which trades a memory-lifetime problem for a
   survives-the-browser problem. That is a worse trade, so it was not made.
 
-  What is left is to stop making unnecessary copies — see §4.
+  What is left is twofold, and both are done in §4: stop making unnecessary
+  copies, and stop the resident copy being the key itself.
 
 ### `chrome.storage.local` — disk, in the clear
 
@@ -66,7 +67,7 @@ which Zwarden does not use.
 
 | Entry | Contents | Why it may live there |
 |---|---|---|
-| `zwardenVaultKey` | the vault key, base64, **alone** | Read by exactly one caller, the popup's restore path, and only where a decryption follows — see §4 |
+| `zwardenVaultKey` | the vault key, **sealed** — AES-GCM under a key that cannot be exported | Read by exactly one caller, the popup's restore path, and only where a decryption follows — see §4 |
 | `zwardenSession` | access and refresh tokens, **the whole cached sync**, the local master-password hash, KDF parameters | Everything of comparable value is kept in memory rather than given a second, weaker home. The key is not among them, on purpose |
 | `zwardenPendingSave` | a credential captured on a page — **username and password in clear** | The only cleartext password the extension ever stores. It lives for the few seconds between a form submission and the user's answer, and is dropped on either answer |
 | `zwardenActivity` | a timestamp | Drives the inactivity lock |
@@ -194,6 +195,45 @@ This does not make the string wipeable; nothing can, see §1. What it does is
 keep the vault key out of the longest-lived and most-exposed context the
 extension has. `tests/session.test.ts` asserts it directly: the existence check
 and the session read must not so much as request the key's entry.
+
+### The stored key is sealed, and the two halves live apart
+
+Confining the key was not the end of it: the session store still held it in
+clear, for the whole browser session, in a string that cannot be wiped.
+
+Encrypting it appears circular — the sealing key needs somewhere to live — and
+the way out is a key that **has no bytes to store**. A `CryptoKey` created with
+`extractable: false` cannot be exported by anyone, this code included; its
+material never enters a JavaScript heap. `chrome.storage` cannot hold one, but
+**IndexedDB can**, because it uses structured clone rather than JSON.
+
+So the two halves go to the two stores, each useless alone:
+
+| Where | What | Alone, it is |
+|---|---|---|
+| IndexedDB, on disk | a non-extractable AES-GCM key | a key that opens nothing |
+| `storage.session`, memory | the vault key, sealed | ciphertext with no key |
+
+Closing the browser purges the session store, so the sealed half disappears and
+the half on disk is inert. That is why the sealed half is the one in memory and
+not the other way round: the lock guarantee is unchanged.
+
+**What this buys, precisely.** The plaintext vault key no longer sits resident
+for the whole browser session. It exists in the popup's heap, while the popup is
+open, and nowhere else. The lifetime drops from hours to seconds at a time.
+
+**What it does not buy**, said plainly because this is the kind of measure that
+becomes theatre if left unqualified: Chrome implements WebCrypto in its own
+process, not in an enclave, so a **full memory dump of the browser still yields
+everything** — the sealed blob and the "non-extractable" key's material both.
+What is defended is narrower and real: a swap page, a hibernation image, a
+partial heap read — anything that catches the long-lived resident copy rather
+than the live process entire.
+
+**Failure is closed.** If IndexedDB is unavailable or a seal will not open, no
+key is returned and the vault behaves as locked. One extra unlock. The
+alternative — falling back to storing the key in clear — would be a silent
+downgrade of the only thing this does.
 
 ### The offline write queue holds ciphertext, and nothing else
 
