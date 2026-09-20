@@ -240,6 +240,8 @@ export const MESSAGE_KEYS = [
   'assertionConfirm',
   'assertionDecline',
   'assertionRefused',
+  'assertionNoneFor',
+  'assertionGone',
   'assertionWorking',
   'registrationTitle',
   'registrationAsks',

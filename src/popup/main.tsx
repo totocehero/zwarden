@@ -1561,6 +1561,11 @@ function App() {
 
     const pending = await loadPendingAssertion();
     if (pending === null) {
+      // The badge may still be up from a ceremony that has since gone. Better
+      // to say so than to leave the user looking for something to click.
+      if (await hadBadgeWithoutCeremony()) {
+        setError(t('assertionGone'));
+      }
       return;
     }
     if (pending.ceremony === 'create') {
@@ -1606,11 +1611,14 @@ function App() {
 
     const choices = selectCredentials(views, ask.rpId, ask.allowCredentials);
     if (choices.length === 0) {
-      // Nothing to offer. Answered **at once** so the page falls back to the
-      // browser now rather than after the ninety-second timeout: a user staring
-      // at a stalled sign-in has no way to tell a slow extension from a broken
-      // one, and it was the extension holding the ceremony open for nothing.
+      // Answered **at once**, so the page falls back to the browser now rather
+      // than after the ninety-second timeout.
       await answerAssertion(pending.id, null);
+      // And said out loud. This window was opened because a badge asked for it;
+      // showing nothing in return is the worst possible answer, and it was what
+      // happened. The message names the relying party, which is also the one
+      // thing needed to tell "no passkey here" from "the wrong name matched".
+      setError(t('assertionNoneFor', ask.rpId, String(views.length)));
       return;
     }
     setAssertion({ kind: 'get', id: pending.id, ask, choices });
@@ -1650,6 +1658,25 @@ function App() {
         }),
     );
     return perItem.flat();
+  }
+
+  /**
+   * Whether the icon is carrying a badge with nothing behind it.
+   *
+   * The badge itself is read, not inferred. Inferring it from "no capture and
+   * no proposal" was the first attempt and it was wrong in the ordinary case:
+   * every normal opening satisfies that, and the window would have announced a
+   * vanished sign-in to someone who had simply clicked the icon.
+   *
+   * The badge is shared with the save proposal, so it only means a lost
+   * ceremony when no capture is waiting either.
+   */
+  async function hadBadgeWithoutCeremony(): Promise<boolean> {
+    if (typeof chrome === 'undefined' || typeof chrome.action?.getBadgeText !== 'function') {
+      return false;
+    }
+    const badge = await chrome.action.getBadgeText({});
+    return badge !== '' && (await loadPendingSave()) === null;
   }
 
   /** Hands the verdict to the service worker, which carries it to the page. */

@@ -461,6 +461,12 @@
   "assertionRefused": {
     "message": "Refused: this page may not ask for that passkey."
   },
+  "assertionNoneFor": {
+    "message": "$1 asked for a passkey. This vault holds none for that site — the browser will handle it. ($2 passkey(s) here, for other sites.)"
+  },
+  "assertionGone": {
+    "message": "The sign-in that was waiting has gone: the page moved on, or it waited too long."
+  },
   "assertionWorking": {
     "message": "Signing…"
   },

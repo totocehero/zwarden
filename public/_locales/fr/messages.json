@@ -461,6 +461,12 @@
   "assertionRefused": {
     "message": "Refusé : cette page n’a pas le droit de demander cette passkey."
   },
+  "assertionNoneFor": {
+    "message": "$1 a demandé une passkey. Ce coffre n’en détient aucune pour ce site — le navigateur va s’en charger. ($2 passkey(s) ici, pour d’autres sites.)"
+  },
+  "assertionGone": {
+    "message": "La connexion en attente a disparu : la page est passée à autre chose, ou elle a trop attendu."
+  },
   "assertionWorking": {
     "message": "Signature…"
   },
