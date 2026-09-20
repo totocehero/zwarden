@@ -14,10 +14,16 @@ import type { CipherResponse } from '../src/core/api/models.js';
 import { encryptString } from '../src/core/crypto/cryptoService.js';
 import { toBase64Url } from '../src/core/crypto/encoding.js';
 import { SymmetricCryptoKey } from '../src/core/crypto/symmetricCryptoKey.js';
-import { decryptCipherDetails, decryptPasskeys } from '../src/core/vault/cipherService.js';
+import {
+  buildCipherCreatePayload,
+  buildCipherUpdatePayload,
+  decryptCipherDetails,
+  decryptPasskeys,
+} from '../src/core/vault/cipherService.js';
 import {
   buildAuthenticatorData,
   buildClientData,
+  createCredential,
   derFromRawSignature,
   type PasskeyCredential,
   selectCredentials,
@@ -333,5 +339,249 @@ describe('decryptPasskeys', () => {
     } as unknown as CipherResponse;
 
     expect(await decryptPasskeys(plain, key, () => undefined)).toEqual([]);
+  });
+});
+
+/**
+ * Creating a passkey.
+ *
+ * The proof that matters is not that bytes came out in the right shape: it is
+ * that the public key handed to the site **verifies a signature made by the
+ * private key handed to the vault**. A registration that produces a mismatched
+ * pair looks perfectly well-formed and fails on the next sign-in, weeks later.
+ *
+ * So the attestation object is decoded the way a relying party decodes it, the
+ * COSE key is pulled out of it, and the two halves are checked against each
+ * other.
+ */
+describe('createCredential', () => {
+  const request = {
+    rpId: 'example.org',
+    origin: 'https://example.org',
+    challenge: new Uint8Array([1, 2, 3, 4]),
+    userId: new Uint8Array([9, 9]),
+    userName: 'ada@example.org',
+    userDisplayName: 'Ada',
+    userVerified: true,
+  };
+
+  /** Just enough CBOR to read back what we wrote, as a site would. */
+  function decodeCbor(bytes: Uint8Array, at = { i: 0 }): unknown {
+    const first = bytes[at.i++]!;
+    const major = first >> 5;
+    let value = first & 0x1f;
+    if (value === 24) {
+      value = bytes[at.i++]!;
+    } else if (value === 25) {
+      value = (bytes[at.i++]! << 8) | bytes[at.i++]!;
+    } else if (value === 26) {
+      value = 0;
+      for (let n = 0; n < 4; n += 1) {
+        value = value * 256 + bytes[at.i++]!;
+      }
+    }
+    if (major === 0) return value;
+    if (major === 1) return -1 - value;
+    if (major === 2) return bytes.subarray(at.i, (at.i += value));
+    if (major === 3) return new TextDecoder().decode(bytes.subarray(at.i, (at.i += value)));
+    if (major === 4) return Array.from({ length: value }, () => decodeCbor(bytes, at));
+    const map = new Map<unknown, unknown>();
+    for (let n = 0; n < value; n += 1) {
+      map.set(decodeCbor(bytes, at), decodeCbor(bytes, at));
+    }
+    return map;
+  }
+
+  const b64url = (bytes: Uint8Array): string =>
+    btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  it('hands the site a public key that matches the private key it keeps', async () => {
+    const created = await createCredential(request);
+
+    const attestation = decodeCbor(created.attestationObject) as Map<string, unknown>;
+    const authData = attestation.get('authData') as Uint8Array;
+    // rpIdHash 32, flags 1, counter 4, aaguid 16, then the id length.
+    const idLength = (authData[53]! << 8) | authData[54]!;
+    const cose = decodeCbor(authData.subarray(55 + idLength)) as Map<number, unknown>;
+
+    const publicKey = await crypto.subtle.importKey(
+      'jwk',
+      {
+        kty: 'EC',
+        crv: 'P-256',
+        x: b64url(cose.get(-2) as Uint8Array),
+        y: b64url(cose.get(-3) as Uint8Array),
+      },
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      false,
+      ['verify'],
+    );
+    const privateKey = await crypto.subtle.importKey(
+      'pkcs8',
+      Uint8Array.from(atob(created.privateKey.replace(/-/g, '+').replace(/_/g, '/')), (c) =>
+        c.charCodeAt(0),
+      ),
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      false,
+      ['sign'],
+    );
+
+    const message = new TextEncoder().encode('a later sign-in');
+    const signature = await crypto.subtle.sign(
+      { name: 'ECDSA', hash: 'SHA-256' },
+      privateKey,
+      message,
+    );
+
+    expect(
+      await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, publicKey, signature, message),
+    ).toBe(true);
+  });
+
+  it('makes no claim about what produced the credential', async () => {
+    const attestation = decodeCbor(
+      (await createCredential(request)).attestationObject,
+    ) as Map<string, unknown>;
+
+    // `none`, with an empty statement. A software authenticator claiming
+    // otherwise is claiming hardware it does not have.
+    expect(attestation.get('fmt')).toBe('none');
+    expect((attestation.get('attStmt') as Map<unknown, unknown>).size).toBe(0);
+
+    const authData = attestation.get('authData') as Uint8Array;
+    // The AAGUID is all zeroes, which is what the specification reserves for
+    // an authenticator declining to identify its model.
+    expect([...authData.subarray(37, 53)]).toEqual(new Array(16).fill(0));
+  });
+
+  it('says attested credential data follows, which an assertion never does', async () => {
+    const attestation = decodeCbor(
+      (await createCredential(request)).attestationObject,
+    ) as Map<string, unknown>;
+    const flags = (attestation.get('authData') as Uint8Array)[32]!;
+
+    expect(flags & 0x40).toBe(0x40); // AT
+    expect(flags & 0x04).toBe(0x04); // UV, because this request verified
+    expect(await buildAuthenticatorData('example.org', true)).not.toContain(0x40);
+  });
+
+  it('records the ceremony as a creation, not a sign-in', async () => {
+    const created = await createCredential(request);
+    expect(JSON.parse(created.clientDataJSON).type).toBe('webauthn.create');
+  });
+
+  it('gives every credential a different identifier', async () => {
+    const first = await createCredential(request);
+    const second = await createCredential(request);
+
+    // The site stores this and hands it back in `allowCredentials`; two vaults
+    // colliding would be two accounts fighting over one entry.
+    expect(first.credentialId).not.toBe(second.credentialId);
+    expect(first.privateKey).not.toBe(second.privateKey);
+  });
+});
+
+/**
+ * Writing a new passkey into the vault.
+ *
+ * It goes through the same payload builder as every other edit, which is the
+ * point: that builder is where the carry-over of fields nobody edits lives,
+ * and a passkey arriving by a second path would be a second chance to lose
+ * them.
+ */
+describe('storing a created passkey', () => {
+  let key: SymmetricCryptoKey;
+
+  beforeAll(() => {
+    key = SymmetricCryptoKey.generate();
+  });
+
+  const NEW_PASSKEY = {
+    credentialId: 'bmV3LWNyZWQ',
+    rpId: 'bank.example',
+    rpName: 'The Bank',
+    userHandle: 'dXNlci0x',
+    userName: 'ada@example.org',
+    userDisplayName: 'Ada',
+    keyValue: 'cGtjczgtYnl0ZXM',
+  };
+
+  const EDIT = {
+    name: 'The Bank',
+    username: 'ada@example.org',
+    password: '',
+    totp: '',
+    notes: '',
+    uris: ['https://bank.example'],
+  };
+
+  it('appends to the passkeys an item already has, never replaces them', async () => {
+    const existing = {
+      id: 'i1',
+      type: 1,
+      name: (await encryptString('The Bank', key)).toString(),
+      login: { fido2Credentials: [{ credentialId: 'already-there' }] },
+      organizationId: null,
+    } as unknown as CipherResponse;
+
+    const payload = await buildCipherUpdatePayload(
+      existing,
+      { ...EDIT, addPasskey: NEW_PASSKEY },
+      key,
+      false,
+    );
+
+    const stored = (payload['login'] as Record<string, unknown>)['fido2Credentials'] as unknown[];
+    expect(stored).toHaveLength(2);
+    // The one that was there is untouched, still encrypted as it was.
+    expect((stored[0] as Record<string, unknown>)['credentialId']).toBe('already-there');
+  });
+
+  it('encrypts every field of the new one', async () => {
+    const payload = await buildCipherCreatePayload({ ...EDIT, addPasskey: NEW_PASSKEY }, key);
+    const stored = (payload['login'] as Record<string, unknown>)['fido2Credentials'] as Record<
+      string,
+      unknown
+    >[];
+
+    const written = JSON.stringify(stored[0]);
+    // The private key above all, but the account name too: a vault that leaked
+    // which sites hold which accounts would be leaking the vault.
+    expect(written).not.toContain('cGtjczgtYnl0ZXM');
+    expect(written).not.toContain('ada@example.org');
+    expect(written).not.toContain('bank.example');
+  });
+
+  it('reads back exactly what was put in', async () => {
+    const payload = await buildCipherCreatePayload({ ...EDIT, addPasskey: NEW_PASSKEY }, key);
+    const cipher = { id: 'i1', type: 1, ...payload, organizationId: null } as unknown as CipherResponse;
+
+    const [credential] = await decryptPasskeys(cipher, key, () => undefined);
+    expect(credential).toEqual({
+      credentialId: 'bmV3LWNyZWQ',
+      rpId: 'bank.example',
+      userHandle: 'dXNlci0x',
+      keyValue: 'cGtjczgtYnl0ZXM',
+      counter: 0,
+    });
+  });
+
+  it('records what the official clients expect alongside it', async () => {
+    const payload = await buildCipherCreatePayload({ ...EDIT, addPasskey: NEW_PASSKEY }, key);
+    const stored = ((payload['login'] as Record<string, unknown>)['fido2Credentials'] as Record<
+      string,
+      unknown
+    >[])[0]!;
+
+    // A credential missing these is one Bitwarden's own clients will not use.
+    for (const field of ['keyType', 'keyAlgorithm', 'keyCurve', 'counter', 'discoverable']) {
+      expect(stored[field]).toBeDefined();
+    }
+    expect(typeof stored['creationDate']).toBe('string');
+  });
+
+  it('leaves an item alone when no passkey is being added', async () => {
+    const payload = await buildCipherCreatePayload(EDIT, key);
+    expect((payload['login'] as Record<string, unknown>)['fido2Credentials']).toBeNull();
   });
 });

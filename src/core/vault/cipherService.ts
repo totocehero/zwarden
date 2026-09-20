@@ -756,6 +756,86 @@ export interface CipherEdit {
   readonly card?: CardEdit;
   /** The identity's values, for a type 4 item. */
   readonly identity?: IdentityEdit;
+  /**
+   * A passkey to append to this item's login section.
+   *
+   * Goes through the same write path as everything else rather than getting one
+   * of its own: that path is where the carry-over of every field the editor does
+   * not know about lives, and a second path would be a second chance to lose
+   * them.
+   */
+  readonly addPasskey?: NewPasskey;
+}
+
+/** A passkey just created, in the clear, on its way into the vault. */
+export interface NewPasskey {
+  readonly credentialId: string;
+  readonly rpId: string;
+  readonly rpName: string;
+  /** The account's opaque handle at the site, base64url. */
+  readonly userHandle: string;
+  readonly userName: string;
+  readonly userDisplayName: string;
+  /** The ECDSA P-256 private key, PKCS#8, base64url. */
+  readonly keyValue: string;
+}
+
+/**
+ * Encrypts a new passkey into the shape the API stores.
+ *
+ * Every field is an `EncString` except the creation date — including the
+ * counter and the `discoverable` flag, which the server keeps encrypted like
+ * the rest despite being neither secret nor interesting. Diverging would make
+ * the credential unreadable by the official clients, which is the one thing a
+ * passkey written here must not be.
+ */
+async function buildPasskeySection(
+  passkey: NewPasskey,
+  enc: FieldEncryptor,
+): Promise<Record<string, unknown>> {
+  const [
+    credentialId,
+    keyType,
+    keyAlgorithm,
+    keyCurve,
+    keyValue,
+    rpId,
+    rpName,
+    userHandle,
+    userName,
+    userDisplayName,
+    counter,
+    discoverable,
+  ] = await Promise.all([
+    enc(passkey.credentialId),
+    enc('public-key'),
+    enc('ECDSA'),
+    enc('P-256'),
+    enc(passkey.keyValue),
+    enc(passkey.rpId),
+    enc(passkey.rpName),
+    enc(passkey.userHandle),
+    enc(passkey.userName),
+    enc(passkey.userDisplayName),
+    enc('0'),
+    enc('true'),
+  ]);
+
+  return {
+    credentialId,
+    keyType,
+    keyAlgorithm,
+    keyCurve,
+    keyValue,
+    rpId,
+    rpName,
+    userHandle,
+    userName,
+    userDisplayName,
+    counter,
+    discoverable,
+    creationDate: new Date().toISOString(),
+  };
 }
 
 /**
@@ -873,6 +953,7 @@ export async function buildCipherCreatePayload(
       password: await encOrNull(edit.password),
       totp: await encOrNull(edit.totp),
       uris,
+      fido2Credentials: await withNewPasskey(null, edit.addPasskey, enc),
     };
     payload['passwordHistory'] = [];
   } else if (type === 2) {
@@ -1023,6 +1104,18 @@ function carryTypeSection(
 /** Field encryptor, as supplied by the caller that holds the item key. */
 type FieldEncryptor = (text: string) => Promise<string>;
 
+/** The item's passkeys, with a new one appended if there is one. */
+async function withNewPasskey(
+  existing: readonly unknown[] | null,
+  passkey: NewPasskey | undefined,
+  enc: FieldEncryptor,
+): Promise<readonly unknown[] | null> {
+  if (passkey === undefined) {
+    return existing;
+  }
+  return [...(existing ?? []), await buildPasskeySection(passkey, enc)];
+}
+
 /** An update's `login` section: edited fields, passkeys preserved. */
 async function buildLoginSection(
   edit: CipherEdit,
@@ -1048,8 +1141,13 @@ async function buildLoginSection(
     totp: await encOrNull(edit.totp),
     uris,
     // Passkeys are not editable here: carried over as-is, already encrypted.
-    // Omitting them would erase them from the server.
-    fido2Credentials: readField<unknown>(login, 'fido2Credentials') ?? null,
+    // Omitting them would erase them from the server. A newly created one is
+    // appended to that list, never substituted for it.
+    fido2Credentials: await withNewPasskey(
+      readField<readonly unknown[]>(login, 'fido2Credentials') ?? null,
+      edit.addPasskey,
+      enc,
+    ),
   };
 }
 

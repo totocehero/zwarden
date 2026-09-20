@@ -79,8 +79,11 @@ function serialiseOptions(options: PublicKeyCredentialRequestOptions): Json {
   };
 }
 
+/** Which ceremony a request is for. */
+type Ceremony = 'get' | 'create';
+
 /** Asks the extension, through the bridge in the isolated world. */
-function ask(options: Json): Promise<Json | null> {
+function ask(ceremony: Ceremony, options: Json): Promise<Json | null> {
   return new Promise((resolve) => {
     const id = crypto.randomUUID();
     const timer = setTimeout(() => finish(null), ASK_TIMEOUT_MS);
@@ -104,7 +107,7 @@ function ask(options: Json): Promise<Json | null> {
     }
 
     window.addEventListener('message', onMessage);
-    window.postMessage({ source: TO_EXTENSION, id, options }, window.location.origin);
+    window.postMessage({ source: TO_EXTENSION, id, ceremony, options }, window.location.origin);
   });
 }
 
@@ -127,23 +130,83 @@ function buildCredential(assertion: Json): Credential {
   } as unknown as Credential;
 }
 
+/** Reduces a registration's options the same way. */
+function serialiseCreation(options: PublicKeyCredentialCreationOptions): Json {
+  return {
+    challenge: toBase64Url(options.challenge as ArrayBuffer),
+    rp: { id: options.rp.id, name: options.rp.name },
+    user: {
+      id: toBase64Url(options.user.id as ArrayBuffer),
+      name: options.user.name,
+      displayName: options.user.displayName,
+    },
+    pubKeyCredParams: options.pubKeyCredParams.map((p) => ({ type: p.type, alg: p.alg })),
+    excludeCredentials: (options.excludeCredentials ?? []).map((c) => ({
+      id: toBase64Url(c.id as ArrayBuffer),
+    })),
+    authenticatorSelection: options.authenticatorSelection,
+  };
+}
+
+/** Builds what the page expects `credentials.create()` to resolve with. */
+function buildRegistration(created: Json): Credential {
+  const rawId = fromBase64Url(created['credentialId'] as string);
+  return {
+    id: created['credentialId'] as string,
+    rawId,
+    type: 'public-key',
+    authenticatorAttachment: 'platform',
+    response: {
+      clientDataJSON: fromBase64Url(created['clientDataJSON'] as string),
+      attestationObject: fromBase64Url(created['attestationObject'] as string),
+      // Sites commonly call these. Answering what is true is better than
+      // omitting them and being read as `undefined` by code expecting a
+      // function.
+      getTransports: () => ['internal', 'hybrid'],
+      getPublicKeyAlgorithm: () => -7,
+      // Permitted to be null, and honest: the key is in the attestation object,
+      // which is where a relying party reads it from anyway.
+      getPublicKey: () => null,
+      getAuthenticatorData: () => fromBase64Url(created['authenticatorData'] as string),
+    },
+    getClientExtensionResults: () => ({}),
+  } as unknown as Credential;
+}
+
 const credentials = navigator.credentials;
-const original = credentials.get.bind(credentials);
+const originalGet = credentials.get.bind(credentials);
+const originalCreate = credentials.create.bind(credentials);
 
 credentials.get = async function get(
   options?: CredentialRequestOptions,
 ): Promise<Credential | null> {
   if (options?.publicKey === undefined) {
     // Not a WebAuthn call at all — a federated or password credential.
-    return original(options);
+    return originalGet(options);
   }
   try {
-    const assertion = await ask(serialiseOptions(options.publicKey));
+    const assertion = await ask('get', serialiseOptions(options.publicKey));
     // Nothing to offer, or the user said no: the browser takes over, and the
     // hardware key in their pocket still works.
-    return assertion === null ? original(options) : buildCredential(assertion);
+    return assertion === null ? originalGet(options) : buildCredential(assertion);
   } catch {
-    return original(options);
+    return originalGet(options);
+  }
+};
+
+credentials.create = async function create(
+  options?: CredentialCreationOptions,
+): Promise<Credential | null> {
+  if (options?.publicKey === undefined) {
+    return originalCreate(options);
+  }
+  try {
+    const created = await ask('create', serialiseCreation(options.publicKey));
+    // Declined, or an algorithm we do not implement, or an account that already
+    // has a key here: the browser offers its own authenticator instead.
+    return created === null ? originalCreate(options) : buildRegistration(created);
+  } catch {
+    return originalCreate(options);
   }
 };
 

@@ -58,7 +58,7 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
 - [x] `SymmetricCryptoKey` — clés de 32/64 octets
 - [x] AES-256-CBC + HMAC-SHA256, encrypt-then-MAC
 - [x] Dérivation de clé : PBKDF2-SHA256 et Argon2id
-- [x] 630 tests, dont les vecteurs des RFC 4231 / 5869 / 6238 / 7914
+- [x] 674 tests, dont les vecteurs des RFC 4231 / 5869 / 6238 / 7914
 - [x] **Interopérabilité validée contre Vaultwarden 2026.6.0** —
       authentification, déchiffrement de la clé de coffre, et un aller-retour
       complet d'écriture/lecture
@@ -143,7 +143,7 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
       montre la popup sont les vingt déchiffrées avant qu'elle ne dessine. Un
       coffre de 500 éléments avec une clé propre à chacun coûte ~650 ms à
       déchiffrer en entier ; la liste ne l'attend plus
-- [x] Passkeys : se connecter avec celles du coffre. Le site qu'une page a le
+- [x] Passkeys : **créer et utiliser** celles du coffre. Le site qu'une page a le
       droit de réclamer est vérifié ici, puisque intercepter
       `navigator.credentials.get()` retire cette vérification au navigateur.
       Désactivé par défaut — c'est la seule fonctionnalité qui place du code
@@ -197,7 +197,7 @@ donc interopérables dans les deux sens :
 
 ```bash
 npm install
-npm test          # 630 tests
+npm test          # 674 tests
 npm run typecheck # TypeScript strict
 npm run lint      # ESLint : promesses perdues, comparaisons laxistes
 npm run build

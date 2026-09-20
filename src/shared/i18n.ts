@@ -241,6 +241,13 @@ export const MESSAGE_KEYS = [
   'assertionDecline',
   'assertionRefused',
   'assertionWorking',
+  'registrationTitle',
+  'registrationAsks',
+  'registrationAttach',
+  'registrationNewItem',
+  'registrationConfirm',
+  'registrationDone',
+  'registrationVerifyHint',
 
   // Breach checking
   'settingsBreachSection',

@@ -91,8 +91,14 @@ import { matchesOrigin } from '@core/vault/uriMatch.js';
 import { decideReplay, isUnreachable } from '@core/vault/offlineQueue.js';
 import { buildHealthReport, type HealthReport } from '@core/vault/health.js';
 import { checkPasswords } from '@core/vault/breachCheck.js';
-import { selectCredentials, signAssertion } from '@core/vault/passkey.js';
-import { type AssertionAsk, validateAssertionAsk, WebAuthnRefusal } from '@core/vault/webauthnRequest.js';
+import { createCredential, selectCredentials, signAssertion } from '@core/vault/passkey.js';
+import {
+  type AssertionAsk,
+  type CreationAsk,
+  validateAssertionAsk,
+  validateCreationAsk,
+  WebAuthnRefusal,
+} from '@core/vault/webauthnRequest.js';
 import { type ExportPayload, type ExportedItem, sealExport } from '@core/vault/exportFile.js';
 import {
   clearWriteQueue,
@@ -373,11 +379,11 @@ function App() {
   const [exportPassphrase, setExportPassphrase] = useState('');
   const [exportConfirmation, setExportConfirmation] = useState('');
   /** The passkey ceremony a page is waiting on, once it has been validated. */
-  const [assertion, setAssertion] = useState<{
-    readonly id: string;
-    readonly ask: AssertionAsk;
-    readonly choices: readonly AssertionChoice[];
-  } | null>(null);
+  const [assertion, setAssertion] = useState<
+    | { readonly kind: 'get'; readonly id: string; readonly ask: AssertionAsk; readonly choices: readonly AssertionChoice[] }
+    | { readonly kind: 'create'; readonly id: string; readonly ask: CreationAsk; readonly choices: readonly AssertionChoice[] }
+    | null
+  >(null);
   const [assertionChoice, setAssertionChoice] = useState<string | null>(null);
   const [assertionPassword, setAssertionPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -1537,6 +1543,40 @@ function App() {
     if (pending === null) {
       return;
     }
+    // Matched on metadata alone, and needed by both ceremonies: signing picks
+    // from it, registering refuses on it.
+    const views = await passkeyViews(open);
+
+    if (pending.ceremony === 'create') {
+      try {
+        const ask = validateCreationAsk(
+          pending.options,
+          pending.origin,
+          views.map((view) => view.credentialId),
+        );
+        setAssertion({
+          kind: 'create',
+          id: pending.id,
+          ask,
+          // Where to put it: any item, or a new one — the empty value.
+          choices: [
+            { itemId: '', credentialId: '', label: t('registrationNewItem') },
+            ...open.items.map((item) => ({
+              itemId: item.id,
+              credentialId: item.id,
+              label: item.name ?? item.id,
+            })),
+          ],
+        });
+        setAssertionChoice('');
+        setAssertionPassword('');
+      } catch (error) {
+        await answerAssertion(pending.id, null);
+        setError(error instanceof WebAuthnRefusal ? t('assertionRefused') : messageFor(error));
+      }
+      return;
+    }
+
     let ask: AssertionAsk;
     try {
       ask = validateAssertionAsk(pending.options, pending.origin);
@@ -1548,9 +1588,22 @@ function App() {
       return;
     }
 
-    // Matched on metadata alone. Only the credential actually used has its
-    // private key decrypted, and only once the user has said yes.
-    const views = await Promise.all(
+    const choices = selectCredentials(views, ask.rpId, ask.allowCredentials);
+    setAssertion({ kind: 'get', id: pending.id, ask, choices });
+    setAssertionChoice(choices[0]?.credentialId ?? null);
+    setAssertionPassword('');
+  }
+
+  /**
+   * Every passkey the vault holds, as metadata.
+   *
+   * No private key is decrypted here. Signing opens exactly the one the user
+   * chose, afterwards; registering never opens any.
+   */
+  async function passkeyViews(
+    open: OpenVault,
+  ): Promise<readonly (AssertionChoice & { readonly rpId: string })[]> {
+    const perItem = await Promise.all(
       open.items
         .filter((item) => item.hasPasskey)
         .map(async (item) => {
@@ -1565,15 +1618,14 @@ function App() {
               itemId: item.id,
               credentialId: view.credentialId!,
               rpId: view.rpId!,
-              label: view.userName === null ? (item.name ?? item.id) : `${item.name ?? item.id} — ${view.userName}`,
+              label:
+                view.userName === null
+                  ? (item.name ?? item.id)
+                  : `${item.name ?? item.id} — ${view.userName}`,
             }));
         }),
     );
-
-    const choices = selectCredentials(views.flat(), ask.rpId, ask.allowCredentials);
-    setAssertion({ id: pending.id, ask, choices });
-    setAssertionChoice(choices[0]?.credentialId ?? null);
-    setAssertionPassword('');
+    return perItem.flat();
   }
 
   /** Hands the verdict to the service worker, which carries it to the page. */
@@ -1582,10 +1634,116 @@ function App() {
     await chrome.runtime.sendMessage({ type: 'assertion-answer', id, assertion: payload });
   }
 
+  /**
+   * Verifies the master password, when the ceremony asked for it.
+   *
+   * The same offline check a per-item guard makes: re-derive and compare
+   * against the witness kept at unlock. Having the server confirm it would
+   * hand whoever controls the network the power to wave a passkey through.
+   */
+  async function verifyMaster(candidate: string): Promise<boolean> {
+    const stored = await loadStoredSession();
+    if (stored === null) {
+      throw new Error(t('errorSessionExpired'));
+    }
+    const masterKey = await deriveMasterKey(candidate, stored.email, stored.kdfConfig);
+    try {
+      return await verifyLocalPasswordHash(masterKey, candidate, stored.localPasswordHash);
+    } finally {
+      masterKey.destroy();
+    }
+  }
+
+  /** Creates a passkey and puts it in the vault. */
+  async function onCreatePasskey(): Promise<void> {
+    if (vault === null || assertion === null || assertion.kind !== 'create') {
+      return;
+    }
+    const ask = assertion.ask;
+    setError(null);
+    setBusy(t('assertionWorking'));
+    try {
+      let verified = false;
+      if (ask.requiresVerification) {
+        verified = await verifyMaster(assertionPassword);
+        if (!verified) {
+          setError(t('exportWrongMaster'));
+          return;
+        }
+      }
+
+      const created = await createCredential({
+        rpId: ask.rpId,
+        origin: ask.origin,
+        challenge: ask.challenge,
+        userId: ask.userId,
+        userName: ask.userName,
+        userDisplayName: ask.userDisplayName,
+        userVerified: verified,
+      });
+
+      const addPasskey = {
+        credentialId: created.credentialId,
+        rpId: ask.rpId,
+        rpName: ask.rpName,
+        userHandle: toBase64Url(ask.userId),
+        userName: ask.userName,
+        userDisplayName: ask.userDisplayName,
+        keyValue: created.privateKey,
+      };
+
+      // Attached to an item the user chose, or to one made for it. Either way
+      // through the write path every other edit uses.
+      const target = assertionChoice === '' ? undefined : vault.raw.get(assertionChoice ?? '');
+      const edit = {
+        name: target === undefined ? ask.rpName : (vault.items.find((i) => i.id === assertionChoice)?.name ?? ask.rpName),
+        username: ask.userName,
+        password: '',
+        totp: '',
+        notes: '',
+        uris: [ask.origin],
+        addPasskey,
+      };
+
+      const auth = await authorize();
+      if (target === undefined) {
+        await auth.client.createCipher(
+          auth.accessToken,
+          await buildCipherCreatePayload(edit, vault.userKey),
+        );
+      } else {
+        await auth.client.updateCipher(
+          auth.accessToken,
+          assertionChoice!,
+          await buildCipherUpdatePayload(target, edit, vault.keys, false),
+        );
+      }
+
+      // The site only hears about it once the vault has it: a passkey a site
+      // believes in and the vault has lost is an account locked shut.
+      await answerAssertion(assertion.id, {
+        credentialId: created.credentialId,
+        clientDataJSON: toBase64Url(new TextEncoder().encode(created.clientDataJSON)),
+        attestationObject: toBase64Url(created.attestationObject),
+        authenticatorData: toBase64Url(created.attestationObject),
+      });
+      setAssertion(null);
+      window.close();
+    } catch (err) {
+      setError(messageFor(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   /** Signs, and lets the page in. */
   async function onConfirmAssertion(event: Event): Promise<void> {
     event.preventDefault();
     if (vault === null || assertion === null || assertionChoice === null) {
+      return;
+    }
+    if (assertion.kind === 'create') {
+      await onCreatePasskey();
       return;
     }
     const choice = assertion.choices.find((c) => c.credentialId === assertionChoice);
@@ -1599,20 +1757,7 @@ function App() {
     try {
       let verified = false;
       if (assertion.ask.requiresVerification) {
-        const stored = await loadStoredSession();
-        if (stored === null) {
-          throw new Error(t('errorSessionExpired'));
-        }
-        const masterKey = await deriveMasterKey(assertionPassword, stored.email, stored.kdfConfig);
-        try {
-          verified = await verifyLocalPasswordHash(
-            masterKey,
-            assertionPassword,
-            stored.localPasswordHash,
-          );
-        } finally {
-          masterKey.destroy();
-        }
+        verified = await verifyMaster(assertionPassword);
         if (!verified) {
           setError(t('exportWrongMaster'));
           return;
@@ -2071,7 +2216,9 @@ function App() {
   if (assertion !== null) {
     return (
       <AssertionScreen
+        ceremony={assertion.kind}
         origin={assertion.ask.origin}
+        siteName={assertion.kind === 'create' ? assertion.ask.rpName : assertion.ask.rpId}
         choices={assertion.choices}
         chosen={assertionChoice}
         needsVerification={assertion.ask.requiresVerification}

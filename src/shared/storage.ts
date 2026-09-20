@@ -746,6 +746,8 @@ const PENDING_ASSERTION_KEY = 'pendingAssertion';
 /** What a page is waiting for, as the service worker recorded it. */
 export interface PendingAssertion {
   readonly id: string;
+  /** Signing in with a passkey, or creating one. */
+  readonly ceremony: 'get' | 'create';
   /**
    * The page's origin **as the browser reported it**, never as the page said.
    * Everything that stops one site asking for another's passkey rests on this.
@@ -774,6 +776,7 @@ export async function loadPendingAssertion(): Promise<PendingAssertion | null> {
   }
   return {
     id: value.id,
+    ceremony: value.ceremony === 'create' ? 'create' : 'get',
     origin: value.origin,
     options: value.options,
     askedAt: typeof value.askedAt === 'number' ? value.askedAt : 0,

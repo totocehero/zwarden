@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 import {
   mayClaimRelyingParty,
   validateAssertionAsk,
+  validateCreationAsk,
   WebAuthnRefusal,
 } from '../src/core/vault/webauthnRequest.js';
 
@@ -139,5 +140,97 @@ describe('validateAssertionAsk', () => {
       'https://evil.example/',
     );
     expect(ask.origin).toBe('https://evil.example');
+  });
+});
+
+/**
+ * Registration requests.
+ *
+ * The same relying-party rule applies, for the same reason — a page must not
+ * register a passkey under a name it does not own — and two refusals here are
+ * honest declines rather than errors: an algorithm we do not implement, and an
+ * account the vault already holds a key for.
+ */
+describe('validateCreationAsk', () => {
+  const USER = { id: 'dXNlci0x', name: 'ada@example.org', displayName: 'Ada' };
+  const ES256 = [{ type: 'public-key', alg: -7 }];
+
+  const ask = (patch: Record<string, unknown> = {}, origin = 'https://bank.example/') =>
+    validateCreationAsk(
+      { challenge: CHALLENGE, rp: { id: 'bank.example', name: 'The Bank' }, user: USER, pubKeyCredParams: ES256, ...patch },
+      origin,
+    );
+
+  const refusal = (patch: Record<string, unknown> = {}, origin = 'https://bank.example/', existing: string[] = []) => {
+    try {
+      validateCreationAsk(
+        { challenge: CHALLENGE, rp: { id: 'bank.example' }, user: USER, pubKeyCredParams: ES256, ...patch },
+        origin,
+        existing,
+      );
+      return 'accepted';
+    } catch (error) {
+      return error instanceof WebAuthnRefusal ? error.code : 'other';
+    }
+  };
+
+  it('accepts an ordinary registration', () => {
+    const request = ask();
+    expect(request.rpId).toBe('bank.example');
+    expect(request.rpName).toBe('The Bank');
+    expect(request.userName).toBe('ada@example.org');
+    expect([...request.userId]).toEqual([...new TextEncoder().encode('user-1')]);
+  });
+
+  it('refuses a party the page has no claim to', () => {
+    expect(refusal({ rp: { id: 'bank.example' } }, 'https://evil.example/')).toBe('rp-mismatch');
+  });
+
+  it('declines an algorithm it does not implement', () => {
+    // RS256 only. Better served by the platform authenticator than by an
+    // extension pretending.
+    expect(refusal({ pubKeyCredParams: [{ type: 'public-key', alg: -257 }] })).toBe(
+      'unsupported-algorithm',
+    );
+  });
+
+  it('serves a site that will take ES256 among others', () => {
+    expect(
+      ask({ pubKeyCredParams: [{ alg: -257 }, { alg: -7 }] }).rpId,
+    ).toBe('bank.example');
+  });
+
+  it('declines when the account already has a key here', () => {
+    // `excludeCredentials` exists so an authenticator does not hand out a
+    // second key for an account that already has one.
+    expect(refusal({ excludeCredentials: [{ id: 'already-there' }] }, 'https://bank.example/', ['already-there'])).toBe(
+      'already-registered',
+    );
+  });
+
+  it('proceeds when the excluded credentials are somebody else’s', () => {
+    expect(
+      ask({ excludeCredentials: [{ id: 'not-ours' }] }).rpId,
+    ).toBe('bank.example');
+  });
+
+  it('refuses a registration with no account to attach it to', () => {
+    expect(refusal({ user: { name: 'ada' } })).toBe('malformed');
+  });
+
+  it('refuses anything that is not https', () => {
+    expect(refusal({}, 'http://bank.example/')).toBe('bad-origin');
+  });
+
+  it('asks for verification unless the site says not to', () => {
+    // `preferred` is the default and means "if you can". We can, and a passkey
+    // made without verification is one the site may later refuse.
+    expect(ask().requiresVerification).toBe(true);
+    expect(ask({ authenticatorSelection: { userVerification: 'preferred' } }).requiresVerification).toBe(true);
+    expect(ask({ authenticatorSelection: { userVerification: 'discouraged' } }).requiresVerification).toBe(false);
+  });
+
+  it('falls back to the relying party id when the site gives no name', () => {
+    expect(ask({ rp: { id: 'bank.example' } }).rpName).toBe('bank.example');
   });
 });

@@ -464,6 +464,27 @@
   "assertionWorking": {
     "message": "Signature…"
   },
+  "registrationTitle": {
+    "message": "Créer une passkey"
+  },
+  "registrationAsks": {
+    "message": "$1 veut créer une passkey pour $2."
+  },
+  "registrationAttach": {
+    "message": "Enregistrer dans"
+  },
+  "registrationNewItem": {
+    "message": "Un nouvel élément"
+  },
+  "registrationConfirm": {
+    "message": "Créer"
+  },
+  "registrationDone": {
+    "message": "Passkey créée dans $1"
+  },
+  "registrationVerifyHint": {
+    "message": "Ce site demande que vous soyez vérifié avant de créer une passkey."
+  },
   "settingsBreachSection": {
     "message": "Vérification des fuites"
   },

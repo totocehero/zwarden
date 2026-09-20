@@ -40,6 +40,9 @@
  * does. It is a real gap; it is named here rather than left to be discovered.
  */
 
+/** The one signature algorithm this authenticator offers: ECDSA with SHA-256. */
+const ES256_ALGORITHM = -7;
+
 /** A request from a page, reduced to what signing needs. */
 export interface AssertionAsk {
   readonly rpId: string;
@@ -51,10 +54,33 @@ export interface AssertionAsk {
   readonly requiresVerification: boolean;
 }
 
+/** A registration request from a page, reduced to what creating needs. */
+export interface CreationAsk {
+  readonly rpId: string;
+  /** What the site calls itself, for the confirmation screen. */
+  readonly rpName: string;
+  readonly origin: string;
+  readonly challenge: Uint8Array;
+  /** The account at the site: an opaque handle it will hand back. */
+  readonly userId: Uint8Array;
+  readonly userName: string;
+  readonly userDisplayName: string;
+  /** Credentials the site already has: it must not be given a second. */
+  readonly excludeCredentials: readonly string[];
+  readonly requiresVerification: boolean;
+}
+
 /** Why a request was refused. */
 export class WebAuthnRefusal extends Error {
   override readonly name = 'WebAuthnRefusal';
-  constructor(readonly code: 'bad-origin' | 'rp-mismatch' | 'malformed') {
+  constructor(
+    readonly code:
+      | 'bad-origin'
+      | 'rp-mismatch'
+      | 'malformed'
+      | 'unsupported-algorithm'
+      | 'already-registered',
+  ) {
     super(code);
   }
 }
@@ -160,5 +186,95 @@ export function validateAssertionAsk(
     challenge,
     allowCredentials: allowed,
     requiresVerification: options['userVerification'] === 'required',
+  };
+}
+
+/**
+ * Validates a registration request and reduces it to what creating needs.
+ *
+ * Two refusals here are not failures but honest declines, and both send the
+ * page back to the browser rather than showing the user anything:
+ *
+ * - **an algorithm we do not implement.** Only ES256 is offered. A site that
+ *   insists on RS256 or Ed25519 is better served by the platform
+ *   authenticator than by an extension pretending;
+ * - **a credential the site already holds.** `excludeCredentials` exists so an
+ *   authenticator does not hand out a second key for an account that already
+ *   has one; the caller supplies what the vault holds and this refuses on the
+ *   overlap.
+ *
+ * @param options The `publicKey` options the page passed, serialised.
+ * @param origin The page's origin, from the browser and never from the page.
+ * @param existing Credential ids the vault already holds for this site.
+ * @throws {WebAuthnRefusal} Origin unusable, relying party not the page's to
+ *   claim, request malformed, or nothing we can serve.
+ */
+export function validateCreationAsk(
+  options: Record<string, unknown>,
+  origin: string,
+  existing: readonly string[] = [],
+): CreationAsk {
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    throw new WebAuthnRefusal('bad-origin');
+  }
+  if (parsed.protocol !== 'https:') {
+    throw new WebAuthnRefusal('bad-origin');
+  }
+  const host = parsed.hostname.toLowerCase();
+
+  const challenge = decodeBinary(options['challenge']);
+  if (challenge === null || challenge.length === 0) {
+    throw new WebAuthnRefusal('malformed');
+  }
+
+  const rp = (options['rp'] ?? {}) as Record<string, unknown>;
+  const claimed = rp['id'];
+  const rpId = typeof claimed === 'string' && claimed !== '' ? claimed.toLowerCase() : host;
+  if (!mayClaimRelyingParty(host, rpId)) {
+    throw new WebAuthnRefusal('rp-mismatch');
+  }
+
+  const user = (options['user'] ?? {}) as Record<string, unknown>;
+  const userId = decodeBinary(user['id']);
+  if (userId === null || userId.length === 0) {
+    throw new WebAuthnRefusal('malformed');
+  }
+
+  // The site lists the algorithms it accepts, best first. We serve exactly one.
+  const params = Array.isArray(options['pubKeyCredParams'])
+    ? (options['pubKeyCredParams'] as Record<string, unknown>[])
+    : [];
+  if (params.length > 0 && !params.some((entry) => entry?.['alg'] === ES256_ALGORITHM)) {
+    throw new WebAuthnRefusal('unsupported-algorithm');
+  }
+
+  const excluded = Array.isArray(options['excludeCredentials'])
+    ? (options['excludeCredentials'] as Record<string, unknown>[])
+        .map((entry) => entry?.['id'])
+        .filter((id): id is string => typeof id === 'string')
+    : [];
+  if (excluded.some((id) => existing.includes(id))) {
+    // The account already has a key here. Making a second would leave the user
+    // with two and the site expecting one.
+    throw new WebAuthnRefusal('already-registered');
+  }
+
+  const selection = (options['authenticatorSelection'] ?? {}) as Record<string, unknown>;
+
+  return {
+    rpId,
+    rpName: typeof rp['name'] === 'string' && rp['name'] !== '' ? rp['name'] : rpId,
+    origin: parsed.origin,
+    challenge,
+    userId,
+    userName: typeof user['name'] === 'string' ? user['name'] : '',
+    userDisplayName: typeof user['displayName'] === 'string' ? user['displayName'] : '',
+    excludeCredentials: excluded,
+    // `preferred` is the default and means "if you can": we can, and a passkey
+    // created without verification is one the site may later refuse.
+    requiresVerification: selection['userVerification'] !== 'discouraged',
   };
 }

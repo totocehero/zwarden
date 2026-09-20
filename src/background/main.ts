@@ -510,9 +510,10 @@ chrome.runtime.onConnect.addListener((port) => {
     return;
   }
   port.onMessage.addListener((message: unknown) => {
-    const body = message as { type?: unknown; options?: unknown } | null;
-    if (body?.type === 'assertion-request') {
-      void onAssertionRequest(port, body.options);
+    const body = message as { type?: unknown; ceremony?: unknown; options?: unknown } | null;
+    if (body?.type === 'webauthn-request') {
+      const ceremony = body.ceremony === 'create' ? 'create' : 'get';
+      void onAssertionRequest(port, ceremony, body.options);
     }
   });
 });
@@ -525,11 +526,15 @@ chrome.runtime.onConnect.addListener((port) => {
  * site asking for another site's passkey rests on that one value being the
  * browser's word rather than the page's.
  */
-async function onAssertionRequest(port: chrome.runtime.Port, options: unknown): Promise<void> {
+async function onAssertionRequest(
+  port: chrome.runtime.Port,
+  ceremony: 'get' | 'create',
+  options: unknown,
+): Promise<void> {
   const sender = port.sender;
   const origin = sender?.origin ?? (sender?.url === undefined ? null : originOf(sender.url));
   if (origin === null || typeof options !== 'object' || options === null) {
-    port.postMessage({ assertion: null });
+    port.postMessage({ result: null });
     return;
   }
 
@@ -538,7 +543,7 @@ async function onAssertionRequest(port: chrome.runtime.Port, options: unknown): 
   port.onDisconnect.addListener(() => void forgetAssertion(id));
 
   await chrome.storage.session.set({
-    [PENDING_ASSERTION_KEY]: { id, origin, options, askedAt: Date.now() },
+    [PENDING_ASSERTION_KEY]: { id, ceremony, origin, options, askedAt: Date.now() },
   });
   // The same badge the save proposal uses: the decision is in the popup, and
   // the icon is how the popup says it has something to decide.
@@ -580,7 +585,7 @@ function originOf(url: string): string | null {
 async function answerAssertion(id: string, assertion: unknown): Promise<void> {
   const port = waitingPages.get(id);
   if (port !== undefined) {
-    port.postMessage({ assertion: assertion ?? null });
+    port.postMessage({ result: assertion ?? null });
   }
   await forgetAssertion(id);
 }

@@ -464,6 +464,27 @@
   "assertionWorking": {
     "message": "Signing…"
   },
+  "registrationTitle": {
+    "message": "Create a passkey"
+  },
+  "registrationAsks": {
+    "message": "$1 wants to create a passkey for $2."
+  },
+  "registrationAttach": {
+    "message": "Save it in"
+  },
+  "registrationNewItem": {
+    "message": "A new item"
+  },
+  "registrationConfirm": {
+    "message": "Create"
+  },
+  "registrationDone": {
+    "message": "Passkey created in $1"
+  },
+  "registrationVerifyHint": {
+    "message": "This site asks that you be verified before a passkey is created."
+  },
   "settingsBreachSection": {
     "message": "Breach checking"
   },

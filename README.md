@@ -57,7 +57,7 @@ The cryptographic core is implemented and tested. The rest is in progress.
 - [x] `SymmetricCryptoKey` — 32/64-byte keys
 - [x] AES-256-CBC + HMAC-SHA256, encrypt-then-MAC
 - [x] Key derivation: PBKDF2-SHA256 and Argon2id
-- [x] 630 tests, including the RFC 4231 / 5869 / 6238 / 7914 vectors
+- [x] 674 tests, including the RFC 4231 / 5869 / 6238 / 7914 vectors
 - [x] **Interoperability validated against Vaultwarden 2026.6.0** —
       authentication, vault key decryption, and a complete write/read round trip
 - [x] API client: prelogin, authentication, session refresh, sync, item creation
@@ -131,7 +131,7 @@ The cryptographic core is implemented and tested. The rest is in progress.
       are the twenty decrypted before it draws. A vault of 500 items with a key
       of its own per item costs ~650 ms to decrypt whole; the list no longer
       waits for it
-- [x] Passkeys: signing in with one from the vault. The relying party a page
+- [x] Passkeys: **creating and using** them from the vault. The relying party a page
       may claim is enforced here, because intercepting
       `navigator.credentials.get()` takes that enforcement away from the
       browser. Off by default — it is the one feature that puts code in every
@@ -183,7 +183,7 @@ in both directions:
 
 ```bash
 npm install
-npm test          # 630 tests
+npm test          # 674 tests
 npm run typecheck # strict TypeScript
 npm run lint      # ESLint: lost promises, loose comparisons
 npm run build

@@ -57,9 +57,16 @@ describe('the hook and the bridge', () => {
     expect(bridge).not.toMatch(/postMessage\([^)]*,\s*'\*'/);
   });
 
-  it('the hook keeps the browser as its fallback', () => {
-    // Swallowing the cases it cannot serve would make every passkey sign-in on
-    // the machine depend on this extension being right.
-    expect(hook).toContain('return original(options)');
+  it('the hook keeps the browser as its fallback, for both ceremonies', () => {
+    // Swallowing the cases it cannot serve would make every passkey sign-in
+    // and every registration on the machine depend on this extension being
+    // right.
+    expect(hook).toContain('return originalGet(options)');
+    expect(hook).toContain('return originalCreate(options)');
+  });
+
+  it('the hook covers both ceremonies', () => {
+    expect(hook).toContain('credentials.get = ');
+    expect(hook).toContain('credentials.create = ');
   });
 });

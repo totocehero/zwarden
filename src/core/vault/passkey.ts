@@ -30,6 +30,7 @@
 
 // `fromBase64` already normalises the URL-safe alphabet and restores missing
 // padding, which is what WebAuthn hands around.
+import { type CborValue, encodeCbor } from '../crypto/cbor.js';
 import { fromBase64, toBase64Url } from '../crypto/encoding.js';
 
 /** A passkey, with its private key, ready to sign. */
@@ -67,11 +68,48 @@ export interface Assertion {
   readonly userHandle: string | null;
 }
 
+/** What a site must supply to have a passkey created. */
+export interface CreationRequest {
+  readonly rpId: string;
+  readonly origin: string;
+  readonly challenge: Uint8Array;
+  /** The account at the site: its opaque handle and its display name. */
+  readonly userId: Uint8Array;
+  readonly userName: string;
+  readonly userDisplayName: string;
+  readonly userVerified: boolean;
+}
+
+/** A passkey just created: what the site gets, and what the vault keeps. */
+export interface CreatedCredential {
+  readonly credentialId: string;
+  readonly clientDataJSON: string;
+  /** CBOR, `none` attestation. What `credentials.create()` resolves with. */
+  readonly attestationObject: Uint8Array;
+  /** PKCS#8, base64url — encrypted into the vault by the caller. */
+  readonly privateKey: string;
+}
+
 /** Authenticator data flags, as the specification numbers them. */
 const FLAG_USER_PRESENT = 0x01;
 const FLAG_USER_VERIFIED = 0x04;
 const FLAG_BACKUP_ELIGIBLE = 0x08;
 const FLAG_BACKED_UP = 0x10;
+/** Attested credential data follows: set on creation, never on an assertion. */
+const FLAG_ATTESTED = 0x40;
+
+/**
+ * The identifier a relying party reads as "which authenticator made this".
+ *
+ * All zeroes, which the specification reserves for exactly this: an
+ * authenticator that declines to identify its model. A made-up value would be
+ * a claim about hardware that does not exist, and a borrowed one would be a
+ * lie about whose it is. Both are what `none` attestation exists to avoid.
+ */
+const AAGUID = new Uint8Array(16);
+
+/** The only algorithm offered: ECDSA with SHA-256 over P-256. */
+export const ES256 = -7;
 
 /**
  * Which passkeys can answer this request.
@@ -163,6 +201,105 @@ export async function buildAuthenticatorData(
   data[32] = flags;
   new DataView(data.buffer).setUint32(33, counter, false);
   return data;
+}
+
+/**
+ * The public key as COSE, which is the form an attestation carries it in.
+ *
+ * A raw P-256 public key is `0x04 ‖ x ‖ y`, sixty-five bytes. COSE wants a map,
+ * and the labels are negative on purpose — the specification uses negative
+ * integers for algorithm-specific parameters so they cannot collide with the
+ * common ones.
+ *
+ * Keys are written in the order CTAP2's canonical form wants them.
+ */
+function coseKeyFrom(rawPublicKey: Uint8Array): Uint8Array {
+  if (rawPublicKey.length !== 65 || rawPublicKey[0] !== 0x04) {
+    throw new RangeError('Expected an uncompressed P-256 public key');
+  }
+  return encodeCbor(
+    new Map<number, number | Uint8Array>([
+      [1, 2], // kty: EC2
+      [3, ES256], // alg
+      [-1, 1], // crv: P-256
+      [-2, rawPublicKey.subarray(1, 33)], // x
+      [-3, rawPublicKey.subarray(33)], // y
+    ]),
+  );
+}
+
+/**
+ * `attestedCredentialData`: who made the credential, what it is called, and
+ * its public key.
+ *
+ * `aaguid ‖ credentialIdLength ‖ credentialId ‖ COSE public key`, the length
+ * big-endian over two bytes.
+ */
+function attestedCredentialData(credentialId: Uint8Array, cose: Uint8Array): Uint8Array {
+  const out = new Uint8Array(AAGUID.length + 2 + credentialId.length + cose.length);
+  out.set(AAGUID, 0);
+  new DataView(out.buffer).setUint16(AAGUID.length, credentialId.length, false);
+  out.set(credentialId, AAGUID.length + 2);
+  out.set(cose, AAGUID.length + 2 + credentialId.length);
+  return out;
+}
+
+/**
+ * Creates a passkey for a site.
+ *
+ * The key pair is generated here and never leaves: the private half comes back
+ * as PKCS#8 for the caller to encrypt into the vault, and the public half goes
+ * to the site inside the attestation object. Nothing else is kept.
+ *
+ * Attestation is `none` — no statement about what made this credential,
+ * because no honest statement is available. A software authenticator claiming
+ * otherwise is claiming hardware it does not have.
+ *
+ * @param request What the site asked for, already validated.
+ * @returns The credential: the site's half and the vault's.
+ */
+export async function createCredential(request: CreationRequest): Promise<CreatedCredential> {
+  const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, [
+    'sign',
+    'verify',
+  ]);
+  const privateKey = new Uint8Array(await crypto.subtle.exportKey('pkcs8', pair.privateKey));
+  const rawPublicKey = new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey));
+
+  // Random, and long enough that two vaults never collide: the site stores
+  // this and hands it back in `allowCredentials`.
+  const credentialId = crypto.getRandomValues(new Uint8Array(32));
+
+  const rpIdHash = new Uint8Array(
+    await crypto.subtle.digest('SHA-256', new TextEncoder().encode(request.rpId)),
+  );
+  let flags = FLAG_USER_PRESENT | FLAG_BACKUP_ELIGIBLE | FLAG_BACKED_UP | FLAG_ATTESTED;
+  if (request.userVerified) {
+    flags |= FLAG_USER_VERIFIED;
+  }
+
+  const attested = attestedCredentialData(credentialId, coseKeyFrom(rawPublicKey));
+  const authData = new Uint8Array(37 + attested.length);
+  authData.set(rpIdHash, 0);
+  authData[32] = flags;
+  // The counter starts, and stays, at zero — see `buildAuthenticatorData`.
+  new DataView(authData.buffer).setUint32(33, 0, false);
+  authData.set(attested, 37);
+
+  return {
+    credentialId: toBase64Url(credentialId),
+    clientDataJSON: buildClientData(request.challenge, request.origin, 'webauthn.create'),
+    attestationObject: encodeCbor(
+      new Map<string, CborValue>([
+        ['fmt', 'none'],
+        // Empty, and that is the whole of `none` attestation: no claim is made
+        // about what produced this credential, because none would be true.
+        ['attStmt', new Map<string, CborValue>()],
+        ['authData', authData],
+      ]),
+    ),
+    privateKey: toBase64Url(privateKey),
+  };
 }
 
 /** Strips the leading zeros DER forbids, and adds one back if the top bit is set. */

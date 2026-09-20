@@ -23,7 +23,9 @@ export interface AssertionChoice {
 }
 
 export function AssertionScreen({
+  ceremony,
   origin,
+  siteName,
   choices,
   chosen,
   needsVerification,
@@ -35,8 +37,12 @@ export function AssertionScreen({
   onConfirm,
   onDecline,
 }: {
+  /** Signing in with a passkey, or creating one. */
+  ceremony: 'get' | 'create';
   /** The site asking, as the browser reported it — never as the page said. */
   origin: string;
+  /** What the site calls itself, shown only when creating. */
+  siteName: string;
   choices: readonly AssertionChoice[];
   chosen: string | null;
   /** The site asked that the user be verified, not merely present. */
@@ -49,10 +55,12 @@ export function AssertionScreen({
   onConfirm: (event: Event) => void;
   onDecline: () => void;
 }) {
+  const creating = ceremony === 'create';
+
   return (
     <div>
       <header>
-        <h1>{t('assertionTitle')}</h1>
+        <h1>{creating ? t('registrationTitle') : t('assertionTitle')}</h1>
         <button class="quiet" onClick={onDecline}>
           {t('assertionDecline')}
         </button>
@@ -60,14 +68,16 @@ export function AssertionScreen({
       <main>
         {/* The origin, spelled out. It is the one thing worth reading before
             authorising a signature, and it comes from the browser. */}
-        <p class="assertion-origin">{t('assertionAsks', origin)}</p>
+        <p class="assertion-origin">
+          {creating ? t('registrationAsks', origin, siteName) : t('assertionAsks', origin)}
+        </p>
 
-        {choices.length === 0 ? (
+        {choices.length === 0 && !creating ? (
           <p class="empty">{t('assertionNone')}</p>
         ) : (
           <form onSubmit={onConfirm}>
             <label>
-              {t('assertionChoose')}
+              {creating ? t('registrationAttach') : t('assertionChoose')}
               <select
                 value={chosen ?? ''}
                 onChange={(e) => onChoose(e.currentTarget.value)}
@@ -93,12 +103,14 @@ export function AssertionScreen({
                     required
                   />
                 </label>
-                <p class="hint-diag">{t('assertionVerifyHint')}</p>
+                <p class="hint-diag">
+                  {creating ? t('registrationVerifyHint') : t('assertionVerifyHint')}
+                </p>
               </>
             )}
 
             <button type="submit" disabled={busy !== null}>
-              {t('assertionConfirm')}
+              {creating ? t('registrationConfirm') : t('assertionConfirm')}
             </button>
           </form>
         )}

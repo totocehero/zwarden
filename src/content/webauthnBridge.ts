@@ -63,7 +63,7 @@ window.addEventListener('message', (event: MessageEvent) => {
   }
 
   port.onMessage.addListener((message: unknown) => {
-    answer((message as Json | null)?.['assertion']);
+    answer((message as Json | null)?.['result']);
     port.disconnect();
   });
 
@@ -71,7 +71,11 @@ window.addEventListener('message', (event: MessageEvent) => {
   // the reason, silence means "we have nothing", and the page recovers.
   port.onDisconnect.addListener(() => answer(null));
 
-  port.postMessage({ type: 'assertion-request', options: data['options'] });
+  port.postMessage({
+    type: 'webauthn-request',
+    ceremony: data['ceremony'],
+    options: data['options'],
+  });
 });
 
 // Nothing is imported and nothing is used elsewhere; this only tells TypeScript
