@@ -6,7 +6,7 @@
  * leaves `App` solely responsible for saving and for its confirmation message.
  */
 
-import { type MessageKey, t } from '@shared/i18n.js';
+import { AVAILABLE_LOCALES, FOLLOW_BROWSER, type MessageKey, t } from '@shared/i18n.js';
 import { type AppSettings, DEFAULT_SETTINGS } from '@shared/storage.js';
 
 /** A partial settings change, raised to `App`. */
@@ -81,6 +81,44 @@ export function ServerSection({ settings, patch }: { settings: AppSettings; patc
 }
 
 /** Auto-lock and clipboard wiping. */
+/**
+ * Interface language.
+ *
+ * Its own section rather than a field in another: it is the one setting that
+ * changes nothing about how the vault behaves, and filing it under "Security"
+ * or "Server" would say something untrue about it.
+ */
+export function InterfaceSection({
+  settings,
+  onLanguage,
+}: {
+  settings: AppSettings;
+  onLanguage: (locale: string) => void;
+}) {
+  return (
+    <section>
+      <h2>{t('settingsInterfaceSection')}</h2>
+      <div class="fields">
+        <label>
+          {t('settingsLanguage')}
+          <select
+            value={settings.language}
+            onInput={(e) => onLanguage(e.currentTarget.value)}
+          >
+            <option value={FOLLOW_BROWSER}>{t('settingsLanguageFollow')}</option>
+            {AVAILABLE_LOCALES.map(([code, name]) => (
+              <option key={code} value={code}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p class="hint">{t('settingsLanguageHint')}</p>
+      </div>
+    </section>
+  );
+}
+
 export function SecuritySection({
   settings,
   patch,

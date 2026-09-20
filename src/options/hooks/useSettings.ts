@@ -8,7 +8,7 @@
  * user cannot know whether their click registered.
  */
 
-import { t } from '@shared/i18n.js';
+import { applyLocale, t } from '@shared/i18n.js';
 import { useEffect, useState } from 'preact/hooks';
 
 import {
@@ -38,6 +38,8 @@ export interface Settings {
   /** The current confirmation message, or the empty string. */
   readonly status: string;
   readonly patch: (field: Partial<AppSettings>) => void;
+  /** Changes the interface language, applied and saved at once. */
+  readonly setLanguage: (locale: string) => Promise<void>;
   readonly save: (event: Event) => Promise<void>;
   readonly lockNow: () => Promise<void>;
   readonly forgetTwoFa: () => Promise<void>;
@@ -70,6 +72,23 @@ export function useSettings(): Settings {
 
     patch(field) {
       setSettings((current) => ({ ...current, ...field }));
+    },
+
+    /**
+     * Unlike every other field, the language applies and saves on the spot,
+     * without waiting for the Save button.
+     *
+     * Two reasons, and neither is impatience. A language one cannot see the
+     * effect of is a language one cannot check one has picked correctly — and
+     * the catalogue has to be loaded before the page re-renders anyway, or the
+     * labels would stay in the old language until something else forced a
+     * render. Saving at the same moment simply keeps the popup from disagreeing
+     * with the page that set it.
+     */
+    async setLanguage(locale) {
+      await applyLocale(locale);
+      setSettings((current) => ({ ...current, language: locale }));
+      await saveSettings({ language: locale });
     },
 
     async save(event) {

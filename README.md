@@ -55,7 +55,7 @@ The cryptographic core is implemented and tested. The rest is in progress.
 - [x] `SymmetricCryptoKey` — 32/64-byte keys
 - [x] AES-256-CBC + HMAC-SHA256, encrypt-then-MAC
 - [x] Key derivation: PBKDF2-SHA256 and Argon2id
-- [x] 394 tests, including the RFC 4231 / 5869 / 6238 / 7914 vectors
+- [x] 409 tests, including the RFC 4231 / 5869 / 6238 / 7914 vectors
 - [x] **Interoperability validated against Vaultwarden 2026.6.0** —
       authentication, vault key decryption, and a complete write/read round trip
 - [x] API client: prelogin, authentication, session refresh, sync, item creation
@@ -93,6 +93,13 @@ The cryptographic core is implemented and tested. The rest is in progress.
       holding a chargeable number
 - [x] The browser's language and theme followed — `chrome.i18n` and a toolbar
       icon that inverts against a light background
+- [x] A language the user can choose, against the grain of an API that offers
+      no way to: `chrome.i18n` reads the browser's language and nothing can
+      change it, so the chosen catalogue is loaded by hand. Adding a language is
+      one folder (`node scripts/new-locale.mjs <code>`), checked automatically
+      by the test suite, and loaded only for the users who read it — which is
+      the whole argument against shipping 63 translations to everyone
+- [x] Filtering the list by item type, several types at once
 - [ ] Key derivation in the service worker (a popup with no key) — and, with it,
       the autofill shortcut
 - [ ] Automatic autofill (form detection, in-page suggestion)

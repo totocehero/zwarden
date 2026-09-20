@@ -491,6 +491,18 @@
   "settingsNetworkTimeout": {
     "message": "Network timeout (seconds, 5–120)"
   },
+  "settingsInterfaceSection": {
+    "message": "Interface"
+  },
+  "settingsLanguage": {
+    "message": "Language"
+  },
+  "settingsLanguageFollow": {
+    "message": "Follow the browser"
+  },
+  "settingsLanguageHint": {
+    "message": "Chrome hands an extension its own language and offers no way to change it, so Zwarden loads the chosen catalogue itself. Two things stay outside its reach, because the browser reads them before any of this code runs: the extension’s name and description, and the shortcut labels on chrome://extensions. A missing translation falls back to English rather than showing a blank label."
+  },
   "settingsSecuritySection": {
     "message": "Security"
   },

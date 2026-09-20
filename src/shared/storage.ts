@@ -50,6 +50,14 @@ export interface AppSettings {
   readonly offerToSave: boolean;
   /** Clipboard wipe after a copy, in seconds. 0 = never. */
   readonly clipboardClearSeconds: number;
+  /**
+   * Interface language, as a code from `AVAILABLE_LOCALES` — or the empty
+   * string, the default, to follow the browser's own.
+   *
+   * Stored as a plain code rather than a boolean plus a code: "follow the
+   * browser" is one choice among the others, not a mode layered over them.
+   */
+  readonly language: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -61,6 +69,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   lockOnSystemLock: true,
   offerToSave: true,
   clipboardClearSeconds: 30,
+  language: '',
 };
 
 const hasLocal = typeof chrome !== 'undefined' && typeof chrome.storage?.local !== 'undefined';
@@ -96,6 +105,7 @@ export async function loadSettings(): Promise<AppSettings> {
     'lockOnSystemLock',
     'offerToSave',
     'clipboardClearSeconds',
+    'language',
   ]);
   return {
     serverUrl: readString(stored, 'serverUrl', DEFAULT_SETTINGS.serverUrl),
@@ -110,6 +120,7 @@ export async function loadSettings(): Promise<AppSettings> {
       'clipboardClearSeconds',
       DEFAULT_SETTINGS.clipboardClearSeconds,
     ),
+    language: readString(stored, 'language', DEFAULT_SETTINGS.language),
   };
 }
 

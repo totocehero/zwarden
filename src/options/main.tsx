@@ -9,12 +9,18 @@
  * rendering in `components/`.
  */
 
-import { t } from '@shared/i18n.js';
+import { applyLocale, t } from '@shared/i18n.js';
+import { loadSettings } from '@shared/storage.js';
 import { render } from 'preact';
 import { useEffect } from 'preact/hooks';
 
 import { ActionsSection, DeviceSection } from './components/ActionSections.js';
-import { SaveSection, SecuritySection, ServerSection } from './components/SettingsSections.js';
+import {
+  InterfaceSection,
+  SaveSection,
+  SecuritySection,
+  ServerSection,
+} from './components/SettingsSections.js';
 import { useSettings } from './hooks/useSettings.js';
 import { followPageColorScheme } from '@shared/theme.js';
 
@@ -40,6 +46,10 @@ function App() {
 
       <form onSubmit={(e) => void s.save(e)}>
         <ServerSection settings={s.settings} patch={s.patch} />
+        <InterfaceSection
+          settings={s.settings}
+          onLanguage={(locale) => void s.setLanguage(locale)}
+        />
         <SecuritySection settings={s.settings} patch={s.patch} />
         <SaveSection settings={s.settings} patch={s.patch} />
 
@@ -59,4 +69,16 @@ function App() {
   );
 }
 
-render(<App />, document.getElementById('app')!);
+/**
+ * The catalogue is in place before the first paint.
+ *
+ * `t` is synchronous, so a language arriving after the first render would
+ * repaint every label under the reader's eyes. One storage read and — only when
+ * a language has actually been chosen — one fetch of a packaged file stand
+ * between the page opening and its first frame; following the browser, the
+ * default, costs neither.
+ */
+void (async () => {
+  await applyLocale((await loadSettings()).language);
+  render(<App />, document.getElementById('app')!);
+})();

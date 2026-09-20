@@ -33,7 +33,7 @@
  * yet in the service worker.
  */
 
-import { t } from '@shared/i18n.js';
+import { applyLocale, t } from '@shared/i18n.js';
 import { followPageColorScheme } from '@shared/theme.js';
 import { render } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
@@ -1492,4 +1492,16 @@ function App() {
   );
 }
 
-render(<App />, document.getElementById('app')!);
+/**
+ * The catalogue is in place before the first paint.
+ *
+ * `t` is synchronous, so a language arriving after the first render would
+ * repaint every label under the reader's eyes. One storage read and — only when
+ * a language has actually been chosen — one fetch of a packaged file stand
+ * between the page opening and its first frame; following the browser, the
+ * default, costs neither.
+ */
+void (async () => {
+  await applyLocale((await loadSettings()).language);
+  render(<App />, document.getElementById('app')!);
+})();

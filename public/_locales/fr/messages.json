@@ -491,6 +491,18 @@
   "settingsNetworkTimeout": {
     "message": "Délai réseau (secondes, 5–120)"
   },
+  "settingsInterfaceSection": {
+    "message": "Interface"
+  },
+  "settingsLanguage": {
+    "message": "Langue"
+  },
+  "settingsLanguageFollow": {
+    "message": "Suivre le navigateur"
+  },
+  "settingsLanguageHint": {
+    "message": "Chrome impose à une extension sa propre langue et n’offre aucun moyen d’en changer : Zwarden charge donc lui-même le catalogue choisi. Deux choses restent hors de portée, le navigateur les lisant avant tout ce code : le nom et la description de l’extension, et les libellés de raccourcis sur chrome://extensions. Une traduction manquante retombe sur l’anglais plutôt que d’afficher une étiquette vide."
+  },
   "settingsSecuritySection": {
     "message": "Sécurité"
   },
