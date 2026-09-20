@@ -31,9 +31,17 @@ wishes it were:
 - the vault key sits there as a base64 **string**. `SymmetricCryptoKey.destroy()`
   zeroes the byte arrays it owns, but a JavaScript string is immutable and
   cannot be wiped — `lockVault()` removes the entry, and the bytes linger until
-  the garbage collector gets to them. This is inherent to the platform, not a
-  bug we have declined to fix, and it is why the key is never written anywhere
-  that survives.
+  the garbage collector gets to them.
+
+  This one is worth being precise about, because it has a partial answer and it
+  is not the obvious one. **`chrome.storage` serialises to JSON**, in every
+  area, session included — which rules out the clean fix: a non-extractable
+  `CryptoKey` is structured-cloneable and would never exist as bytes in a heap
+  at all, and `chrome.storage` cannot hold one. IndexedDB can, but IndexedDB is
+  written to disk, which trades a memory-lifetime problem for a
+  survives-the-browser problem. That is a worse trade, so it was not made.
+
+  What is left is to stop making unnecessary copies — see §4.
 
 ### `chrome.storage.local` — disk, in the clear
 
@@ -58,7 +66,8 @@ which Zwarden does not use.
 
 | Entry | Contents | Why it may live there |
 |---|---|---|
-| `zwardenSession` | vault key (base64), access and refresh tokens, **the whole cached sync**, the local master-password hash, KDF parameters | The key is the most sensitive object in the extension; everything of comparable value is kept beside it rather than given a second, weaker home |
+| `zwardenVaultKey` | the vault key, base64, **alone** | Read by exactly one caller, the popup's restore path, and only where a decryption follows — see §4 |
+| `zwardenSession` | access and refresh tokens, **the whole cached sync**, the local master-password hash, KDF parameters | Everything of comparable value is kept in memory rather than given a second, weaker home. The key is not among them, on purpose |
 | `zwardenPendingSave` | a credential captured on a page — **username and password in clear** | The only cleartext password the extension ever stores. It lives for the few seconds between a form submission and the user's answer, and is dropped on either answer |
 | `zwardenActivity` | a timestamp | Drives the inactivity lock |
 
@@ -168,6 +177,23 @@ determined attacker with a host list; it is the removal of a free gift.
 the vault — which is not on disk — they identify nothing. The residual leak is
 "this user opened twelve distinct items, at these times", and paying for it with
 a broken "recently used" ordering across restarts is not a trade worth making.
+
+### The vault key has its own entry, and the service worker never reads it
+
+It used to be a field of the session object, which meant every reader of the
+session pulled the key into its own heap whether it needed it or not. Four of
+those readers are in the service worker and **not one of them decrypts**: they
+ask whether a session exists. One of the four runs on every credential capture,
+which is to say on form submissions across every page the user visits.
+
+So the key is stored apart, and the worker asks `hasStoredSession()` instead.
+The key is now read in exactly one place — the popup's restore path, where a
+decryption follows immediately.
+
+This does not make the string wipeable; nothing can, see §1. What it does is
+keep the vault key out of the longest-lived and most-exposed context the
+extension has. `tests/session.test.ts` asserts it directly: the existence check
+and the session read must not so much as request the key's entry.
 
 ### The offline write queue holds ciphertext, and nothing else
 

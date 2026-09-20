@@ -53,7 +53,7 @@ import {
   loadLastActivity,
   isNeverSaveHost,
   loadSettings,
-  loadStoredSession,
+  hasStoredSession,
   lockVault,
   recordActivity,
   savePendingSave,
@@ -70,7 +70,7 @@ import {
  * there is no deadline to push back.
  */
 async function onActivity(): Promise<void> {
-  if ((await loadStoredSession()) === null) {
+  if (!(await hasStoredSession())) {
     return;
   }
   await recordActivity();
@@ -83,7 +83,7 @@ async function lockNow(): Promise<void> {
 
 /** One heartbeat: compares inactivity against the configured delay. */
 async function tick(): Promise<void> {
-  if ((await loadStoredSession()) === null) {
+  if (!(await hasStoredSession())) {
     // Session already gone (manual lock, browser restart): the heartbeat has
     // nothing left to do.
     await stopAutoLockWatch();
@@ -163,7 +163,7 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
 async function resync(): Promise<void> {
   await syncToolbarIcon();
   await applyDetectorRegistration();
-  if ((await loadStoredSession()) === null) {
+  if (!(await hasStoredSession())) {
     await lockVault();
     return;
   }
@@ -352,7 +352,7 @@ async function onCredentials(
   }
 
   const { offerToSave } = await loadSettings();
-  if (!offerToSave || (await loadStoredSession()) === null) {
+  if (!offerToSave || !(await hasStoredSession())) {
     return;
   }
   if (await isNeverSaveHost(host)) {

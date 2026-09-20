@@ -94,6 +94,7 @@ import {
   loadRememberToken,
   loadSettings,
   loadStoredSession,
+  loadVaultKey,
   lockVault,
   markUsed,
   recordActivity,
@@ -101,6 +102,7 @@ import {
   saveRememberToken,
   saveSettings,
   saveStoredSession,
+  saveVaultKey,
   scheduleClipboardWipe,
   startAutoLockWatch,
 } from '@shared/storage.js';
@@ -423,14 +425,17 @@ function App() {
    */
   async function restoreSession(s: AppSettings): Promise<void> {
     const stored = await loadStoredSession();
-    if (stored === null) {
+    // The key is fetched apart, and only here: this is the one place in the
+    // extension that goes on to decrypt (`docs/STORAGE.md`).
+    const userKeyB64 = stored === null ? null : await loadVaultKey();
+    if (stored === null || userKeyB64 === null) {
       setInitializing(false);
       return;
     }
 
     setServerUrl(stored.serverUrl);
     setEmail(stored.email);
-    const userKey = SymmetricCryptoKey.fromBase64(stored.userKeyB64);
+    const userKey = SymmetricCryptoKey.fromBase64(userKeyB64);
     void startAutoLockWatch(s.autoLockMinutes);
 
     // The cache first: it displays without a network, hence immediately. The
@@ -668,8 +673,8 @@ function App() {
     // The session survives the popup closing, until the browser closes, the
     // inactivity deadline passes, or a manual lock. The sync is cached for an
     // immediate display the next time it opens.
+    await saveVaultKey(result.userKey.toBase64());
     await saveStoredSession({
-      userKeyB64: result.userKey.toBase64(),
       accessToken: result.session.accessToken,
       refreshToken: result.session.refreshToken ?? null,
       expiresAt: result.session.expiresAt,
@@ -1237,8 +1242,9 @@ function App() {
   async function refreshAfterWrite(auth: AuthorizedSession, userKey: SymmetricCryptoKey): Promise<void> {
     setBusy(t('statusSyncing'));
     const sync = await auth.client.sync(auth.accessToken);
+    // The key is untouched by a resync: it is not rewritten, so it is not
+    // read either.
     await saveStoredSession({
-      userKeyB64: auth.stored.userKeyB64,
       accessToken: auth.accessToken,
       refreshToken: auth.refreshToken,
       expiresAt: auth.expiresAt,

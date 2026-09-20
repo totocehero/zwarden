@@ -512,9 +512,13 @@ export async function clearLastUsed(): Promise<void> {
 
 // --- Unlocked session --------------------------------------------------------
 
-/** The unlocked session, as kept in `chrome.storage.session`. */
+/**
+ * The unlocked session, as kept in `chrome.storage.session`.
+ *
+ * **The vault key is deliberately not in here.** It lives under its own entry,
+ * fetched only by the one caller that decrypts — see {@link loadVaultKey}.
+ */
 export interface StoredSession {
-  readonly userKeyB64: string;
   readonly accessToken: string;
   readonly refreshToken: string | null;
   readonly expiresAt: number;
@@ -531,9 +535,7 @@ export interface StoredSession {
    *
    * Used to verify a fresh entry **without a network** when an item demands the
    * password again (`reprompt`). It cannot be replayed against the server — its
-   * iteration count differs from the authorization hash's — and it lives in the
-   * same memory storage as the vault key, which is strictly more sensitive: no
-   * new surface at all.
+   * iteration count differs from the authorization hash's.
    */
   readonly localPasswordHash: string;
   /** The account's KDF parameters, to re-derive the master key on verification. */
@@ -573,6 +575,65 @@ function readKdfConfig(value: unknown): KdfConfig | null {
 
 const SESSION_KEY = 'session';
 
+/**
+ * The vault key, under an entry of its own.
+ *
+ * ## Why it is not part of {@link StoredSession}
+ *
+ * It was, and that meant every reader of the session pulled the key into its
+ * own heap whether it needed it or not. Four of the callers are in the service
+ * worker, and **not one of them decrypts anything** — they ask whether a
+ * session exists. One of those four runs on every credential capture, which is
+ * to say on form submissions across every page the user visits.
+ *
+ * `chrome.storage` serialises to JSON, so the key crosses as a base64 string,
+ * and a JavaScript string is immutable: it cannot be wiped, only dropped and
+ * left to the garbage collector. Every needless read was therefore a needless
+ * copy of the vault key lying in the longest-lived, most-exposed context the
+ * extension has, waiting to be collected — and possibly paged to swap in the
+ * meantime (`docs/STORAGE.md` §1).
+ *
+ * Splitting the entry does not make the string wipeable. Nothing can, under
+ * MV3: a non-extractable `CryptoKey` would solve it outright, and
+ * `chrome.storage` cannot hold one. What it does is confine the key to the one
+ * context that decrypts — the popup — and keep it out of the service worker
+ * entirely.
+ */
+const VAULT_KEY_KEY = 'vaultKey';
+
+/**
+ * The vault key, base64. `null` if the vault is locked.
+ *
+ * Call it only where a decryption actually follows. Everything else that used
+ * to reach for the session wholesale wants {@link hasStoredSession} or
+ * {@link loadStoredSession}, neither of which touches this entry.
+ */
+export async function loadVaultKey(): Promise<string | null> {
+  if (!hasSession) {
+    return null;
+  }
+  const stored = await chrome.storage.session.get(VAULT_KEY_KEY);
+  const value = stored[VAULT_KEY_KEY];
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+/** Stores the vault key for the session. */
+export async function saveVaultKey(userKeyB64: string): Promise<void> {
+  if (hasSession) {
+    await chrome.storage.session.set({ [VAULT_KEY_KEY]: userKeyB64 });
+  }
+}
+
+/**
+ * Whether a session is open, **without reading the key**.
+ *
+ * What the service worker actually wanted every time it loaded the whole
+ * session and compared it to `null`.
+ */
+export async function hasStoredSession(): Promise<boolean> {
+  return (await loadStoredSession()) !== null;
+}
+
 export async function loadStoredSession(): Promise<StoredSession | null> {
   if (!hasSession) {
     return null;
@@ -582,7 +643,6 @@ export async function loadStoredSession(): Promise<StoredSession | null> {
   const kdfConfig = readKdfConfig(s?.kdfConfig);
   if (
     s !== undefined &&
-    typeof s.userKeyB64 === 'string' &&
     typeof s.accessToken === 'string' &&
     typeof s.expiresAt === 'number' &&
     typeof s.serverUrl === 'string' &&
@@ -596,7 +656,6 @@ export async function loadStoredSession(): Promise<StoredSession | null> {
     kdfConfig !== null
   ) {
     return {
-      userKeyB64: s.userKeyB64,
       accessToken: s.accessToken,
       refreshToken: typeof s.refreshToken === 'string' ? s.refreshToken : null,
       expiresAt: s.expiresAt,
@@ -618,7 +677,9 @@ export async function saveStoredSession(session: StoredSession): Promise<void> {
 
 export async function clearStoredSession(): Promise<void> {
   if (hasSession) {
-    await chrome.storage.session.remove(SESSION_KEY);
+    // Both entries, always together: a key outliving its session would be a key
+    // nothing could use and nothing would clear.
+    await chrome.storage.session.remove([SESSION_KEY, VAULT_KEY_KEY]);
   }
 }
 
