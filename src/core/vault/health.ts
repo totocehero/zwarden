@@ -49,6 +49,15 @@ export interface HealthItem {
 export interface HealthSubject {
   readonly id: string;
   readonly name: string;
+  /**
+   * The item's site, when it has one that can safely be opened.
+   *
+   * `null` for anything that is not `http:` or `https:`. That filter is not
+   * tidiness: a vault URI is arbitrary text, and rendering `javascript:…` as a
+   * link would run it in the extension's own page, with the extension's own
+   * privileges. See {@link openableUri}.
+   */
+  readonly uri: string | null;
 }
 
 /** Several items sharing one password. */
@@ -90,9 +99,39 @@ export const STALE_AFTER_DAYS = 365;
 
 const DAY_MS = 86_400_000;
 
+/**
+ * The first URI of an item that a browser may be sent to.
+ *
+ * Only `http:` and `https:`. Everything else is refused — `javascript:`
+ * because rendering it as a link would run it inside the extension's own page,
+ * and `file:`, `data:` and the rest because nothing good follows from opening
+ * them on a click meant for a website.
+ *
+ * @param uris The item's URIs, decrypted.
+ * @returns An absolute URL, or `null` if none can be trusted.
+ */
+export function openableUri(uris: readonly string[]): string | null {
+  for (const raw of uris) {
+    const trimmed = raw.trim();
+    if (trimmed === '') {
+      continue;
+    }
+    try {
+      // A bare host is the commonest form in a vault, and it means https.
+      const url = new URL(trimmed.includes('://') ? trimmed : `https://${trimmed}`);
+      if (url.protocol === 'http:' || url.protocol === 'https:') {
+        return url.toString();
+      }
+    } catch {
+      // Not a URL at all: try the next one.
+    }
+  }
+  return null;
+}
+
 /** A displayable name for an item that may not have one. */
 function subject(item: HealthItem): HealthSubject {
-  return { id: item.id, name: item.name ?? item.id };
+  return { id: item.id, name: item.name ?? item.id, uri: openableUri(item.uris) };
 }
 
 /** The host of the first URI, which is what a password most often echoes. */

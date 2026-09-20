@@ -12,7 +12,7 @@
  * finds the obviously bad and does not certify the rest.
  */
 
-import { useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 
 import { t, type MessageKey } from '@shared/i18n.js';
 import type { HealthReport, HealthSubject } from '@core/vault/health.js';
@@ -37,25 +37,48 @@ interface FindingRow {
   readonly detail?: string;
   /** The item to discard, when the row offers it. */
   readonly deletable?: string;
+  /** The item's site, when there is one worth offering to open. */
+  readonly uri?: string | null;
 }
+
+/** How long an armed discard waits before giving up on being confirmed. */
+const ARMED_MS = 4_000;
 
 /**
  * The discard button, which asks twice.
  *
  * Two clicks rather than a dialog: the popup is four hundred and twenty pixels
- * wide and an overlay to confirm one row would cover the list it came from. The
- * second click is the confirmation, and moving away from the row cancels it —
- * so a misclick costs nothing and does not need undoing.
+ * wide, and an overlay to confirm one row would cover the list it came from.
+ *
+ * ## The bug this shape exists to avoid
+ *
+ * The first version cancelled on `mouseleave`, which read well and did not
+ * work: "Confirm" is half the width of "Move to the trash", so arming shrank
+ * the button out from under the pointer, `mouseleave` fired, and it disarmed
+ * before anyone could click it again. An element that resizes cannot use the
+ * pointer leaving it as a signal.
+ *
+ * So it disarms on a timer instead, and the button reserves the width of its
+ * longer label in CSS so neither state moves the row.
  */
 function DiscardButton({ onDelete }: { onDelete: () => void }) {
   const [armed, setArmed] = useState(false);
+  const timer = useRef<number | undefined>(undefined);
+
+  // An armed button left alone goes back to safety rather than waiting all
+  // session for a click that is not coming.
+  useEffect(() => {
+    if (!armed) {
+      return;
+    }
+    timer.current = window.setTimeout(() => setArmed(false), ARMED_MS);
+    return () => clearTimeout(timer.current);
+  }, [armed]);
 
   return (
     <button
       class={`chip health-discard${armed ? ' chip-on' : ''}`}
       title={t('healthDelete')}
-      onMouseLeave={() => setArmed(false)}
-      onBlur={() => setArmed(false)}
       onClick={() => {
         if (armed) {
           onDelete();
@@ -84,10 +107,12 @@ function Finding({
   title,
   rows,
   onDelete,
+  onOpen,
 }: {
   title: string;
   rows: readonly FindingRow[];
   onDelete?: (id: string) => void;
+  onOpen?: (uri: string) => void;
 }) {
   if (rows.length === 0) {
     return null;
@@ -100,7 +125,17 @@ function Finding({
       </summary>
       {rows.map((row) => (
         <div key={row.key} class="health-row">
-          <span class="health-name">{row.name}</span>
+          {row.uri != null && onOpen !== undefined ? (
+            <button
+              class="health-name health-link"
+              title={row.uri}
+              onClick={() => onOpen(row.uri!)}
+            >
+              {row.name}
+            </button>
+          ) : (
+            <span class="health-name">{row.name}</span>
+          )}
           {row.detail !== undefined && <span class="health-detail">{row.detail}</span>}
           {row.deletable !== undefined && onDelete !== undefined && (
             <DiscardButton onDelete={() => onDelete(row.deletable!)} />
@@ -118,12 +153,22 @@ export function HealthPanel({
   report,
   onBack,
   onDelete,
+  onOpen,
 }: {
   report: HealthReport;
   onBack: () => void;
   /** Moves an item to the trash. Offered on the stale list, which is the one
    *  read to decide what is no longer worth keeping. */
   onDelete: (id: string) => void;
+  /**
+   * Opens an item's site in a tab.
+   *
+   * Only ever called with an `http`/`https` URL: `openableUri` refuses
+   * everything else before it reaches a row, because a vault URI is arbitrary
+   * text and `javascript:` rendered as a link would run inside the extension's
+   * own page.
+   */
+  onOpen: (uri: string) => void;
 }) {
   const total = findingCount(report);
 
@@ -152,11 +197,18 @@ export function HealthPanel({
             key: finding.id,
             name: finding.name,
             detail: t(REASONS[finding.reason]),
+            uri: finding.uri,
           }))}
+          onOpen={onOpen}
         />
         <Finding
           title={t('healthEchoing')}
-          rows={report.echoing.map((finding) => ({ key: finding.id, name: finding.name }))}
+          rows={report.echoing.map((finding) => ({
+            key: finding.id,
+            name: finding.name,
+            uri: finding.uri,
+          }))}
+          onOpen={onOpen}
         />
         <Finding
           title={t('healthStale')}
@@ -165,8 +217,10 @@ export function HealthPanel({
             name: finding.name,
             detail: t('healthStaleDetail', String(finding.days)),
             deletable: finding.id,
+            uri: finding.uri,
           }))}
           onDelete={onDelete}
+          onOpen={onOpen}
         />
         {report.stale.length > 0 && <p class="hint-diag">{t('healthDeleteHint')}</p>}
         <Finding
@@ -175,7 +229,9 @@ export function HealthPanel({
             key: finding.id,
             name: finding.name,
             detail: finding.expired ? t('cardExpired') : t('cardExpiresSoon'),
+            uri: finding.uri,
           }))}
+          onOpen={onOpen}
         />
 
         {report.guarded > 0 && (

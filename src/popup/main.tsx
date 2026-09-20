@@ -1476,6 +1476,19 @@ function App() {
   }
 
   /**
+   * Opens an item's site in a new tab.
+   *
+   * The URL is one `openableUri` has already narrowed to `http`/`https`: a
+   * vault URI is arbitrary text, and handing `javascript:` to the browser from
+   * the extension's own page would run it with the extension's privileges.
+   * Checked there, where it is tested, rather than trusted here.
+   */
+  function openSite(url: string): void {
+    void chrome.tabs.create({ url });
+    window.close();
+  }
+
+  /**
    * Moves an item to the trash, from the health report.
    *
    * The trash and not the permanent deletion: the official clients keep a
@@ -1746,6 +1759,7 @@ function App() {
           report={health}
           onBack={() => setHealth(null)}
           onDelete={(id) => void onTrashItem(id)}
+          onOpen={openSite}
         />
         {busy !== null && <p class="status">{busy}</p>}
         {error !== null && <p class="error">{error}</p>}

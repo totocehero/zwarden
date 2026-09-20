@@ -17,7 +17,9 @@ export default defineConfig({
     // WebCrypto is available natively in Node >= 20 through globalThis.crypto,
     // so the crypto core needs no jsdom.
     environment: 'node',
-    include: ['tests/**/*.test.ts'],
+    // `.tsx` too: a rule that only lives in a component is still a rule, and
+    // the discard button proved it by breaking where nothing could see it.
+    include: ['tests/**/*.test.ts', 'tests/**/*.test.tsx'],
     // Tests that need a DOM ask for one file by file, through
     // `// @vitest-environment jsdom`: forcing jsdom everywhere would slow down
     // the forty KDF tests, which need nothing but WebCrypto.

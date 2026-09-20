@@ -13,7 +13,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { EMPTY_CARD } from '../src/core/vault/card.js';
-import { buildHealthReport, findingCount, type HealthItem } from '../src/core/vault/health.js';
+import {
+  buildHealthReport,
+  findingCount,
+  openableUri,
+  type HealthItem,
+} from '../src/core/vault/health.js';
 
 const NOW = new Date(Date.UTC(2026, 8, 20));
 
@@ -218,5 +223,47 @@ describe('the order findings come back in', () => {
       NOW,
     );
     expect(report.stale.map((f) => f.id)).toEqual(['ancient', 'middling', 'recent']);
+  });
+});
+
+/**
+ * Which URI a finding may offer to open.
+ *
+ * A vault URI is arbitrary text the user pasted in years ago. Rendering one as
+ * a link puts it a click away from the extension's own page, with the
+ * extension's own privileges — so the filter is not tidiness.
+ */
+describe('openableUri', () => {
+  it('takes an ordinary address', () => {
+    expect(openableUri(['https://bank.example.org/login'])).toBe(
+      'https://bank.example.org/login',
+    );
+  });
+
+  it('assumes https for a bare host, which is how vaults store them', () => {
+    expect(openableUri(['bank.example.org'])).toBe('https://bank.example.org/');
+  });
+
+  it('refuses a script URI outright', () => {
+    // The one that matters: as an href, this runs inside the popup.
+    expect(openableUri(['javascript:alert(1)'])).toBeNull();
+    expect(openableUri(['JavaScript:alert(1)'])).toBeNull();
+  });
+
+  it('refuses the other schemes nothing good comes of', () => {
+    expect(openableUri(['data:text/html,<script>alert(1)</script>'])).toBeNull();
+    expect(openableUri(['file:///etc/passwd'])).toBeNull();
+    expect(openableUri(['chrome://settings'])).toBeNull();
+  });
+
+  it('skips what it refuses and takes the next one', () => {
+    expect(openableUri(['javascript:alert(1)', 'https://bank.example.org/'])).toBe(
+      'https://bank.example.org/',
+    );
+  });
+
+  it('gives nothing when there is nothing to give', () => {
+    expect(openableUri([])).toBeNull();
+    expect(openableUri(['', '   '])).toBeNull();
   });
 });

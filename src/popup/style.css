@@ -888,3 +888,27 @@ button.health-discard.chip-on {
 .health-group > summary:hover .health-group-count {
   color: var(--text);
 }
+
+/* A finding's name, when its site can be opened. */
+
+button.health-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.health-link:hover {
+  text-decoration: underline;
+}
+
+/* Both labels reserve the same width: a button that shrinks when it arms pulls
+   itself out from under the pointer, which is how the first version cancelled
+   itself before anyone could confirm. */
+button.health-discard {
+  min-width: 9.5em;
+  text-align: center;
+}
