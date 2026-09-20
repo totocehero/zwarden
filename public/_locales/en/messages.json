@@ -422,6 +422,27 @@
   "repromptWrongPassword": {
     "message": "Incorrect password."
   },
+  "queueSavedOffline": {
+    "message": "Saved on this device — it will be sent when the server can be reached."
+  },
+  "queuePending": {
+    "message": "$1 change(s) waiting to be sent"
+  },
+  "queueHeld": {
+    "message": "$1 change(s) could not be applied: the item changed elsewhere in the meantime."
+  },
+  "queueHeldDetail": {
+    "message": "Nothing was overwritten. Discard them and make the change again on the current version."
+  },
+  "queueDiscard": {
+    "message": "Discard them"
+  },
+  "queueDiscarded": {
+    "message": "$1 change(s) discarded"
+  },
+  "queueSent": {
+    "message": "$1 change(s) sent"
+  },
   "proposalCreateTitle": {
     "message": "Save the credentials for $1?"
   },

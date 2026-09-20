@@ -55,7 +55,12 @@ import {
   TwoFactorRequiredError,
   type TwoFactorSubmission,
 } from '@core/api/apiClient.js';
-import { TwoFactorProvider, type CipherResponse, type SyncResponse } from '@core/api/models.js';
+import {
+  TwoFactorProvider,
+  readField,
+  type CipherResponse,
+  type SyncResponse,
+} from '@core/api/models.js';
 import { SymmetricCryptoKey } from '@core/crypto/symmetricCryptoKey.js';
 import { digitsOf, EMPTY_CARD_EDIT } from '@core/vault/card.js';
 import { EMPTY_IDENTITY_EDIT, fullName } from '@core/vault/identity.js';
@@ -78,6 +83,13 @@ import {
 import { buildVaultKeys, destroyVaultKeys } from '@core/vault/keyring.js';
 import { type VaultLabels, decryptLabels } from '@core/vault/labels.js';
 import { matchesOrigin } from '@core/vault/uriMatch.js';
+import { decideReplay, isUnreachable } from '@core/vault/offlineQueue.js';
+import {
+  clearWriteQueue,
+  enqueueWrite,
+  loadWriteQueue,
+  removeWrites,
+} from '@shared/writeQueue.js';
 import { type TotpConfig, generateTotp, parseTotp } from '@core/vault/totp.js';
 import { type UnlockResult, unlock } from '@core/vault/session.js';
 import {
@@ -335,6 +347,11 @@ function App() {
    * cursor already on its way.
    */
   const [rawCounts, setRawCounts] = useState<ReadonlyMap<number, number>>(new Map());
+  /**
+   * Writes made while the server was unreachable: how many are waiting, and how
+   * many could not be applied because the item changed elsewhere.
+   */
+  const [queued, setQueued] = useState({ pending: 0, held: 0 });
   const [showPassword, setShowPassword] = useState(false);
   const [proposal, setProposal] = useState<SaveProposal | null>(null);
   const reprompt = useReprompt(messageFor);
@@ -381,6 +398,9 @@ function App() {
     void (async () => {
       const loaded = await loadSettings();
       setSettings(loaded);
+      // Held writes survive the browser closing, so the count is read at every
+      // opening, not only after a failure.
+      void refreshQueueCounts();
       setServerUrl(loaded.serverUrl);
       setEmail(loaded.email);
       await restoreSession(loaded);
@@ -504,7 +524,19 @@ function App() {
     if (!displayed) {
       setBusy(t('statusOpeningVault'));
     }
-    const sync = await client.sync(accessToken);
+    let sync = await client.sync(accessToken);
+
+    // The server is answering again: send what was held while it was not.
+    // Decided against this very sync, so a conflict is read off the server's
+    // own current state rather than guessed.
+    const replayed = await replayQueue(client, accessToken, sync);
+    if (replayed.sent > 0) {
+      // A second sync, and only when something actually went out: the list must
+      // show what was just written, not the state from before it.
+      sync = await client.sync(accessToken);
+    }
+    await refreshQueueCounts(replayed.held);
+
     await saveStoredSession({
       ...stored,
       accessToken,
@@ -513,6 +545,9 @@ function App() {
       cachedSync: sync,
     });
     await showVault(sync, userKey, !displayed);
+    if (replayed.sent > 0) {
+      setError(t('queueSent', String(replayed.sent)));
+    }
   }
 
   /**
@@ -860,19 +895,46 @@ function App() {
     setError(null);
     setBusy(t('statusEncrypting'));
     try {
-      const auth = await authorize();
-      if (existing === null) {
-        await createFromCapture(auth, open, capture);
-      } else {
-        await updateFromCapture(auth, open, capture, existing);
+      // Encrypted before anything is attempted over the network: a body that
+      // exists can be held, and one that does not cannot.
+      const payload =
+        existing === null
+          ? await createFromCapture(open, capture)
+          : await updateFromCapture(open, capture, existing);
+
+      setBusy(t('statusSaving'));
+      try {
+        const auth = await authorize();
+        if (existing === null) {
+          await auth.client.createCipher(auth.accessToken, payload);
+        } else {
+          await auth.client.updateCipher(auth.accessToken, existing.id, payload);
+        }
+        await dismissProposal();
+        await refreshAfterWrite(auth, open.userKey);
+      } catch (err) {
+        if (!isUnreachable(err)) {
+          throw err;
+        }
+        await dismissProposal();
+        await holdWrite(
+          existing === null ? 'create' : 'update',
+          existing?.id ?? null,
+          payload,
+          existing === null ? null : revisionOf(open, existing.id),
+          existing?.name ?? capture.host,
+        );
       }
-      await dismissProposal();
-      await refreshAfterWrite(auth, open.userKey);
     } catch (err) {
       setError(messageFor(err));
-    } finally {
       setBusy(null);
     }
+  }
+
+  /** The server's revision for an item, as last synced. */
+  function revisionOf(open: OpenVault, cipherId: string): string | null {
+    const cipher = open.raw.get(cipherId);
+    return cipher === undefined ? null : (readField<string>(cipher, 'revisionDate') ?? null);
   }
 
   /**
@@ -883,10 +945,9 @@ function App() {
    * user fills in the rest if they wish.
    */
   async function createFromCapture(
-    auth: AuthorizedSession,
     open: OpenVault,
     capture: PendingSave,
-  ): Promise<void> {
+  ): Promise<Record<string, unknown>> {
     const payload = await buildCipherCreatePayload(
       {
         name: capture.host,
@@ -898,8 +959,7 @@ function App() {
       },
       open.userKey,
     );
-    setBusy(t('statusSaving'));
-    await auth.client.createCipher(auth.accessToken, payload);
+    return payload;
   }
 
   /**
@@ -911,11 +971,10 @@ function App() {
    * was there disappear.
    */
   async function updateFromCapture(
-    auth: AuthorizedSession,
     open: OpenVault,
     capture: PendingSave,
     existing: CipherOverview,
-  ): Promise<void> {
+  ): Promise<Record<string, unknown>> {
     const cipher = open.raw.get(existing.id);
     if (cipher === undefined) {
       throw new Error(t('errorItemNotFound'));
@@ -938,8 +997,7 @@ function App() {
       open.keys,
       true,
     );
-    setBusy(t('statusSaving'));
-    await auth.client.updateCipher(auth.accessToken, existing.id, payload);
+    return payload;
   }
 
   /**
@@ -1259,6 +1317,102 @@ function App() {
     await showVault(sync, userKey, false);
   }
 
+  /**
+   * Holds a write the server never received.
+   *
+   * Only called for a failure that means "no answer" — `isUnreachable` keeps a
+   * refusal out of the queue, since retrying a refusal never succeeds and would
+   * hide a real error behind a reassuring "saved locally".
+   *
+   * What is stored is the **already-encrypted** body. The cleartext edit never
+   * reaches disk (`docs/STORAGE.md` §4).
+   */
+  async function holdWrite(
+    kind: 'create' | 'update',
+    cipherId: string | null,
+    payload: Record<string, unknown>,
+    baseRevision: string | null,
+    label: string,
+  ): Promise<void> {
+    await enqueueWrite({
+      id: crypto.randomUUID(),
+      kind,
+      cipherId,
+      payload,
+      baseRevision,
+      queuedAt: Date.now(),
+      label,
+    });
+    await refreshQueueCounts();
+    setBusy(null);
+    setError(t('queueSavedOffline'));
+  }
+
+  /** Reflects the queue's size on screen. */
+  async function refreshQueueCounts(held = 0): Promise<void> {
+    const queue = await loadWriteQueue();
+    setQueued({ pending: queue.length, held });
+  }
+
+  /**
+   * Sends what was held, once the server answers again.
+   *
+   * Decided against the sync that has just come back, so a conflict is detected
+   * from the server's own current state rather than from a guess.
+   *
+   * @returns How many were sent, and how many were held back.
+   */
+  async function replayQueue(
+    client: ApiClient,
+    accessToken: string,
+    sync: SyncResponse,
+  ): Promise<{ sent: number; held: number }> {
+    const queue = await loadWriteQueue();
+    if (queue.length === 0) {
+      return { sent: 0, held: 0 };
+    }
+    const byId = new Map((sync.ciphers ?? []).map((c) => [c.id, c]));
+    const done: string[] = [];
+    let held = 0;
+
+    for (const entry of queue) {
+      const outcome = decideReplay(entry, byId.get(entry.cipherId ?? ''));
+      if (outcome.kind !== 'replay') {
+        // Nothing is overwritten and nothing is resurrected. The user is told,
+        // and decides.
+        held += 1;
+        continue;
+      }
+      try {
+        if (entry.kind === 'create') {
+          await client.createCipher(accessToken, entry.payload);
+        } else {
+          await client.updateCipher(accessToken, entry.cipherId!, entry.payload);
+        }
+        done.push(entry.id);
+      } catch (err) {
+        if (isUnreachable(err)) {
+          // Still offline: stop, keep the rest, try again next time.
+          break;
+        }
+        // Refused. Retrying would refuse again for ever; it is dropped and
+        // counted as held so the user hears about it.
+        done.push(entry.id);
+        held += 1;
+      }
+    }
+
+    await removeWrites(done);
+    return { sent: done.length - held, held };
+  }
+
+  /** Abandons the held writes the user has given up on. */
+  async function onDiscardQueue(): Promise<void> {
+    const n = await clearWriteQueue();
+    setQueued({ pending: 0, held: 0 });
+    setError(n === 0 ? null : t('queueDiscarded', String(n)));
+  }
+
   /** Opens the edit screen on a blank item, type still to be chosen. */
   function onNewItem(): void {
     setEditForm(EMPTY_EDIT);
@@ -1311,27 +1465,43 @@ function App() {
     setError(null);
     setBusy(t('statusEncrypting'));
     try {
-      const auth = await authorize();
       const edit = cipherEditFrom(editForm);
+      // Encryption first, and entirely local. Only then is the network tried —
+      // so a server that cannot be reached leaves a body ready to be held,
+      // rather than an edit that has to be retyped.
+      const payload =
+        raw === undefined
+          ? // Creation goes out under the vault key, with no item key of its
+            // own — the shape the interoperability round trip validates.
+            await buildCipherCreatePayload(edit, vault.userKey)
+          : await buildCipherUpdatePayload(
+              raw,
+              edit,
+              vault.keys,
+              editForm.password !== editOriginalPassword,
+            );
 
       setBusy(t('statusSaving'));
-      if (raw === undefined) {
-        // Creation goes out under the vault key, with no item key of its own —
-        // the shape the interoperability round trip validates.
-        await auth.client.createCipher(
-          auth.accessToken,
-          await buildCipherCreatePayload(edit, vault.userKey),
+      try {
+        const auth = await authorize();
+        if (raw === undefined) {
+          await auth.client.createCipher(auth.accessToken, payload);
+        } else {
+          await auth.client.updateCipher(auth.accessToken, editing!.id, payload);
+        }
+        await refreshAfterWrite(auth, vault.userKey);
+      } catch (err) {
+        if (!isUnreachable(err)) {
+          throw err;
+        }
+        await holdWrite(
+          raw === undefined ? 'create' : 'update',
+          editing?.id ?? null,
+          payload,
+          raw === undefined ? null : (readField<string>(raw, 'revisionDate') ?? null),
+          editForm.name.trim(),
         );
-      } else {
-        const payload = await buildCipherUpdatePayload(
-          raw,
-          edit,
-          vault.keys,
-          editForm.password !== editOriginalPassword,
-        );
-        await auth.client.updateCipher(auth.accessToken, editing!.id, payload);
       }
-      await refreshAfterWrite(auth, vault.userKey);
 
       setEditing(null);
       setCreating(false);
@@ -1340,7 +1510,6 @@ function App() {
       setRevealed(null);
     } catch (err) {
       setError(messageFor(err));
-    } finally {
       setBusy(null);
     }
   }
@@ -1505,6 +1674,23 @@ function App() {
           />
         )}
         {generator.render()}
+        {queued.pending > 0 && (
+          <div class={`queue-banner${queued.held > 0 ? ' queue-held' : ''}`}>
+            <p>
+              {queued.held > 0
+                ? t('queueHeld', String(queued.held))
+                : t('queuePending', String(queued.pending))}
+            </p>
+            {queued.held > 0 && (
+              <>
+                <p class="hint-diag">{t('queueHeldDetail')}</p>
+                <button class="secondary" onClick={() => void onDiscardQueue()}>
+                  {t('queueDiscard')}
+                </button>
+              </>
+            )}
+          </div>
+        )}
         {proposal !== null && (
           <SaveProposalBanner
             proposal={proposal}

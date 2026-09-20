@@ -57,7 +57,7 @@ The cryptographic core is implemented and tested. The rest is in progress.
 - [x] `SymmetricCryptoKey` — 32/64-byte keys
 - [x] AES-256-CBC + HMAC-SHA256, encrypt-then-MAC
 - [x] Key derivation: PBKDF2-SHA256 and Argon2id
-- [x] 447 tests, including the RFC 4231 / 5869 / 6238 / 7914 vectors
+- [x] 475 tests, including the RFC 4231 / 5869 / 6238 / 7914 vectors
 - [x] **Interoperability validated against Vaultwarden 2026.6.0** —
       authentication, vault key decryption, and a complete write/read round trip
 - [x] API client: prelogin, authentication, session refresh, sync, item creation
@@ -104,6 +104,10 @@ The cryptographic core is implemented and tested. The rest is in progress.
       by the test suite, and loaded only for the users who read it — which is
       the whole argument against shipping 63 translations to everyone
 - [x] Filtering the list by item type, several types at once
+- [x] Editing offline: a write the server never received is held — already
+      encrypted, never the cleartext edit — and sent when it can be reached. A
+      held write is **never replayed over an item that changed since**: the
+      user is told rather than having a rotated password silently put back
 - [x] The first screenful decrypted first — the ordering is computed from the
       identifiers, which are not encrypted, so the twenty rows the popup shows
       are the twenty decrypted before it draws. A vault of 500 items with a key
@@ -154,7 +158,7 @@ in both directions:
 
 ```bash
 npm install
-npm test          # 447 tests
+npm test          # 475 tests
 npm run typecheck # strict TypeScript
 npm run lint      # ESLint: lost promises, loose comparisons
 npm run build

@@ -226,6 +226,15 @@ export const MESSAGE_KEYS = [
   'repromptVerifying',
   'repromptWrongPassword',
 
+  // Offline write queue
+  'queueSavedOffline',
+  'queuePending',
+  'queueHeld',
+  'queueHeldDetail',
+  'queueDiscard',
+  'queueDiscarded',
+  'queueSent',
+
   // Save proposal
   'proposalCreateTitle',
   'proposalUpdateTitle',

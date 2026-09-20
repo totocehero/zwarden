@@ -422,6 +422,27 @@
   "repromptWrongPassword": {
     "message": "Mot de passe incorrect."
   },
+  "queueSavedOffline": {
+    "message": "Enregistré sur cet appareil — sera envoyé dès que le serveur sera joignable."
+  },
+  "queuePending": {
+    "message": "$1 modification(s) en attente d’envoi"
+  },
+  "queueHeld": {
+    "message": "$1 modification(s) n’ont pas pu être appliquées : l’élément a changé ailleurs entre-temps."
+  },
+  "queueHeldDetail": {
+    "message": "Rien n’a été écrasé. Abandonnez-les et refaites la modification sur la version actuelle."
+  },
+  "queueDiscard": {
+    "message": "Les abandonner"
+  },
+  "queueDiscarded": {
+    "message": "$1 modification(s) abandonnées"
+  },
+  "queueSent": {
+    "message": "$1 modification(s) envoyées"
+  },
   "proposalCreateTitle": {
     "message": "Enregistrer les identifiants pour $1 ?"
   },

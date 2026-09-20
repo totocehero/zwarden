@@ -717,3 +717,27 @@ button:disabled {
   opacity: 0.45;
   cursor: default;
 }
+
+/* Writes held back while the server was unreachable. */
+
+.queue-banner {
+  margin-bottom: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  font-size: 12px;
+}
+
+.queue-banner p {
+  margin: 0 0 4px;
+}
+
+/* Held back by a conflict: nothing was lost, but the user has to decide. */
+.queue-banner.queue-held {
+  border-color: var(--warn);
+}
+
+.queue-banner.queue-held > p:first-child {
+  color: var(--warn);
+}
