@@ -483,10 +483,18 @@ async function applyPasskeyRegistration(): Promise<void> {
   // Said on every start-up. Whether the setting is even on was the one fact
   // never confirmed while several real but unrelated faults were found and
   // fixed; it should not have taken that long, and it will not again.
-  console.debug('[zwarden] passkey sign-in', {
-    setting: passkeySignIn ? 'on' : 'off',
-    alreadyRegistered: existing.map((script) => script.id),
-  });
+  // At `log`, not `debug`, and as one string.
+  //
+  // Two reasons, and both were learnt the hard way. This runs **once when the
+  // worker starts**, not on every page, so it is not the noise the per-page
+  // traces would be — and it answers the first question anyone asks, which is
+  // whether the feature is even on. And Firefox collapses an object to the
+  // word `Object` and asks for a click, which is a click too many for a line
+  // whose purpose is to be read at a glance and quoted back to me.
+  console.log(
+    `[zwarden] passkey sign-in: setting=${passkeySignIn ? 'on' : 'off'}, ` +
+      `alreadyRegistered=[${existing.map((script) => script.id).join(', ')}]`,
+  );
 
   if (!passkeySignIn) {
     if (existing.length > 0) {
@@ -569,9 +577,13 @@ async function applyPasskeyRegistration(): Promise<void> {
     }
   }
 
-  console.log('[zwarden] passkey scripts', {
-    registered: (await chrome.scripting.getRegisteredContentScripts({ ids })).map((s) => s.id),
-  });
+  const installed = (await chrome.scripting.getRegisteredContentScripts({ ids })).map(
+    (script) => script.id,
+  );
+  console.log(
+    `[zwarden] passkey scripts: registered=[${installed.join(', ')}]` +
+      (refused.length === 0 ? '' : ` refused=${refused.join(' | ')}`),
+  );
   await savePasskeyHookStatus(
     refused.length === 0
       ? { registered: true, error: null }
@@ -630,10 +642,11 @@ async function onAssertionRequest(
   // nothing would make Zwarden a ninety-second delay on every sign-in done with
   // a hardware key — which is most of them.
   if (ceremony === 'get' && !(await canAnswerFor(options))) {
-    console.debug('[zwarden] declined before asking: no related passkey', {
-      rpId: (options as { rpId?: unknown }).rpId ?? '(the page\u2019s own host)',
-      known: await loadPasskeyParties(),
-    });
+    console.debug(
+      `[zwarden] declined before asking: rpId=${String(
+        (options as { rpId?: unknown }).rpId ?? "(the page's own host)",
+      )}, known=[${(await loadPasskeyParties())?.join(', ') ?? '(not published yet)'}]`,
+    );
     port.postMessage({ result: null });
     return;
   }
