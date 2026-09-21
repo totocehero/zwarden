@@ -45,6 +45,7 @@ import { ExportScreen } from './components/ExportScreen.js';
 import { HealthPanel } from './components/HealthPanel.js';
 import { TypeFilter } from './components/TypeFilter.js';
 import { type MenuAction, VaultHeader } from './components/VaultHeader.js';
+import { useVaultExport } from './hooks/useVaultExport.js';
 import { chipsFor, ItemRow } from './components/ItemRow.js';
 import { RepromptGuard } from './components/RepromptGuard.js';
 import { SaveProposalBanner, type SaveProposal } from './components/SaveProposal.js';
@@ -99,7 +100,6 @@ import {
   validateCreationAsk,
   WebAuthnRefusal,
 } from '@core/vault/webauthnRequest.js';
-import { type ExportPayload, type ExportedItem, sealExport } from '@core/vault/exportFile.js';
 import {
   clearWriteQueue,
   enqueueWrite,
@@ -375,10 +375,7 @@ function App() {
   /** The health report, while its screen is open. */
   const [health, setHealth] = useState<HealthReport | null>(null);
   /** The export form's three secrets, while its screen is open. */
-  const [exporting, setExporting] = useState(false);
-  const [exportMaster, setExportMaster] = useState('');
-  const [exportPassphrase, setExportPassphrase] = useState('');
-  const [exportConfirmation, setExportConfirmation] = useState('');
+  const vaultExport = useVaultExport({ vault, setBusy, setError, messageFor });
   /** The passkey ceremony a page is waiting on, once it has been validated. */
   const [assertion, setAssertion] = useState<
     | { readonly kind: 'get'; readonly id: string; readonly ask: AssertionAsk; readonly choices: readonly AssertionChoice[] }
@@ -827,10 +824,7 @@ function App() {
     // The export form holds the master password and a passphrase in its own
     // state: locking must take those with it, like every other secret on
     // screen (`docs/EXTENSION.md` §2).
-    setExporting(false);
-    setExportMaster('');
-    setExportPassphrase('');
-    setExportConfirmation('');
+    vaultExport.close();
     setAssertion(null);
     setAssertionPassword('');
     reprompt.cancel();
@@ -1858,139 +1852,6 @@ function App() {
     setAssertionPassword('');
   }
 
-  /** How short a passphrase may not be. Long beats complicated. */
-  const MIN_PASSPHRASE = 12;
-
-  /** Leaves the export screen, taking its three secrets with it. */
-  function closeExport(): void {
-    setExporting(false);
-    setExportMaster('');
-    setExportPassphrase('');
-    setExportConfirmation('');
-    setError(null);
-  }
-
-  /**
-   * Builds the encrypted export and hands it to the browser to save.
-   *
-   * The master password is asked for once and verified **offline**, against the
-   * witness kept at unlock — the same check a per-item guard makes. That single
-   * answer covers every `reprompt` item at once, which is what lets the backup
-   * be complete: one missing exactly the items the user was most careful about
-   * would be worse than none, because it would be trusted.
-   */
-  async function onExport(event: Event): Promise<void> {
-    event.preventDefault();
-    if (vault === null) {
-      return;
-    }
-    if (exportPassphrase !== exportConfirmation) {
-      setError(t('exportMismatch'));
-      return;
-    }
-    if (exportPassphrase.length < MIN_PASSPHRASE) {
-      setError(t('exportTooShort'));
-      return;
-    }
-
-    setError(null);
-    setBusy(t('exportWorking'));
-    try {
-      const stored = await loadStoredSession();
-      if (stored === null) {
-        throw new Error(t('errorSessionExpired'));
-      }
-      const masterKey = await deriveMasterKey(exportMaster, stored.email, stored.kdfConfig);
-      let verified: boolean;
-      try {
-        verified = await verifyLocalPasswordHash(
-          masterKey,
-          exportMaster,
-          stored.localPasswordHash,
-        );
-      } finally {
-        masterKey.destroy();
-      }
-      if (!verified) {
-        setError(t('exportWrongMaster'));
-        return;
-      }
-
-      const payload = await buildExportPayload(vault);
-      const file = await sealExport(payload, exportPassphrase);
-      downloadFile(file, `zwarden-${new Date().toISOString().slice(0, 10)}.json`);
-
-      closeExport();
-      setError(t('exportDone', String(payload.items.length)));
-    } catch (err) {
-      setError(messageFor(err));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  /** Decrypts the whole vault into the shape the file carries. */
-  async function buildExportPayload(open: OpenVault): Promise<ExportPayload> {
-    const items = await Promise.all(
-      open.items.map(async (item): Promise<ExportedItem> => {
-        const cipher = open.raw.get(item.id);
-        const details =
-          cipher === undefined
-            ? null
-            : await decryptCipherDetails(cipher, open.keys, () => undefined);
-        const base = {
-          id: item.id,
-          type: item.type,
-          name: item.name ?? '',
-          notes: details?.notes ?? null,
-          favorite: cipher === undefined ? false : (readField<boolean>(cipher, 'favorite') ?? false),
-          folderId: item.folderId,
-        };
-        if (item.type === 1) {
-          return {
-            ...base,
-            login: {
-              username: details?.username ?? null,
-              password: details?.password ?? null,
-              totp: details?.totp ?? null,
-              uris: item.uris.map((uri) => ({ uri })),
-            },
-          };
-        }
-        if (item.type === 3 && details?.card != null) {
-          return { ...base, card: { ...details.card } };
-        }
-        if (item.type === 4 && details?.identity != null) {
-          return { ...base, identity: { ...details.identity } };
-        }
-        return base;
-      }),
-    );
-
-    return {
-      encrypted: false,
-      folders: [...open.labels.folders].map(([id, name]) => ({ id, name })),
-      items,
-    };
-  }
-
-  /**
-   * Hands a file to the browser.
-   *
-   * A blob URL and an anchor rather than `chrome.downloads`: the API would need
-   * a permission in the manifest, and a password manager asking for one more
-   * than it needs is a password manager asking to be distrusted. The URL is
-   * revoked straight after — it names the whole vault, encrypted or not.
-   */
-  function downloadFile(text: string, filename: string): void {
-    const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = filename;
-    anchor.click();
-    URL.revokeObjectURL(url);
-  }
-
   /**
    * Opens an item's site in a new tab.
    *
@@ -2054,7 +1915,7 @@ function App() {
   function menuActions(unlocked: boolean): readonly MenuAction[] {
     return [
       { key: 'health', label: 'actionHealth', run: unlocked ? () => void onCheckHealth() : undefined },
-      { key: 'export', label: 'actionExport', run: unlocked ? () => setExporting(true) : undefined },
+      { key: 'export', label: 'actionExport', run: unlocked ? vaultExport.open : undefined },
       { key: 'settings', label: 'actionSettings', run: openOptions },
       { key: 'lock', label: 'actionLock', run: onLock },
     ];
@@ -2293,19 +2154,19 @@ function App() {
   }
 
   // --- Encrypted export -----------------------------------------------------
-  if (exporting) {
+  if (vaultExport.active) {
     return (
       <ExportScreen
-        masterPassword={exportMaster}
-        passphrase={exportPassphrase}
-        confirmation={exportConfirmation}
+        masterPassword={vaultExport.masterPassword}
+        passphrase={vaultExport.passphrase}
+        confirmation={vaultExport.confirmation}
         busy={busy}
         error={error}
-        onMasterPassword={setExportMaster}
-        onPassphrase={setExportPassphrase}
-        onConfirmation={setExportConfirmation}
-        onSubmit={(e) => void onExport(e)}
-        onCancel={closeExport}
+        onMasterPassword={vaultExport.setMasterPassword}
+        onPassphrase={vaultExport.setPassphrase}
+        onConfirmation={vaultExport.setConfirmation}
+        onSubmit={(e) => void vaultExport.run(e)}
+        onCancel={vaultExport.close}
       />
     );
   }
