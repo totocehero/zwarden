@@ -114,6 +114,7 @@ import {
   loadStoredSession,
   loadVaultKey,
   lockVault,
+  onSessionCleared,
   markUsed,
   recordActivity,
   setSaveBadge,
@@ -447,6 +448,26 @@ function App() {
     void recordActivity();
     const timer = setInterval(() => void recordActivity(), ACTIVITY_PING_MS);
     return () => clearInterval(timer);
+  }, [vault]);
+
+  /**
+   * A lock decided elsewhere reaches this popup too.
+   *
+   * The service worker locks on the inactivity alarm, on the lock screen and on
+   * the keyboard shortcut; the options page has a button. Each purges the
+   * stored session — and a popup open at that moment kept its keys and its
+   * decrypted list, fully usable, on a vault everything else called locked.
+   * "To lock is to purge everything" (`docs/EXTENSION.md` §2) has to include
+   * the one context that can still show a password.
+   */
+  useEffect(() => {
+    if (vault === null) {
+      return;
+    }
+    return onSessionCleared(() => {
+      destroyVaultKeys(vault.keys);
+      resetVaultState();
+    });
   }, [vault]);
 
   function makeClient(s: AppSettings, url: string, deviceId: string): ApiClient {

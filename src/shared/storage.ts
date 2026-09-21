@@ -383,6 +383,13 @@ async function digestOf(password: string): Promise<string> {
   return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** Forgets the last fill. Part of locking: the digest is of a vault password. */
+export async function clearJustFilled(): Promise<void> {
+  if (hasSession) {
+    await chrome.storage.session.remove(JUST_FILLED_KEY);
+  }
+}
+
 /** Remembers a fill, so the submission that follows is not offered back. */
 export async function noteFilled(
   origin: string,
@@ -1130,12 +1137,50 @@ export async function cancelClipboardWipe(): Promise<void> {
  * their responsibility, since they alone hold it.
  */
 export async function lockVault(): Promise<void> {
+  const wasOpen = await hasStoredSession();
   await clearStoredSession();
   await clearPendingSave();
+  await clearJustFilled();
+  await clearPendingAssertion();
   await stopAutoLockWatch();
   await setSaveBadge(false);
   // The clipboard may hold a secret taken out of the vault: locking without
   // wiping it would leave outside what we have just put away. The alarm is
   // brought forward rather than cancelled.
-  await scheduleClipboardWipe(1);
+  //
+  // Only if there was a vault open to take a secret out of. Locking a vault
+  // already locked — every browser start-up does it, to reconcile alarms —
+  // has nothing to put away, and overwriting whatever the user had copied
+  // from another program thirty seconds after they opened the browser was a
+  // real loss for no gain.
+  if (wasOpen) {
+    await scheduleClipboardWipe(1);
+  }
+}
+
+/**
+ * Runs `callback` whenever the unlocked session is removed from storage.
+ *
+ * For the popup: the service worker locks on its own — the inactivity alarm,
+ * the lock screen, the keyboard shortcut, the options page — and a popup still
+ * open at that moment would otherwise keep its keys and its decrypted list, on
+ * a vault every other part of the extension believes locked.
+ *
+ * @returns A function that stops listening.
+ */
+export function onSessionCleared(callback: () => void): () => void {
+  if (typeof chrome === 'undefined' || typeof chrome.storage?.onChanged?.addListener !== 'function') {
+    return () => {};
+  }
+  const listener = (
+    changes: Record<string, { newValue?: unknown; oldValue?: unknown }>,
+    area: string,
+  ): void => {
+    const change = changes[SESSION_KEY];
+    if (area === 'session' && change !== undefined && change.newValue === undefined) {
+      callback();
+    }
+  };
+  chrome.storage.onChanged.addListener(listener);
+  return () => chrome.storage.onChanged.removeListener(listener);
 }

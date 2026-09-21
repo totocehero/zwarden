@@ -112,6 +112,39 @@ describe('the vault key lives apart from the session', () => {
     expect(store.data['session']).toBeUndefined();
   });
 
+  it('locks by purging every trace the unlocked state left', async () => {
+    const { lockVault, noteFilled, saveStoredSession, saveVaultKey } = await load();
+    await saveStoredSession(SESSION);
+    await saveVaultKey('dmF1bHQta2V5');
+    await noteFilled('https://bank.example', 'ada', 'K7#mQv2$Lz9!');
+    store.data['pendingAssertion'] = { id: 'x', ceremony: 'get', origin: 'https://a', options: {} };
+    store.data['pendingSave'] = { origin: 'https://a', host: 'a', username: 'u', password: 'p' };
+
+    await lockVault();
+
+    // The fill digest is a fast hash of a vault password; the two pending
+    // entries are what a page and a form left behind. None outlives the lock.
+    for (const key of ['session', 'vaultKey', 'justFilled', 'pendingAssertion', 'pendingSave']) {
+      expect(store.data[key], key).toBeUndefined();
+    }
+  });
+
+  it('wipes the clipboard on lock only if there was a vault open', async () => {
+    const alarms = { create: vi.fn(async () => {}), clear: vi.fn(async () => {}) };
+    (globalThis as unknown as { chrome: { alarms: unknown } }).chrome.alarms = alarms;
+    const { lockVault, saveStoredSession } = await load();
+
+    // Every browser start-up locks a vault that is already locked, to bring
+    // the alarms back in line. Nothing was taken out of it, so nothing is put
+    // away — and whatever the user had copied from another program stays.
+    await lockVault();
+    expect(alarms.create).not.toHaveBeenCalled();
+
+    await saveStoredSession(SESSION);
+    await lockVault();
+    expect(alarms.create).toHaveBeenCalledWith('zwarden-clipboard', expect.anything());
+  });
+
   it('reports no key when the vault is locked', async () => {
     const { loadVaultKey } = await load();
     expect(await loadVaultKey()).toBeNull();

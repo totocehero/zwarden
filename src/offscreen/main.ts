@@ -61,7 +61,14 @@ async function write(text: string): Promise<void> {
   buffer.value = '';
 }
 
-chrome.runtime.onMessage.addListener((message: unknown, _sender, respond) => {
+chrome.runtime.onMessage.addListener((message: unknown, sender, respond) => {
+  // Only the extension's own pages — the service worker, in practice. A
+  // content script is extension code too, but it runs inside a page that may
+  // be hostile, and this document writes whatever it is told into the
+  // clipboard: a message from a tab is refused before it is read.
+  if (sender.tab !== undefined) {
+    return false;
+  }
   const type =
     typeof message === 'object' && message !== null
       ? (message as { type?: unknown }).type

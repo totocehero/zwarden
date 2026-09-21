@@ -49,7 +49,7 @@
 import '@shared/browserApi.js';
 
 import { generatePassword } from '@core/generator/password.js';
-import { vaultMayAnswer } from '@core/vault/webauthnRequest.js';
+import { pageMayAsk, vaultMayAnswer } from '@core/vault/webauthnRequest.js';
 import { applyToolbarIcon, variantFor } from '@shared/theme.js';
 import {
   AUTOLOCK_ALARM_NAME,
@@ -393,8 +393,16 @@ chrome.runtime.onMessage.addListener((message: unknown, sender) => {
     void onCredentials(message as CredentialsMessage, sender);
   }
   // The popup's verdict on a passkey ceremony, on its way back to the page.
+  // From an extension page only: a content script runs inside a page, and a
+  // page must not be the one to say what a ceremony's answer is. The ceremony
+  // id is unguessable, so this is a second lock on the same door — but a lock
+  // that rests on the sender's identity rather than on a secret staying one.
   const body = message as { type?: unknown; id?: unknown; assertion?: unknown } | null;
-  if (body?.type === 'assertion-answer' && typeof body.id === 'string') {
+  if (
+    body?.type === 'assertion-answer' &&
+    typeof body.id === 'string' &&
+    sender.tab === undefined
+  ) {
     void answerAssertion(body.id, body.assertion);
   }
   // No async response expected: do not return `true`.
@@ -457,6 +465,9 @@ const PENDING_ASSERTION_KEY = 'pendingAssertion';
 
 /** How long a ceremony is held before it is let go. */
 const ASSERTION_TIMEOUT_MS = 90_000;
+
+/** How many ceremonies may wait at once. A sign-in opens one. */
+const MAX_WAITING_PAGES = 8;
 
 /**
  * Registers, or removes, the two halves of the passkey hook.
@@ -630,6 +641,25 @@ async function onAssertionRequest(
   const sender = port.sender;
   const origin = sender?.origin ?? (sender?.url === undefined ? null : originOf(sender.url));
   if (origin === null || typeof options !== 'object' || options === null) {
+    port.postMessage({ result: null });
+    return;
+  }
+
+  // Is this party the page's to ask about at all? Settled **before** the vault
+  // is consulted, because the answer below is observable from the page: an
+  // instant decline says "nothing for that party", a hold says the opposite.
+  // Left to the popup, that difference let any page enumerate the sites the
+  // user holds passkeys at, one `rpId` per question and no click needed.
+  if (!pageMayAsk(origin, options)) {
+    port.postMessage({ result: null });
+    return;
+  }
+
+  // A locked vault answers nothing, and a ceremony held for it would only
+  // light a badge over a question the popup will refuse. Same for a worker
+  // already holding more ceremonies than any page has a reason to open: past
+  // that, a page is not signing in, it is keeping the worker busy.
+  if (waitingPages.size >= MAX_WAITING_PAGES || !(await hasStoredSession())) {
     port.postMessage({ result: null });
     return;
   }

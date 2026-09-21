@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   mayClaimRelyingParty,
+  pageMayAsk,
   validateAssertionAsk,
   validateCreationAsk,
   vaultMayAnswer,
@@ -60,6 +61,15 @@ describe('mayClaimRelyingParty', () => {
     // Claiming `com` would be claiming every site under it.
     expect(mayClaimRelyingParty('bank.example', 'example')).toBe(false);
     expect(mayClaimRelyingParty('anything.com', 'com')).toBe(false);
+  });
+
+  it('refuses an address claiming a suffix of itself', () => {
+    // `1.2.3.4` is not "under" `3.4`: an address has no parent, and letting a
+    // page on one claim a suffix would let it claim a range of addresses.
+    expect(mayClaimRelyingParty('1.2.3.4', '3.4')).toBe(false);
+    expect(mayClaimRelyingParty('1.2.3.4', '2.3.4')).toBe(false);
+    expect(mayClaimRelyingParty('1.2.3.4', '1.2.3.4')).toBe(true);
+    expect(mayClaimRelyingParty('[::1]', '::1]')).toBe(false);
   });
 
   it('refuses localhost, which has no dot and no owner', () => {
@@ -245,6 +255,37 @@ describe('validateCreationAsk', () => {
  * hardware key, so most ceremonies would be ninety seconds of delay that
  * Zwarden added and nobody asked for.
  */
+describe('pageMayAsk', () => {
+  // The worker's early decline is observable from the page: answered at once
+  // means "nothing for that party", held means the opposite. So the question
+  // itself is refused whenever the party is not the page's own to claim —
+  // otherwise a page enumerates, one `rpId` per question, the sites the user
+  // holds passkeys at, with no click and no badge until the last one.
+  it('lets a page ask about itself, named or not', () => {
+    expect(pageMayAsk('https://login.bank.example', {})).toBe(true);
+    expect(pageMayAsk('https://login.bank.example', { rpId: 'bank.example' })).toBe(true);
+    expect(pageMayAsk('https://login.bank.example', { rpId: 'Login.Bank.Example' })).toBe(true);
+  });
+
+  it("refuses a question about somebody else's party", () => {
+    expect(pageMayAsk('https://evil.example', { rpId: 'bank.example' })).toBe(false);
+    expect(pageMayAsk('https://evil.example', { rpId: 'com' })).toBe(false);
+    expect(pageMayAsk('https://evil.example', { rpId: 'example' })).toBe(false);
+  });
+
+  it('refuses a page that is not https, or not a page', () => {
+    expect(pageMayAsk('http://bank.example', {})).toBe(false);
+    expect(pageMayAsk('null', {})).toBe(false);
+    expect(pageMayAsk('not a url', {})).toBe(false);
+  });
+
+  it('refuses a party that is not a string', () => {
+    expect(pageMayAsk('https://bank.example', { rpId: 42 })).toBe(false);
+    expect(pageMayAsk('https://bank.example', { rpId: ['bank.example'] })).toBe(false);
+    expect(pageMayAsk('https://bank.example', null)).toBe(false);
+  });
+});
+
 describe('vaultMayAnswer', () => {
   it('answers for a party the vault holds', () => {
     expect(vaultMayAnswer(['bank.example'], 'bank.example')).toBe(true);

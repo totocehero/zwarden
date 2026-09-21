@@ -105,9 +105,56 @@ export function mayClaimRelyingParty(host: string, rpId: string): boolean {
   if (host === rpId) {
     return true;
   }
+  // An IP address has no parent: `1.2.3.4` is not "under" `3.4`, and letting a
+  // page on one address claim a suffix of it would let it claim a range.
+  if (isIpLiteral(host)) {
+    return false;
+  }
   // A parent domain, and only on a label boundary: `evil-bank.example` must not
   // pass for `bank.example`, which a plain `endsWith` would allow.
   return host.endsWith(`.${rpId}`);
+}
+
+/** `true` for an IPv4 dotted quad or a bracketed IPv6 literal. */
+function isIpLiteral(host: string): boolean {
+  return /^\d+(\.\d+){3}$/.test(host) || host.startsWith('[');
+}
+
+/**
+ * Whether a page at `origin` may so much as **ask** about `options`.
+ *
+ * The same rule as {@link validateAssertionAsk}, reduced to a yes or no and
+ * applied in the service worker, before anything is looked up on the page's
+ * behalf. It matters because the worker's early decline is observable: a page
+ * that is answered at once learns the vault holds nothing for the party it
+ * named, and one that is held learns the opposite. Asked about a thousand
+ * parties, that is a list of the sites the user has passkeys at. Refusing the
+ * question itself, whenever the party is not the page's own to claim, leaves a
+ * page able to learn only what it is entitled to — whether the user has a
+ * passkey at **this** site.
+ *
+ * @param origin The page's origin, as the browser reported it.
+ * @param options The `publicKey` options, untrusted.
+ */
+export function pageMayAsk(origin: string, options: unknown): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol !== 'https:') {
+    return false;
+  }
+  if (typeof options !== 'object' || options === null) {
+    return false;
+  }
+  const host = parsed.hostname.toLowerCase();
+  const claimed = (options as { rpId?: unknown }).rpId;
+  if (claimed === undefined || claimed === null || claimed === '') {
+    return mayClaimRelyingParty(host, host);
+  }
+  return typeof claimed === 'string' && mayClaimRelyingParty(host, claimed.toLowerCase());
 }
 
 /** Decodes base64url, or whatever the page sent, into bytes. */
