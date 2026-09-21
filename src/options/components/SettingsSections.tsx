@@ -19,6 +19,9 @@ import {
 /** A partial settings change, raised to `App`. */
 export type PatchSettings = (patch: Partial<AppSettings>) => void;
 
+/** A switch being flipped: applied and written at once, without the button. */
+export type ToggleSetting = (patch: Partial<AppSettings>) => void;
+
 /** Values offered for auto-lock, in minutes. */
 const AUTOLOCK_CHOICES: ReadonlyArray<readonly [number, MessageKey]> = [
   [0, 'settingsAutoLockOnClose'],
@@ -137,10 +140,10 @@ export function InterfaceSection({
  */
 export function BreachSection({
   settings,
-  patch,
+  toggle,
 }: {
   settings: AppSettings;
-  patch: PatchSettings;
+  toggle: ToggleSetting;
 }) {
   return (
     <section>
@@ -150,7 +153,7 @@ export function BreachSection({
           <input
             type="checkbox"
             checked={settings.breachCheckEnabled}
-            onInput={(e) => patch({ breachCheckEnabled: e.currentTarget.checked })}
+            onInput={(e) => void toggle({ breachCheckEnabled: e.currentTarget.checked })}
           />
           {t('settingsBreachEnable')}
         </label>
@@ -170,10 +173,10 @@ export function BreachSection({
  */
 export function PasskeySection({
   settings,
-  patch,
+  toggle,
 }: {
   settings: AppSettings;
-  patch: PatchSettings;
+  toggle: ToggleSetting;
 }) {
   const [status, setStatus] = useState<PasskeyHookStatus | null>(null);
 
@@ -193,7 +196,7 @@ export function PasskeySection({
           <input
             type="checkbox"
             checked={settings.passkeySignIn}
-            onInput={(e) => patch({ passkeySignIn: e.currentTarget.checked })}
+            onInput={(e) => void toggle({ passkeySignIn: e.currentTarget.checked })}
           />
           {t('settingsPasskeyEnable')}
         </label>
@@ -227,9 +230,11 @@ export function PasskeySection({
 export function SecuritySection({
   settings,
   patch,
+  toggle,
 }: {
   settings: AppSettings;
   patch: PatchSettings;
+  toggle: ToggleSetting;
 }) {
   return (
     <section>
@@ -253,7 +258,7 @@ export function SecuritySection({
           <input
             type="checkbox"
             checked={settings.lockOnSystemLock}
-            onInput={(e) => patch({ lockOnSystemLock: e.currentTarget.checked })}
+            onInput={(e) => void toggle({ lockOnSystemLock: e.currentTarget.checked })}
           />
           {t('settingsLockOnSystemLock')}
         </label>
@@ -278,7 +283,7 @@ export function SecuritySection({
 }
 
 /** Offering to save an entered credential. */
-export function SaveSection({ settings, patch }: { settings: AppSettings; patch: PatchSettings }) {
+export function SaveSection({ settings, toggle }: { settings: AppSettings; toggle: ToggleSetting }) {
   return (
     <section>
       <h2>{t('settingsSaveSection')}</h2>
@@ -287,7 +292,7 @@ export function SaveSection({ settings, patch }: { settings: AppSettings; patch:
           <input
             type="checkbox"
             checked={settings.offerToSave}
-            onInput={(e) => patch({ offerToSave: e.currentTarget.checked })}
+            onInput={(e) => void toggle({ offerToSave: e.currentTarget.checked })}
           />
           {t('settingsOfferToSave')}
         </label>

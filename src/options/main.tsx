@@ -56,10 +56,14 @@ function App() {
           settings={s.settings}
           onLanguage={(locale) => void s.setLanguage(locale)}
         />
-        <SecuritySection settings={s.settings} patch={s.patch} />
-        <SaveSection settings={s.settings} patch={s.patch} />
-        <PasskeySection settings={s.settings} patch={s.patch} />
-        <BreachSection settings={s.settings} patch={s.patch} />
+        <SecuritySection
+          settings={s.settings}
+          patch={s.patch}
+          toggle={(f) => void s.toggle(f)}
+        />
+        <SaveSection settings={s.settings} toggle={(f) => void s.toggle(f)} />
+        <PasskeySection settings={s.settings} toggle={(f) => void s.toggle(f)} />
+        <BreachSection settings={s.settings} toggle={(f) => void s.toggle(f)} />
 
         <button type="submit">{t('actionSave')}</button>
         <p class="status">{s.status}</p>

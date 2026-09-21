@@ -38,6 +38,8 @@ export interface Settings {
   /** The current confirmation message, or the empty string. */
   readonly status: string;
   readonly patch: (field: Partial<AppSettings>) => void;
+  /** Flips a switch: applied and written at once, without the Save button. */
+  readonly toggle: (field: Partial<AppSettings>) => Promise<void>;
   /** Changes the interface language, applied and saved at once. */
   readonly setLanguage: (locale: string) => Promise<void>;
   readonly save: (event: Event) => Promise<void>;
@@ -72,6 +74,27 @@ export function useSettings(): Settings {
 
     patch(field) {
       setSettings((current) => ({ ...current, ...field }));
+    },
+
+    /**
+     * A switch acts when it is flipped; a field is saved when you are done
+     * typing. That distinction was missing, and it cost real time.
+     *
+     * Every checkbox here went through `patch`, which only changes what is on
+     * screen. Nothing reached storage until the Save button was pressed — and
+     * two of these switches do their work *through* that write: the service
+     * worker watches `chrome.storage.onChanged` and installs or removes the
+     * content scripts in response. So ticking "answer passkey sign-ins" and
+     * reloading the page looked exactly like a setting that refused to stick,
+     * and the feature it controls was never installed at all.
+     *
+     * A text field is different: writing on every keystroke would be a storage
+     * write per character, and half-typed values in between. Those keep the
+     * button.
+     */
+    async toggle(field) {
+      setSettings((current) => ({ ...current, ...field }));
+      await saveSettings(field);
     },
 
     /**
