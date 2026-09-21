@@ -90,7 +90,8 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
 - [x] Un paquet Firefox à côté de celui pour Chrome — même code, un manifeste
       transformé pour lui, et les deux différences nommées plutôt que
       découvertes : il se charge temporairement, et l'effacement différé du
-      presse-papiers est propre à Chrome
+      presse-papiers est propre à Chrome. Tout le reste, passkeys comprises, a
+      été éprouvé sur les deux
 - [x] La langue et le thème du navigateur suivis — `chrome.i18n` et une icône de
       barre d'outils qui s'inverse sur fond clair
 - [x] Une langue que l'utilisateur peut choisir, à rebours d'une API qui ne le
@@ -130,7 +131,8 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
       montre la popup sont les vingt déchiffrées avant qu'elle ne dessine. Un
       coffre de 500 éléments avec une clé propre à chacun coûte ~650 ms à
       déchiffrer en entier ; la liste ne l'attend plus
-- [x] Passkeys : **créer et utiliser** celles du coffre. Le site qu'une page a le
+- [x] Passkeys : **créer et utiliser** celles du coffre, sur Chrome, Edge et
+      Firefox. Le site qu'une page a le
       droit de réclamer est vérifié ici, puisque intercepter
       `navigator.credentials.get()` retire cette vérification au navigateur.
       Désactivé par défaut — c'est la seule fonctionnalité qui place du code
@@ -148,7 +150,9 @@ Aucune compilation nécessaire. Chaque version publiée embarque l'extension
 déjà construite.
 
 1. **Téléchargez** `zwarden-<version>-chrome.zip` depuis les
-   [Releases](https://github.com/totocehero/zwarden/releases).
+   [Releases](https://github.com/totocehero/zwarden/releases). Chaque version
+   publiée porte deux archives, une par navigateur ; celle-ci est pour Chrome
+   et Edge.
 2. **Décompressez-le dans un dossier permanent** — vos Documents, pas
    Téléchargements. Chrome recharge une extension non empaquetée *depuis ce
    dossier, à chaque démarrage* : le déplacer ou le supprimer fait disparaître

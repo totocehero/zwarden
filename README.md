@@ -81,7 +81,7 @@ The cryptographic core is implemented and tested. The rest is in progress.
 - [x] A Firefox package alongside the Chrome one — same code, a manifest
       transformed for it, and the two differences named rather than left to be
       met: it loads temporarily, and the deferred clipboard wipe is Chrome's
-      alone
+      alone. Everything else, passkeys included, has been used on both
 - [x] The browser's language and theme followed — `chrome.i18n` and a toolbar
       icon that inverts against a light background
 - [x] A language the user can choose, against the grain of an API that offers
@@ -118,7 +118,8 @@ The cryptographic core is implemented and tested. The rest is in progress.
       are the twenty decrypted before it draws. A vault of 500 items with a key
       of its own per item costs ~650 ms to decrypt whole; the list no longer
       waits for it
-- [x] Passkeys: **creating and using** them from the vault. The relying party a page
+- [x] Passkeys: **creating and using** them from the vault, on Chrome, Edge
+      and Firefox. The relying party a page
       may claim is enforced here, because intercepting
       `navigator.credentials.get()` takes that enforcement away from the
       browser. Off by default — it is the one feature that puts code in every
@@ -134,7 +135,8 @@ The cryptographic core is implemented and tested. The rest is in progress.
 No build needed. Each release carries the extension already built.
 
 1. **Download** `zwarden-<version>-chrome.zip` from
-   [Releases](https://github.com/totocehero/zwarden/releases).
+   [Releases](https://github.com/totocehero/zwarden/releases). Each release
+   carries two archives, one per browser; this is the Chrome and Edge one.
 2. **Unzip it somewhere permanent** — your Documents folder, not Downloads.
    Chrome loads an unpacked extension *from that folder, every time it
    starts*: move or delete it and the extension disappears.
