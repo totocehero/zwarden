@@ -664,3 +664,50 @@ describe('selectCredentials, against a real allowCredentials list', () => {
     );
   });
 });
+
+/**
+ * What the site is handed back as the credential's identifier.
+ *
+ * A vault may store it as a UUID; a site understands only bytes, base64url.
+ * Handing the stored spelling straight through gives the page sixteen bytes
+ * of nothing once it decodes it, a `rawId` that names no credential, and a
+ * relying party that refuses the assertion — reporting it, as Gandi did, as
+ * its own service being unavailable.
+ */
+describe('the identifier an assertion carries', () => {
+  const request = {
+    rpId: 'example.org',
+    origin: 'https://example.org',
+    challenge: new Uint8Array([1, 2, 3, 4]),
+    userVerified: true,
+  };
+
+  it('converts a UUID to the bytes the site expects', async () => {
+    const assertion = await signAssertion(
+      { ...credential, credentialId: '0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0' },
+      request,
+    );
+
+    expect(assertion.credentialId).toBe('Dx4tPEtaaXiHlqW0w9Lh8A');
+    // And the round trip holds: what the site gets decodes back to what the
+    // vault holds.
+    expect(credentialIdMatches('0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0', assertion.credentialId)).toBe(
+      true,
+    );
+  });
+
+  it('leaves an identifier already written as bytes alone', async () => {
+    const assertion = await signAssertion(
+      { ...credential, credentialId: 'Dx4tPEtaaXiHlqW0w9Lh8A' },
+      request,
+    );
+    expect(assertion.credentialId).toBe('Dx4tPEtaaXiHlqW0w9Lh8A');
+  });
+
+  it('refuses to sign with an identifier it cannot read', async () => {
+    // Better a refusal here than a signature the site cannot attribute.
+    await expect(
+      signAssertion({ ...credential, credentialId: '' }, request),
+    ).rejects.toThrow(RangeError);
+  });
+});

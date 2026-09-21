@@ -61,6 +61,16 @@ export interface AssertionRequest {
 
 /** The pieces a page needs to complete `navigator.credentials.get()`. */
 export interface Assertion {
+  /**
+   * The credential's identifier **as the site understands it**: base64url of
+   * its bytes, never the spelling the vault happens to store.
+   *
+   * A vault may write it as a UUID. Handing that text to a page which decodes
+   * it as base64url yields sixteen bytes of nothing, a `rawId` that names no
+   * credential, and a relying party that refuses the assertion — with a
+   * message about its own service being unavailable, since from its side
+   * nothing else makes sense.
+   */
   readonly credentialId: string;
   readonly clientDataJSON: string;
   readonly authenticatorData: Uint8Array;
@@ -465,8 +475,14 @@ export async function signAssertion(
     ),
   );
 
+  const identifier = credentialIdBytes(credential.credentialId);
+  if (identifier === null) {
+    throw new RangeError(`Unreadable credential identifier: ${credential.credentialId}`);
+  }
+
   return {
-    credentialId: credential.credentialId,
+    // Converted, not passed through: see {@link Assertion.credentialId}.
+    credentialId: toBase64Url(identifier),
     clientDataJSON,
     authenticatorData,
     signature: derFromRawSignature(raw),
