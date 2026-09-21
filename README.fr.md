@@ -41,7 +41,7 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
 - [x] `SymmetricCryptoKey` — clés de 32/64 octets
 - [x] AES-256-CBC + HMAC-SHA256, encrypt-then-MAC
 - [x] Dérivation de clé : PBKDF2-SHA256 et Argon2id
-- [x] 704 tests, dont les vecteurs des RFC 4231 / 5869 / 6238 / 7914
+- [x] 709 tests, dont les vecteurs des RFC 4231 / 5869 / 6238 / 7914
 - [x] **Interopérabilité validée contre Vaultwarden 2026.6.0** —
       authentification, déchiffrement de la clé de coffre, et un aller-retour
       complet d'écriture/lecture
@@ -87,6 +87,10 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
       copié en chiffres nus, le nom complet et l'adresse postale composés et
       copiés d'un geste, les papiers masqués, et la liste affichant
       `Visa •••• 4242` sans jamais détenir de numéro débitable
+- [x] Un paquet Firefox à côté de celui pour Chrome — même code, un manifeste
+      transformé pour lui, et les deux différences nommées plutôt que
+      découvertes : il se charge temporairement, et l'effacement différé du
+      presse-papiers est propre à Chrome
 - [x] La langue et le thème du navigateur suivis — `chrome.i18n` et une icône de
       barre d'outils qui s'inverse sur fond clair
 - [x] Une langue que l'utilisateur peut choisir, à rebours d'une API qui ne le
@@ -143,7 +147,7 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
 Aucune compilation nécessaire. Chaque version publiée embarque l'extension
 déjà construite.
 
-1. **Téléchargez** `zwarden-<version>.zip` depuis les
+1. **Téléchargez** `zwarden-<version>-chrome.zip` depuis les
    [Releases](https://github.com/totocehero/zwarden/releases).
 2. **Décompressez-le dans un dossier permanent** — vos Documents, pas
    Téléchargements. Chrome recharge une extension non empaquetée *depuis ce
@@ -165,11 +169,21 @@ même dossier, puis cliquez la flèche de rechargement sur la carte de Zwarden
 dans `chrome://extensions`. Vos réglages et votre session vivent dans le profil
 du navigateur, pas dans ce dossier, et survivent.
 
-**Firefox n'est pas encore pris en charge.** Le manifeste déclare un service
-worker comme arrière-plan, ce que Chrome et Edge acceptent et que Firefox
-refuse — il lui faut une page d'événements. C'est une cible de construction à
-ajouter, pas un réglage à changer, et d'ici là le zip refusera simplement de
-s'y charger.
+**Firefox 128 ou plus récent** — prenez `zwarden-<version>-firefox.zip`, puis
+`about:debugging#/runtime/this-firefox`, *Charger un module temporaire*, et
+choisissez le `manifest.json` dans le dossier décompressé. Deux choses y
+diffèrent, et les deux tiennent au navigateur, pas à un raccourci pris ici :
+
+- c'est **temporaire**. Firefox oublie une extension chargée de côté quand il
+  se ferme, et il faut la recharger. La signer réglerait ça, et signer veut
+  dire la soumettre à Mozilla, ce qui est une autre décision que publier la
+  source ;
+- **l'effacement différé du presse-papiers est propre à Chrome**. Il repose sur
+  un document offscreen, dont Firefox n'a pas d'équivalent. Le presse-papiers
+  est tout de même effacé — pendant que le popup vit, pas après sa fermeture.
+
+Tout le reste est le même code : les deux paquets ne diffèrent que par leur
+manifeste, ce que `tests/firefoxBuild.test.ts` vérifie fichier par fichier.
 
 `dist/` n'est volontairement pas commité : un artefact de construction dans git
 rend chaque commit bruyant et invite un `dist/` qui diverge en silence de la
@@ -236,7 +250,7 @@ donc interopérables dans les deux sens :
 
 ```bash
 npm install
-npm test          # 704 tests
+npm test          # 709 tests
 npm run typecheck # TypeScript strict
 npm run lint      # ESLint : promesses perdues, comparaisons laxistes
 npm run build

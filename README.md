@@ -40,7 +40,7 @@ The cryptographic core is implemented and tested. The rest is in progress.
 - [x] `SymmetricCryptoKey` — 32/64-byte keys
 - [x] AES-256-CBC + HMAC-SHA256, encrypt-then-MAC
 - [x] Key derivation: PBKDF2-SHA256 and Argon2id
-- [x] 704 tests, including the RFC 4231 / 5869 / 6238 / 7914 vectors
+- [x] 709 tests, including the RFC 4231 / 5869 / 6238 / 7914 vectors
 - [x] **Interoperability validated against Vaultwarden 2026.6.0** —
       authentication, vault key decryption, and a complete write/read round trip
 - [x] API client: prelogin, authentication, session refresh, sync, item creation
@@ -78,6 +78,10 @@ The cryptographic core is implemented and tested. The rest is in progress.
       the full name and the postal address composed and copied in one gesture,
       the papers masked, and the list showing `Visa •••• 4242` without ever
       holding a chargeable number
+- [x] A Firefox package alongside the Chrome one — same code, a manifest
+      transformed for it, and the two differences named rather than left to be
+      met: it loads temporarily, and the deferred clipboard wipe is Chrome's
+      alone
 - [x] The browser's language and theme followed — `chrome.i18n` and a toolbar
       icon that inverts against a light background
 - [x] A language the user can choose, against the grain of an API that offers
@@ -129,7 +133,7 @@ The cryptographic core is implemented and tested. The rest is in progress.
 
 No build needed. Each release carries the extension already built.
 
-1. **Download** `zwarden-<version>.zip` from
+1. **Download** `zwarden-<version>-chrome.zip` from
    [Releases](https://github.com/totocehero/zwarden/releases).
 2. **Unzip it somewhere permanent** — your Documents folder, not Downloads.
    Chrome loads an unpacked extension *from that folder, every time it
@@ -149,10 +153,21 @@ does not disable anything.
 the reload arrow on Zwarden's card in `chrome://extensions`. Your settings and
 your session live in the browser profile, not in that folder, and survive.
 
-**Firefox is not supported yet.** The manifest declares a service worker for
-its background, which Chrome and Edge accept and Firefox does not — it wants
-an event page instead. That is a build target to add, not a setting to change,
-and until it exists the zip will simply refuse to load there.
+**Firefox 128 or later** — take `zwarden-<version>-firefox.zip` instead, then
+`about:debugging#/runtime/this-firefox`, *Load Temporary Add-on*, and choose
+the `manifest.json` inside the unzipped folder. Two things differ there, and
+both are the browser's doing rather than a shortcut taken here:
+
+- it is **temporary**. Firefox forgets a side-loaded extension when it closes,
+  and it has to be loaded again. Signing it would fix that, and signing means
+  submitting it to Mozilla, which is a different decision from publishing the
+  source;
+- the **deferred clipboard wipe is Chrome-only**. It relies on an offscreen
+  document, which Firefox has no equivalent for. The clipboard is still wiped —
+  just while the popup is alive, not after it has closed.
+
+Everything else is the same code: the two packages differ by their manifest
+and nothing else, which `tests/firefoxBuild.test.ts` checks file by file.
 
 `dist/` is deliberately not committed to this repository: a build artefact in
 git makes every commit noisy and invites a `dist/` that quietly disagrees with
@@ -218,7 +233,7 @@ in both directions:
 
 ```bash
 npm install
-npm test          # 704 tests
+npm test          # 709 tests
 npm run typecheck # strict TypeScript
 npm run lint      # ESLint: lost promises, loose comparisons
 npm run build

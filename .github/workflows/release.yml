@@ -35,35 +35,43 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run size
+      - run: npm run build:firefox
 
-      - name: Pack dist/
+      - name: Pack both packages
         run: |
           version=$(node -p "require('./package.json').version")
-          name="zwarden-${GITHUB_REF_NAME#v}"
-          [ "$GITHUB_REF_TYPE" = tag ] || name="zwarden-${version}-$(git rev-parse --short HEAD)"
-          cd dist && zip -qr "../${name}.zip" . && cd ..
-          echo "ARCHIVE=${name}.zip" >> "$GITHUB_ENV"
-          ls -l "${name}.zip"
+          base="zwarden-${GITHUB_REF_NAME#v}"
+          [ "$GITHUB_REF_TYPE" = tag ] || base="zwarden-${version}-$(git rev-parse --short HEAD)"
+          (cd dist && zip -qr "../${base}-chrome.zip" .)
+          (cd dist-firefox && zip -qr "../${base}-firefox.zip" .)
+          echo "BASE=${base}" >> "$GITHUB_ENV"
+          ls -l "${base}"-*.zip
 
       # For a hand-run build: downloadable from the run itself.
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ARCHIVE }}
-          path: ${{ env.ARCHIVE }}
+          name: ${{ env.BASE }}
+          path: ${{ env.BASE }}-*.zip
 
       - name: Attach it to the release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.ARCHIVE }}
+          files: ${{ env.BASE }}-*.zip
           body: |
-            **Chrome / Edge.** Unzip somewhere permanent — the browser reloads
-            it from that folder at every start-up — then `chrome://extensions`,
-            turn on Developer mode, *Load unpacked*, and choose the folder
-            containing `manifest.json`.
+            Two packages, same code, different manifests.
 
-            **Firefox** cannot load this yet: the background is declared as a
-            service worker, which it does not accept.
+            **Chrome / Edge** — `…-chrome.zip`. Unzip somewhere permanent, the
+            browser reloads it from that folder at every start-up. Then
+            `chrome://extensions`, Developer mode, *Load unpacked*, choose the
+            folder holding `manifest.json`.
+
+            **Firefox 128+** — `…-firefox.zip`. `about:debugging#/runtime/this-firefox`,
+            *Load Temporary Add-on*, choose the `manifest.json` inside. It is
+            temporary: Firefox forgets it when it closes. The deferred
+            clipboard wipe is Chrome-only, since Firefox has no offscreen
+            documents — the wipe still happens, just not after the popup has
+            gone.
 
             Built by this workflow from the tagged commit, after the same
             checks CI runs. See the README for updating.

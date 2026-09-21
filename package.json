@@ -15,7 +15,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests",
-    "size": "node scripts/check-size.mjs && node scripts/check-content-scripts.mjs"
+    "size": "node scripts/check-size.mjs && node scripts/check-content-scripts.mjs",
+    "build:firefox": "npm run build && node scripts/build-firefox.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.287",
