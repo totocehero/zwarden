@@ -21,6 +21,7 @@ import {
 } from '../src/core/crypto/cryptoService.js';
 import {
   HashPurpose,
+  KdfDowngradeError,
   KdfType,
   WeakKdfError,
   deriveMasterKey,
@@ -41,7 +42,14 @@ import {
   resolveItemKey,
   reuseByRevision,
 } from '../src/core/vault/cipherService.js';
-import { MissingOrgKeyError, buildVaultKeys } from '../src/core/vault/keyring.js';
+import {
+  MissingOrgKeyError,
+  OrgKeyRefusedError,
+  buildVaultKeys,
+  fingerprintKey,
+  reconcilePins,
+  withoutOrganisations,
+} from '../src/core/vault/keyring.js';
 import { decryptLabels } from '../src/core/vault/labels.js';
 import { matchesOrigin, uriOrigin } from '../src/core/vault/uriMatch.js';
 import { UnlockError, unlock } from '../src/core/vault/session.js';
@@ -538,6 +546,33 @@ describe('organisation keyring', () => {
     expect((errors[0] as MissingOrgKeyError).organizationId).toBe('org-unknown');
   });
 
+  it('refuses an organisation key that is not 64 bytes', async () => {
+    // A 32-byte key would make the unauthenticated legacy path reachable for
+    // that organisation's items — the downgrade refusal rests on key length.
+    const pair = await crypto.subtle.generateKey(
+      { name: 'RSA-OAEP', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-1' },
+      true,
+      ['encrypt', 'decrypt'],
+    );
+    const pkcs8 = new Uint8Array(await crypto.subtle.exportKey('pkcs8', pair.privateKey));
+    const short = crypto.getRandomValues(new Uint8Array(32));
+    const wrapped = new Uint8Array(
+      await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, pair.publicKey, short),
+    );
+    const shortProfile: SyncResponse['profile'] = {
+      privateKey: (await encryptBytes(pkcs8, userKey)).toString(),
+      organizations: [{ id: 'org-short', key: `4.${toBase64(wrapped)}` }],
+    };
+
+    const errors: unknown[] = [];
+    const keys = await buildVaultKeys(shortProfile, userKey, (e) => errors.push(e));
+
+    expect(keys.orgKeys.size).toBe(0);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(OrgKeyRefusedError);
+    expect((errors[0] as OrgKeyRefusedError).reason).toBe('length');
+  });
+
   it('a profile with no organisation never touches RSA', async () => {
     const errors: unknown[] = [];
     const keys = await buildVaultKeys({}, userKey, (e) => errors.push(e));
@@ -558,6 +593,72 @@ describe('organisation keyring', () => {
     const keys = await buildVaultKeys(brokenProfile, userKey, (e) => errors.push(e));
     expect(keys.orgKeys.size).toBe(0);
     expect(errors).toHaveLength(1);
+  });
+});
+
+describe('organisation key pins', () => {
+  it('fingerprints a key stably and tells two keys apart', async () => {
+    const a = SymmetricCryptoKey.generate();
+    const b = SymmetricCryptoKey.generate();
+    expect(await fingerprintKey(a)).toBe(await fingerprintKey(a));
+    expect(await fingerprintKey(a)).not.toBe(await fingerprintKey(b));
+    // A digest, not the key: 64 hex characters, and not the key's own base64.
+    expect(await fingerprintKey(a)).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('pins what it sees for the first time', () => {
+    const out = reconcilePins({}, new Map([['org-1', 'f1']]));
+    expect(out.pins).toEqual({ 'org-1': 'f1' });
+    expect(out.firstSeen).toEqual(['org-1']);
+    expect(out.refused).toEqual([]);
+  });
+
+  it('accepts a key it has seen, in silence', () => {
+    const out = reconcilePins({ 'org-1': 'f1' }, new Map([['org-1', 'f1']]));
+    expect(out.firstSeen).toEqual([]);
+    expect(out.refused).toEqual([]);
+    expect(out.pins).toEqual({ 'org-1': 'f1' });
+  });
+
+  it('refuses a key that changed, and keeps the old pin', () => {
+    // The attack: the server swaps a real organisation's key for one it knows.
+    // Keys are not rotated in this format; a changed key is a substituted one.
+    const out = reconcilePins({ 'org-1': 'f1' }, new Map([['org-1', 'f2']]));
+    expect(out.refused).toEqual(['org-1']);
+    expect(out.pins).toEqual({ 'org-1': 'f1' });
+  });
+
+  it('keeps the pin of an organisation that is gone', () => {
+    // Removed and brought back with a new key is exactly the case a pin is for.
+    const out = reconcilePins({ 'org-1': 'f1' }, new Map());
+    expect(out.pins).toEqual({ 'org-1': 'f1' });
+  });
+
+  it('is not fooled by a prototype property as an organisation id', () => {
+    const out = reconcilePins({}, new Map([['constructor', 'f1']]));
+    expect(out.firstSeen).toEqual(['constructor']);
+    expect(out.refused).toEqual([]);
+  });
+
+  it('drops a refused organisation from the ring and destroys its key', () => {
+    const userKey = SymmetricCryptoKey.generate();
+    const refusedKey = SymmetricCryptoKey.generate();
+    const keptKey = SymmetricCryptoKey.generate();
+    const ring = {
+      userKey,
+      orgKeys: new Map([
+        ['org-bad', refusedKey],
+        ['org-ok', keptKey],
+      ]),
+    };
+
+    const out = withoutOrganisations(ring, ['org-bad']);
+
+    expect([...out.orgKeys.keys()]).toEqual(['org-ok']);
+    expect(refusedKey.key.every((b) => b === 0)).toBe(true);
+    expect(keptKey.key.every((b) => b === 0)).toBe(false);
+    // Nothing to drop: the same ring comes back, untouched.
+    expect(withoutOrganisations(ring, [])).toBe(ring);
   });
 });
 
@@ -846,6 +947,30 @@ describe('unlock (the unlock orchestrator)', () => {
     // Only prelogin was called: no hash was computed nor sent.
     expect(calls).toHaveLength(1);
     expect(calls[0]).toContain('/prelogin');
+  });
+
+  it('refuses KDF parameters weaker than the ones remembered, before any hash is sent', async () => {
+    // The floors let 100,000 through. A server that took this account there
+    // from 600,000 would have made the authorization hash six times cheaper to
+    // crack, and nothing on screen would have said so.
+    const calls: string[] = [];
+    const remembered: KdfConfig = { type: KdfType.PBKDF2_SHA256, iterations: 600_000 };
+    const erreur = await unlock(
+      makeClient(fakeServer({ calls })),
+      EMAIL,
+      PASSWORD,
+      undefined,
+      remembered,
+    ).catch((e: unknown) => e);
+
+    expect(erreur).toBeInstanceOf(KdfDowngradeError);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain('/prelogin');
+  });
+
+  it('unlocks as before when the remembered parameters are the same or weaker', async () => {
+    const result = await unlock(makeClient(fakeServer()), EMAIL, PASSWORD, undefined, KDF_CONFIG);
+    expect(result.userKey.toBase64()).toBe(userKey.toBase64());
   });
 
   it('surfaces the second-factor demand with its providers', async () => {

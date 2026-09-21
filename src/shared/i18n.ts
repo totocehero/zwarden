@@ -279,6 +279,7 @@ export const MESSAGE_KEYS = [
   'exportRun',
   'exportWorking',
   'exportDone',
+  'exportUnreadable',
   'exportAlgorithm',
 
   // Vault health
@@ -338,6 +339,7 @@ export const MESSAGE_KEYS = [
   'errorSessionNoRefresh',
   'errorItemNotFound',
   'errorTabMismatch',
+  'errorKdfDowngrade',
 
   // Settings — server
   'settingsServerSection',
@@ -383,6 +385,7 @@ export const MESSAGE_KEYS = [
   'settingsForgetTwoFa',
   'settingsRestoreExcluded',
   'settingsForgetOrdering',
+  'settingsForgetPins',
   'settingsDeviceSection',
   'settingsDeviceIdLabel',
   'settingsRegenerateDevice',
@@ -397,6 +400,8 @@ export const MESSAGE_KEYS = [
   'settingsNoExcluded',
   'settingsExcludedRestored',
   'settingsOrderingForgotten',
+  'settingsNoPins',
+  'settingsPinsForgotten',
   'settingsDeviceRegenerated',
 ] as const;
 

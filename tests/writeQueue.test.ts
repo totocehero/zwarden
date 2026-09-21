@@ -20,7 +20,6 @@ function entry(patch: Partial<QueuedWrite> = {}): QueuedWrite {
     payload: { name: '2.aXY=|Y2lwaGVy|bWFj' },
     baseRevision: '2026-09-01T10:00:00Z',
     queuedAt: 1_000,
-    label: 'My bank',
     ...patch,
   };
 }
@@ -43,7 +42,7 @@ describe('the held-writes queue', () => {
 
     const queue = await loadWriteQueue();
     expect(queue).toHaveLength(1);
-    expect(queue[0]!.label).toBe('My bank');
+    expect(queue[0]!.cipherId).toBe('item-1');
   });
 
   it('stores only what was already encrypted', async () => {

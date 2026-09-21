@@ -5,6 +5,7 @@ import {
   KdfType,
   WeakKdfError,
   assertKdfIsAcceptable,
+  isWeakerKdf,
   HashPurpose,
   derivePasswordHash,
   deriveMasterKey,
@@ -17,6 +18,30 @@ import { decryptString, encryptString } from '../src/core/crypto/cryptoService.j
 const PBKDF2: KdfConfig = { type: KdfType.PBKDF2_SHA256, iterations: 600_000 };
 /** A lighter configuration: we test the mechanism, not the resistance. */
 const PBKDF2_FAST: KdfConfig = { type: KdfType.PBKDF2_SHA256, iterations: 100_000 };
+
+describe('KDF downgrade detection (isWeakerKdf)', () => {
+  const ARGON: KdfConfig = { type: KdfType.Argon2id, ...ARGON2_DEFAULTS };
+
+  it('reads fewer PBKDF2 iterations as weaker, and the same or more as not', () => {
+    expect(isWeakerKdf(PBKDF2_FAST, PBKDF2)).toBe(true);
+    expect(isWeakerKdf(PBKDF2, PBKDF2)).toBe(false);
+    expect(isWeakerKdf(PBKDF2, PBKDF2_FAST)).toBe(false);
+  });
+
+  it('reads any Argon2id parameter lowered as weaker, whatever the others do', () => {
+    expect(isWeakerKdf({ ...ARGON, iterations: 2 }, ARGON)).toBe(true);
+    expect(isWeakerKdf({ ...ARGON, memoryMiB: 32, iterations: 10 }, ARGON)).toBe(true);
+    expect(isWeakerKdf({ ...ARGON, parallelism: 1 }, ARGON)).toBe(true);
+    expect(isWeakerKdf({ ...ARGON, memoryMiB: 128 }, ARGON)).toBe(false);
+  });
+
+  it('reads Argon2id → PBKDF2 as weaker, and the other way round as not', () => {
+    // The two work factors do not compare; the change of algorithm is read the
+    // one way it is dangerous.
+    expect(isWeakerKdf(PBKDF2, ARGON)).toBe(true);
+    expect(isWeakerKdf(ARGON, PBKDF2)).toBe(false);
+  });
+});
 
 describe('KDF parameter validation', () => {
   it('accepts PBKDF2 at the recommended values', () => {

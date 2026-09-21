@@ -135,6 +135,45 @@ export class WeakKdfError extends Error {
 }
 
 /**
+ * Thrown when the server announces KDF parameters weaker than the ones this
+ * device accepted for the same account before.
+ *
+ * The floors in {@link assertKdfIsAcceptable} are the only line a hostile
+ * server cannot cross; between them and the account's real setting lies room
+ * to make the authorization hash several times cheaper to crack, and a
+ * compromised server would take it without the user noticing. Remembering what
+ * was accepted turns that room into a refusal.
+ */
+export class KdfDowngradeError extends Error {
+  override readonly name = 'KdfDowngradeError';
+  readonly code = 'kdf-downgrade';
+}
+
+/**
+ * Whether `next` costs an attacker less than `previous` did.
+ *
+ * Comparing work factors across the two algorithms is not meaningful, so a
+ * change of algorithm is read the one way it is dangerous: Argon2id to PBKDF2
+ * is weaker, PBKDF2 to Argon2id is not — nobody attacks their own account by
+ * moving to the memory-hard function. Within one algorithm, any parameter
+ * lowered is weaker; the rest raised does not make up for it, because the
+ * cheapest path is the one that counts.
+ */
+export function isWeakerKdf(next: KdfConfig, previous: KdfConfig): boolean {
+  if (next.type !== previous.type) {
+    return next.type === KdfType.PBKDF2_SHA256;
+  }
+  if (next.type === KdfType.PBKDF2_SHA256 || previous.type === KdfType.PBKDF2_SHA256) {
+    return next.iterations < previous.iterations;
+  }
+  return (
+    next.iterations < previous.iterations ||
+    next.memoryMiB < previous.memoryMiB ||
+    next.parallelism < previous.parallelism
+  );
+}
+
+/**
  * Validates a server-announced KDF parameter: safe integer, within [min, max].
  *
  * @throws {WeakKdfError} With a message fitted to the case encountered.

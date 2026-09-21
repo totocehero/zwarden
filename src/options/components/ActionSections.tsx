@@ -13,11 +13,13 @@ export function ActionsSection({
   onForgetTwoFa,
   onForgetNeverSave,
   onForgetLastUsed,
+  onForgetPins,
 }: {
   onLockNow: () => void;
   onForgetTwoFa: () => void;
   onForgetNeverSave: () => void;
   onForgetLastUsed: () => void;
+  onForgetPins: () => void;
 }) {
   return (
     <section>
@@ -34,6 +36,9 @@ export function ActionsSection({
         </button>
         <button class="secondary" onClick={onForgetLastUsed}>
           {t('settingsForgetOrdering')}
+        </button>
+        <button class="secondary" onClick={onForgetPins}>
+          {t('settingsForgetPins')}
         </button>
       </div>
     </section>

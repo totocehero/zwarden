@@ -566,6 +566,9 @@
   "exportDone": {
     "message": "$1 élément(s) exportés."
   },
+  "exportUnreadable": {
+    "message": "$1 champ(s) n’ont pu être déchiffrés. Rien n’a été exporté : une sauvegarde à trous aurait l’air complète. Voir le rapport du coffre."
+  },
   "exportAlgorithm": {
     "message": "Argon2id puis AES-256-GCM. Les paramètres voyagent en clair dans le fichier et sont authentifiés avec lui : les abaisser fait refuser l’ouverture, pas ouvrir plus faible."
   },
@@ -719,6 +722,9 @@
   "errorTabMismatch": {
     "message": "L’onglet actif ne correspond plus à cet item."
   },
+  "errorKdfDowngrade": {
+    "message": "Le serveur annonce des paramètres de dérivation plus faibles que ceux acceptés sur cet appareil. Refusé. Si vous les avez abaissés vous-même, oubliez les paramètres serveur mémorisés dans les réglages."
+  },
   "settingsServerSection": {
     "message": "Serveur"
   },
@@ -824,6 +830,9 @@
   "settingsForgetOrdering": {
     "message": "Oublier le classement d’usage"
   },
+  "settingsForgetPins": {
+    "message": "Oublier les paramètres serveur mémorisés"
+  },
   "settingsDeviceSection": {
     "message": "Appareil"
   },
@@ -859,6 +868,12 @@
   },
   "settingsOrderingForgotten": {
     "message": "Classement d’usage oublié — la liste reprend l’ordre du serveur."
+  },
+  "settingsNoPins": {
+    "message": "Rien de mémorisé."
+  },
+  "settingsPinsForgotten": {
+    "message": "$1 paramètre(s) mémorisé(s) oublié(s) — le prochain déverrouillage accepte ce que le serveur annonce, et le retient."
   },
   "settingsDeviceRegenerated": {
     "message": "Identifiant régénéré."

@@ -91,6 +91,7 @@ import {
   reuseByRevision,
   sortCiphersByLastUsed,
 } from '@core/vault/cipherService.js';
+import { KdfDowngradeError } from '@core/crypto/kdf.js';
 import { buildVaultKeys, destroyVaultKeys } from '@core/vault/keyring.js';
 import { type VaultLabels, decryptLabels } from '@core/vault/labels.js';
 import { matchesOrigin } from '@core/vault/uriMatch.js';
@@ -109,6 +110,8 @@ import {
   loadLastUsed,
   loadPendingSave,
   noteFilled,
+  loadNewOrganisations,
+  loadPinnedKdf,
   loadRememberToken,
   loadSettings,
   loadStoredSession,
@@ -118,6 +121,8 @@ import {
   markUsed,
   recordActivity,
   setSaveBadge,
+  pinOrganisationKeys,
+  savePinnedKdf,
   saveRememberToken,
   saveSettings,
   saveStoredSession,
@@ -221,7 +226,14 @@ async function activeWebTab(): Promise<{ tabId: number; url: URL } | null> {
  * never an automatic submission.
  */
 function fillCredentials(username: string, password: string): void {
-  const visible = (el: HTMLElement): boolean => el.getClientRects().length > 0;
+  // Visible means painted and not made transparent: `getClientRects()` alone
+  // let through `opacity: 0` and `visibility: hidden`, the two ways a field is
+  // hidden without leaving the layout. `checkVisibility` is Chrome 105+, and
+  // the manifest asks for 120.
+  const visible = (el: HTMLElement): boolean =>
+    el.getClientRects().length > 0 &&
+    (typeof el.checkVisibility !== 'function' ||
+      el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
   const setValue = (input: HTMLInputElement, value: string): void => {
     // Go through the prototype's native setter, so that frameworks intercepting
     // `value` (React and friends) actually see the change.
@@ -234,20 +246,33 @@ function fillCredentials(username: string, password: string): void {
   const passwordInput = Array.from(
     document.querySelectorAll<HTMLInputElement>('input[type="password"]'),
   ).find(visible);
-  if (passwordInput !== undefined && password !== '') {
+  if (passwordInput === undefined) {
+    // No password field, no fill. A username alone would land in whatever
+    // text field comes first — a search box, as often as not — and a search
+    // box posts what it is given.
+    return;
+  }
+  if (password !== '') {
     setValue(passwordInput, password);
   }
+  if (username === '') {
+    return;
+  }
 
-  if (username !== '') {
-    const scope = passwordInput?.form ?? document;
-    const usernameInput = Array.from(
-      scope.querySelectorAll<HTMLInputElement>(
-        'input[type="email"], input[autocomplete="username"], input[type="text"], input:not([type])',
-      ),
-    ).find(visible);
-    if (usernameInput !== undefined) {
-      setValue(usernameInput, username);
-    }
+  // The field the page announces first; the generic text field only as a
+  // fallback, and only within the same form.
+  const scope = passwordInput.form ?? document;
+  const announced = scope.querySelectorAll<HTMLInputElement>(
+    'input[autocomplete="username"], input[autocomplete="email"], input[type="email"]',
+  );
+  const generic = scope.querySelectorAll<HTMLInputElement>(
+    'input[type="text"], input:not([type])',
+  );
+  const usernameInput =
+    Array.from(announced).find(visible) ??
+    Array.from(generic).find((el) => visible(el) && el !== passwordInput);
+  if (usernameInput !== undefined) {
+    setValue(usernameInput, username);
   }
 }
 
@@ -315,6 +340,9 @@ const ACTIVITY_PING_MS = 30_000;
 function messageFor(err: unknown): string {
   if (err instanceof DOMException && err.name === 'TimeoutError') {
     return t('errorTimeout');
+  }
+  if (err instanceof KdfDowngradeError) {
+    return t('errorKdfDowngrade');
   }
   if (err instanceof Error) {
     return err.message;
@@ -643,7 +671,16 @@ function App() {
     if (announce) {
       setBusy(t('statusDecrypting', String(ciphers.length)));
     }
-    const keys = await buildVaultKeys(sync.profile, userKey, onDecryptError);
+    // Organisation keys are trusted on first use and refused on change: the
+    // server holds the public key they are wrapped to, so nothing else binds
+    // them to anything the user controls (`docs/CRYPTO.md` §1).
+    const account = await loadSettings();
+    const keys = await pinOrganisationKeys(
+      account.serverUrl,
+      account.email,
+      await buildVaultKeys(sync.profile, userKey, onDecryptError),
+      onDecryptError,
+    );
 
     // Counted from the raw items: `type` is not encrypted, so the filter is
     // right from the first frame and never has to be revised.
@@ -723,7 +760,13 @@ function App() {
 
     try {
       const client = makeClient(settings, serverUrl, await getDeviceId());
-      const result = await unlock(client, email, password, submission);
+      const result = await unlock(
+        client,
+        email,
+        password,
+        submission,
+        await loadPinnedKdf(serverUrl, email),
+      );
       await onUnlocked(client, result);
     } catch (err) {
       await onUnlockFailure(err, twoFactor, submission);
@@ -750,6 +793,8 @@ function App() {
     if (result.twoFactorRememberToken !== undefined) {
       await saveRememberToken(serverUrl, email, result.twoFactorRememberToken);
     }
+    // What unlocked is what the next unlock is measured against.
+    await savePinnedKdf(serverUrl, email, result.kdfConfig);
 
     setBusy(t('statusSyncing'));
     const sync = await client.sync(result.session.accessToken);
@@ -895,6 +940,18 @@ function App() {
 
     const existing = findSaveCandidate(items, capture.origin, capture.username, matchesOrigin);
 
+    // An item in an organisation this device saw for the first time this
+    // session gets no update: saving the real password into it would encrypt
+    // that password to a key the server chose, on the user's own click. Next
+    // unlock, the organisation is pinned and the offer returns.
+    if (
+      existing?.organizationId != null &&
+      (await loadNewOrganisations()).includes(existing.organizationId)
+    ) {
+      await dismissProposal();
+      return;
+    }
+
     // The matched item's password is decrypted here — the popup is what holds
     // the keys — and then the rule is applied by `decideProposal`, pure and
     // tested. An item missing from `raw` yields `null`, which the rule treats as
@@ -977,7 +1034,6 @@ function App() {
           existing?.id ?? null,
           payload,
           existing === null ? null : revisionOf(open, existing.id),
-          existing?.name ?? capture.host,
         );
       }
     } catch (err) {
@@ -1492,7 +1548,6 @@ function App() {
           editing?.id ?? null,
           payload,
           raw === undefined ? null : (readField<string>(raw, 'revisionDate') ?? null),
-          editForm.name.trim(),
         );
       }
 
@@ -1627,7 +1682,7 @@ function App() {
         siteName={pending.kind === 'create' ? pending.ask.rpName : pending.ask.rpId}
         choices={pending.choices}
         chosen={ceremony.choice}
-        needsVerification={pending.ask.requiresVerification}
+        needsVerification={ceremony.needsVerification}
         masterPassword={ceremony.masterPassword}
         busy={busy}
         error={error}

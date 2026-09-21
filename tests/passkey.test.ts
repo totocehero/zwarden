@@ -396,6 +396,15 @@ describe('createCredential', () => {
   const b64url = (bytes: Uint8Array): string =>
     btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
+  it('exposes the authenticator data bare, the same bytes the attestation wraps', async () => {
+    // `getAuthenticatorData()` must return `authData`, not the CBOR map around
+    // it: libraries read the flags and the credential out of those bytes.
+    const created = await createCredential(request);
+    const attestation = decodeCbor(created.attestationObject) as Map<string, unknown>;
+    expect([...created.authenticatorData]).toEqual([...(attestation.get('authData') as Uint8Array)]);
+    expect(created.authenticatorData.length).toBeGreaterThan(37);
+  });
+
   it('hands the site a public key that matches the private key it keeps', async () => {
     const created = await createCredential(request);
 

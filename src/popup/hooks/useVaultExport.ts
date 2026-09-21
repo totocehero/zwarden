@@ -139,15 +139,23 @@ async function run(event: Event): Promise<void> {
   }
 }
 
-/** Decrypts the whole vault into the shape the file carries. */
+/**
+ * Decrypts the whole vault into the shape the file carries.
+ *
+ * Every field, or no file. A field whose MAC fails is not written as `null`
+ * into a backup the user will believe complete — that is the "worse than
+ * none" the file format's own header warns about. The count is thrown so the
+ * user hears how much is unreadable and can look at the vault's own report.
+ */
 async function buildExportPayload(open: ExportableVault): Promise<ExportPayload> {
+  const unreadable: unknown[] = [];
   const items = await Promise.all(
     open.items.map(async (item: CipherOverview): Promise<ExportedItem> => {
       const cipher = open.raw.get(item.id);
       const details =
         cipher === undefined
           ? null
-          : await decryptCipherDetails(cipher, open.keys, () => undefined);
+          : await decryptCipherDetails(cipher, open.keys, (error) => unreadable.push(error));
       const base = {
         id: item.id,
         type: item.type,
@@ -176,6 +184,10 @@ async function buildExportPayload(open: ExportableVault): Promise<ExportPayload>
       return base;
     }),
   );
+
+  if (unreadable.length > 0) {
+    throw new Error(t('exportUnreadable', String(unreadable.length)));
+  }
 
   return {
     encrypted: false,

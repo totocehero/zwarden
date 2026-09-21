@@ -67,10 +67,17 @@ which Zwarden does not use.
 
 | Entry | Contents | Why it may live there |
 |---|---|---|
-| `zwardenVaultKey` | the vault key, **sealed** — AES-GCM under a key that cannot be exported | Read by exactly one caller, the popup's restore path, and only where a decryption follows — see §4 |
-| `zwardenSession` | access and refresh tokens, **the whole cached sync**, the local master-password hash, KDF parameters | Everything of comparable value is kept in memory rather than given a second, weaker home. The key is not among them, on purpose |
-| `zwardenPendingSave` | a credential captured on a page — **username and password in clear** | The only cleartext password the extension ever stores. It lives for the few seconds between a form submission and the user's answer, and is dropped on either answer |
-| `zwardenActivity` | a timestamp | Drives the inactivity lock |
+| `vaultKey` | the vault key, **sealed** — AES-GCM under a key that cannot be exported | Read by exactly one caller, the popup's restore path, and only where a decryption follows — see §4 |
+| `session` | access and refresh tokens, **the whole cached sync**, the local master-password hash, KDF parameters | Everything of comparable value is kept in memory rather than given a second, weaker home. The key is not among them, on purpose |
+| `pendingSave` | a credential captured on a page — **username and password in clear** | The only cleartext password the extension ever stores. It lives for the few seconds between a form submission and the user's answer, and is dropped on either answer |
+| `justFilled` | origin, username and an **unsalted SHA-256** of the password Zwarden itself just filled, for ten minutes | So the sign-in that follows a fill is not offered back. A fast hash of a vault password is dictionary-crackable if captured, which is why it goes with the lock |
+| `pendingAssertion` | a page's WebAuthn request and its origin, as the browser reported it | Untrusted page input, held until the popup validates it or ninety seconds pass |
+| `passkeyRelyingParties` | the domains the vault holds a passkey for, in clear | Lets the service worker decline a ceremony it cannot answer without waking the popup. A small, real exposure, stated in `storage.ts` |
+| `newOrganisations` | identifiers of organisations first seen this session | Withholds the automatic update from an organisation the server may have just invented — `docs/CRYPTO.md` §7 |
+| `lastActivityAt` | a timestamp | Drives the inactivity lock |
+
+Every one of them is removed by `lockVault()`. `tests/session.test.ts` checks
+the list.
 
 ### On disk (`local`) — assume it is read
 
@@ -82,6 +89,10 @@ which Zwarden does not use.
 | `neverSaveHosts` | hosts the user told Zwarden to stop asking about | Reveals sites the user has an account on. Hardened — see §4 |
 | `generatorOptions` | length, character classes | Nothing |
 | `lastUsed` | `{ item id: timestamp }` | How many distinct items are used and when. The identifiers are server-side UUIDs and mean nothing without the vault, which is not on disk |
+| `writeQueue` | edits made offline, **already encrypted**, with item identifiers and revision dates | Ciphertext the attacker cannot open, plus how many items were edited offline and when — see §4. It once carried the items' names in clear; it no longer carries any name |
+| `kdfPin:<email>@<server>` | the KDF parameters that last unlocked the account | Which algorithm and work factor the account uses — the same fact `prelogin` hands to anyone who asks for it |
+| `orgKeyPins:<email>@<server>` | SHA-256 of each organisation key, by organisation id | How many organisations the account belongs to. The digests open nothing |
+| `passkeyHookStatus` | whether the passkey scripts installed, and the error if not | Nothing |
 
 **The vault ciphertext is not on disk today.** The cached sync lives in memory
 with the key. That is a stronger position than most password managers take, and
@@ -251,6 +262,11 @@ message.
   path to either key.
 - What it does add is **metadata**: the identifiers and revision dates of the
   items edited while offline. A handful of UUIDs, of the same nature as the
-  usage log, and only for items actually edited offline.
+  usage log, and only for items actually edited offline. **Not their names**:
+  a first version stored each item's decrypted name as a label, and nothing
+  ever displayed it. That was a list of the user's accounts on disk, in clear,
+  for as long as the network stayed away — the exact thing this section says
+  the queue does not do. It was found by an audit, not by a reader of this
+  document, which is the argument for keeping the inventory above complete.
 
 That is the cost, and it is stated so the trade can be disagreed with.

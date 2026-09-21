@@ -385,6 +385,19 @@ export async function resolveItemKey(
   return new SymmetricCryptoKey(await decryptBytes(EncString.parse(wrapped), userKey));
 }
 
+/**
+ * Erases an item's own key once it has served.
+ *
+ * {@link resolveItemKey} allocates one per item per decryption when the item
+ * carries a `key`; without this they accumulated, plaintext, until the
+ * collector came round. The base key is the caller's and is left alone.
+ */
+function releaseItemKey(itemKey: SymmetricCryptoKey, baseKey: SymmetricCryptoKey): void {
+  if (itemKey !== baseKey) {
+    itemKey.destroy();
+  }
+}
+
 /** Extracts the `login` sub-object, tolerating either casing. */
 function readLogin(cipher: CipherResponse): Record<string, unknown> | undefined {
   return readField<Record<string, unknown>>(cipher, 'login') ?? undefined;
@@ -453,14 +466,20 @@ export async function decryptCipherOverview(
   }
 
   const rawUris = readField<readonly RawUriEntry[]>(login, 'uris') ?? [];
-  const [name, username, subtitle, ...decryptedUris] = await Promise.all([
-    decryptStringOrNull(readField<string>(cipher, 'name'), itemKey, onError),
-    decryptStringOrNull(readField<string>(login, 'username'), itemKey, onError),
-    decryptSubtitle(cipher, meta.type, itemKey, onError),
-    ...rawUris.map((entry) =>
-      decryptStringOrNull(readField<string>(entry, 'uri'), itemKey, onError),
-    ),
-  ]);
+  let name: string | null, username: string | null, subtitle: string | null;
+  let decryptedUris: (string | null)[];
+  try {
+    [name, username, subtitle, ...decryptedUris] = await Promise.all([
+      decryptStringOrNull(readField<string>(cipher, 'name'), itemKey, onError),
+      decryptStringOrNull(readField<string>(login, 'username'), itemKey, onError),
+      decryptSubtitle(cipher, meta.type, itemKey, onError),
+      ...rawUris.map((entry) =>
+        decryptStringOrNull(readField<string>(entry, 'uri'), itemKey, onError),
+      ),
+    ]);
+  } finally {
+    releaseItemKey(itemKey, baseKey);
+  }
 
   return {
     ...meta,
@@ -587,12 +606,17 @@ export async function decryptCipherDetails(
     }),
   ]);
 
-  const [card, identity] = await Promise.all([
-    type === 3 ? decryptSection(cipher, 'card', CARD_FIELDS, EMPTY_CARD, itemKey, onError) : null,
-    type === 4
-      ? decryptSection(cipher, 'identity', IDENTITY_FIELDS, EMPTY_IDENTITY, itemKey, onError)
-      : null,
-  ]);
+  let card: CardView | null, identity: IdentityView | null;
+  try {
+    [card, identity] = await Promise.all([
+      type === 3 ? decryptSection(cipher, 'card', CARD_FIELDS, EMPTY_CARD, itemKey, onError) : null,
+      type === 4
+        ? decryptSection(cipher, 'identity', IDENTITY_FIELDS, EMPTY_IDENTITY, itemKey, onError)
+        : null,
+    ]);
+  } finally {
+    releaseItemKey(itemKey, baseKey);
+  }
 
   return {
     username: username as string | null,
@@ -698,6 +722,7 @@ export async function decryptPasskeys(
     }),
   );
 
+  releaseItemKey(itemKey, baseKey);
   return decrypted.filter((entry): entry is PasskeyCredential => entry !== null);
 }
 
@@ -1022,48 +1047,53 @@ export async function buildCipherUpdatePayload(
   keys: CipherKeys,
   recordPasswordHistory: boolean,
 ): Promise<Record<string, unknown>> {
-  const itemKey = await resolveItemKey(cipher, requireBaseKey(cipher, keys));
+  const baseKey = requireBaseKey(cipher, keys);
+  const itemKey = await resolveItemKey(cipher, baseKey);
+  try {
 
-  const enc = async (text: string): Promise<string> =>
-    (await encryptString(text, itemKey)).toString();
-  const encOrNull = async (text: string): Promise<string | null> =>
-    text === '' ? null : enc(text);
+    const enc = async (text: string): Promise<string> =>
+      (await encryptString(text, itemKey)).toString();
+    const encOrNull = async (text: string): Promise<string | null> =>
+      text === '' ? null : enc(text);
 
-  const type = readField<number>(cipher, 'type') ?? 1;
-  const login = readLogin(cipher);
-  const wrappedItemKey = readField<string>(cipher, 'key');
+    const type = readField<number>(cipher, 'type') ?? 1;
+    const login = readLogin(cipher);
+    const wrappedItemKey = readField<string>(cipher, 'key');
 
-  // Fields carried over from the existing item, never recomputed: an update
-  // replaces the whole item server-side, and any omitted field is lost.
-  const payload: Record<string, unknown> = {
-    type,
-    organizationId: readField<string | null>(cipher, 'organizationId') ?? null,
-    folderId: readField<string | null>(cipher, 'folderId') ?? null,
-    favorite: readField<boolean>(cipher, 'favorite') ?? false,
-    reprompt: readField<number>(cipher, 'reprompt') ?? 0,
-    name: await enc(edit.name),
-    notes: await encOrNull(edit.notes),
-    // Custom fields: carried over as-is, already encrypted.
-    fields: readField<unknown>(cipher, 'fields') ?? [],
-  };
+    // Fields carried over from the existing item, never recomputed: an update
+    // replaces the whole item server-side, and any omitted field is lost.
+    const payload: Record<string, unknown> = {
+      type,
+      organizationId: readField<string | null>(cipher, 'organizationId') ?? null,
+      folderId: readField<string | null>(cipher, 'folderId') ?? null,
+      favorite: readField<boolean>(cipher, 'favorite') ?? false,
+      reprompt: readField<number>(cipher, 'reprompt') ?? 0,
+      name: await enc(edit.name),
+      notes: await encOrNull(edit.notes),
+      // Custom fields: carried over as-is, already encrypted.
+      fields: readField<unknown>(cipher, 'fields') ?? [],
+    };
 
-  if (wrappedItemKey != null && wrappedItemKey !== '') {
-    payload['key'] = wrappedItemKey;
-  }
-
-  if (type === 1) {
-    payload['login'] = await buildLoginSection(edit, login, enc, encOrNull);
-    payload['passwordHistory'] = buildPasswordHistory(cipher, login, recordPasswordHistory);
-  } else {
-    const edited = await buildEditedSection(type, edit, cipher, encOrNull);
-    if (edited !== null) {
-      payload[edited[0]] = edited[1];
-    } else {
-      carryTypeSection(cipher, type, payload);
+    if (wrappedItemKey != null && wrappedItemKey !== '') {
+      payload['key'] = wrappedItemKey;
     }
-  }
 
-  return payload;
+    if (type === 1) {
+      payload['login'] = await buildLoginSection(edit, login, enc, encOrNull);
+      payload['passwordHistory'] = buildPasswordHistory(cipher, login, recordPasswordHistory);
+    } else {
+      const edited = await buildEditedSection(type, edit, cipher, encOrNull);
+      if (edited !== null) {
+        payload[edited[0]] = edited[1];
+      } else {
+        carryTypeSection(cipher, type, payload);
+      }
+    }
+
+    return payload;
+  } finally {
+    releaseItemKey(itemKey, baseKey);
+  }
 }
 
 /**

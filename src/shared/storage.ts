@@ -18,6 +18,13 @@ import type { KdfConfig } from '../core/crypto/kdf.js';
 import { KdfType } from '../core/crypto/kdf.js';
 import type { SyncResponse } from '../core/api/models.js';
 import { toBase64 } from '../core/crypto/encoding.js';
+import {
+  fingerprintKey,
+  OrgKeyRefusedError,
+  reconcilePins,
+  type VaultKeys,
+  withoutOrganisations,
+} from '../core/vault/keyring.js';
 import { forgetSealingKey, openVaultKey, sealVaultKey } from './keyGuard.js';
 import {
   DEFAULT_PASSWORD_OPTIONS,
@@ -645,6 +652,153 @@ export async function clearLastUsed(): Promise<void> {
   }
 }
 
+// --- What the server said last time ------------------------------------------
+//
+// Two things a hostile server can change under the user between two unlocks,
+// both remembered here so that a change is a refusal rather than a surprise.
+// On disk, in clear, and harmless there: a KDF setting and key fingerprints
+// name no site and open nothing.
+
+const KDF_PIN_PREFIX = 'kdfPin:';
+const ORG_PINS_PREFIX = 'orgKeyPins:';
+
+/** One account on one server. */
+function accountKey(prefix: string, serverUrl: string, email: string): string {
+  return `${prefix}${email.trim().toLowerCase()}@${serverUrl}`;
+}
+
+/** The KDF parameters last accepted for this account, or `null`. */
+export async function loadPinnedKdf(serverUrl: string, email: string): Promise<KdfConfig | null> {
+  if (!hasLocal) {
+    return null;
+  }
+  const key = accountKey(KDF_PIN_PREFIX, serverUrl, email);
+  return readKdfConfig((await chrome.storage.local.get(key))[key]);
+}
+
+/** Remembers the KDF parameters that just unlocked this account. */
+export async function savePinnedKdf(
+  serverUrl: string,
+  email: string,
+  config: KdfConfig,
+): Promise<void> {
+  if (hasLocal) {
+    await chrome.storage.local.set({ [accountKey(KDF_PIN_PREFIX, serverUrl, email)]: config });
+  }
+}
+
+/** The organisation-key fingerprints seen for this account, by organisation. */
+export async function loadOrgKeyPins(
+  serverUrl: string,
+  email: string,
+): Promise<Readonly<Record<string, string>>> {
+  if (!hasLocal) {
+    return {};
+  }
+  const key = accountKey(ORG_PINS_PREFIX, serverUrl, email);
+  const value = (await chrome.storage.local.get(key))[key];
+  if (typeof value !== 'object' || value === null) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).filter(
+      (entry): entry is [string, string] => typeof entry[1] === 'string',
+    ),
+  );
+}
+
+export async function saveOrgKeyPins(
+  serverUrl: string,
+  email: string,
+  pins: Readonly<Record<string, string>>,
+): Promise<void> {
+  if (hasLocal) {
+    await chrome.storage.local.set({ [accountKey(ORG_PINS_PREFIX, serverUrl, email)]: pins });
+  }
+}
+
+/**
+ * Forgets every remembered server parameter, for every account.
+ *
+ * The way out when a change was legitimate — a KDF lowered on purpose in the
+ * web vault, an organisation genuinely re-keyed. The next unlock accepts what
+ * the server announces and remembers that instead.
+ *
+ * @returns How many entries were removed.
+ */
+export async function clearAllServerPins(): Promise<number> {
+  if (!hasLocal) {
+    return 0;
+  }
+  const all = await chrome.storage.local.get(null);
+  const keys = Object.keys(all).filter(
+    (key) => key.startsWith(KDF_PIN_PREFIX) || key.startsWith(ORG_PINS_PREFIX),
+  );
+  if (keys.length > 0) {
+    await chrome.storage.local.remove(keys);
+  }
+  return keys.length;
+}
+
+const NEW_ORGANISATIONS_KEY = 'newOrganisations';
+
+/**
+ * Organisations first seen during this session.
+ *
+ * A pin cannot refuse an organisation it has never seen, so the first sight is
+ * the one moment a server can slip one in. What is withheld from such an
+ * organisation, until the next unlock, is the one automatic write the
+ * extension makes — the offer to save a captured password into an existing
+ * item. A server that plants an item for the user's mail provider and waits
+ * for the sign-in would otherwise have the real password encrypted to a key
+ * it holds, by the user's own click. In memory, purged with the session.
+ */
+export async function noteNewOrganisations(ids: readonly string[]): Promise<void> {
+  if (!hasSession || ids.length === 0) {
+    return;
+  }
+  const known = await loadNewOrganisations();
+  await chrome.storage.session.set({ [NEW_ORGANISATIONS_KEY]: [...new Set([...known, ...ids])] });
+}
+
+export async function loadNewOrganisations(): Promise<readonly string[]> {
+  if (!hasSession) {
+    return [];
+  }
+  const value = (await chrome.storage.session.get(NEW_ORGANISATIONS_KEY))[NEW_ORGANISATIONS_KEY];
+  return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
+}
+
+/**
+ * Reconciles a freshly unwrapped keyring with the fingerprints on record.
+ *
+ * Refused keys are destroyed and dropped from the ring, each reported through
+ * `onError`; first-seen organisations are pinned and noted for the session.
+ * The rule itself is `reconcilePins`, pure and tested; this is the storage
+ * around it.
+ */
+export async function pinOrganisationKeys(
+  serverUrl: string,
+  email: string,
+  keys: VaultKeys,
+  onError: (error: unknown) => void,
+): Promise<VaultKeys> {
+  if (keys.orgKeys.size === 0) {
+    return keys;
+  }
+  const current = new Map<string, string>();
+  for (const [id, key] of keys.orgKeys) {
+    current.set(id, await fingerprintKey(key));
+  }
+  const outcome = reconcilePins(await loadOrgKeyPins(serverUrl, email), current);
+  await saveOrgKeyPins(serverUrl, email, outcome.pins);
+  await noteNewOrganisations(outcome.firstSeen);
+  for (const id of outcome.refused) {
+    onError(new OrgKeyRefusedError(id, 'changed'));
+  }
+  return withoutOrganisations(keys, outcome.refused);
+}
+
 // --- Unlocked session --------------------------------------------------------
 
 /**
@@ -838,7 +992,12 @@ export async function clearStoredSession(): Promise<void> {
   if (hasSession) {
     // Both entries, always together: a key outliving its session would be a key
     // nothing could use and nothing would clear.
-    await chrome.storage.session.remove([SESSION_KEY, VAULT_KEY_KEY, PASSKEY_PARTIES_KEY]);
+    await chrome.storage.session.remove([
+      SESSION_KEY,
+      VAULT_KEY_KEY,
+      PASSKEY_PARTIES_KEY,
+      NEW_ORGANISATIONS_KEY,
+    ]);
   }
   // And the other half. Either alone is inert, so this is belt and braces —
   // but a sealing key left behind outlives its purpose, and those accumulate.

@@ -40,8 +40,6 @@ export interface QueuedWrite {
   readonly baseRevision: string | null;
   /** When it was queued, for display and for ordering. */
   readonly queuedAt: number;
-  /** A name for the user, so a conflict names the item rather than an id. */
-  readonly label: string;
 }
 
 /**

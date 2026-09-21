@@ -566,6 +566,9 @@
   "exportDone": {
     "message": "$1 item(s) exported."
   },
+  "exportUnreadable": {
+    "message": "$1 field(s) could not be decrypted. Nothing was exported: a backup with holes would look complete. See the vault's own report."
+  },
   "exportAlgorithm": {
     "message": "Argon2id then AES-256-GCM. The parameters travel in clear inside the file and are authenticated with it: lowering them makes the file refuse to open, not open weaker."
   },
@@ -719,6 +722,9 @@
   "errorTabMismatch": {
     "message": "The active tab no longer matches this item."
   },
+  "errorKdfDowngrade": {
+    "message": "The server announces weaker key-derivation parameters than this device accepted before. Refused. If you lowered them yourself, forget the remembered server parameters in the settings."
+  },
   "settingsServerSection": {
     "message": "Server"
   },
@@ -824,6 +830,9 @@
   "settingsForgetOrdering": {
     "message": "Forget the use ordering"
   },
+  "settingsForgetPins": {
+    "message": "Forget the remembered server parameters"
+  },
   "settingsDeviceSection": {
     "message": "Device"
   },
@@ -859,6 +868,12 @@
   },
   "settingsOrderingForgotten": {
     "message": "Use ordering forgotten — the list returns to the server order."
+  },
+  "settingsNoPins": {
+    "message": "Nothing remembered."
+  },
+  "settingsPinsForgotten": {
+    "message": "$1 remembered parameter(s) forgotten — the next unlock accepts what the server announces, and remembers that."
   },
   "settingsDeviceRegenerated": {
     "message": "Identifier regenerated."

@@ -99,6 +99,12 @@ export interface CreatedCredential {
   readonly clientDataJSON: string;
   /** CBOR, `none` attestation. What `credentials.create()` resolves with. */
   readonly attestationObject: Uint8Array;
+  /**
+   * The authenticator data alone, as `getAuthenticatorData()` must return it.
+   * The same bytes sit inside `attestationObject`; libraries that read them
+   * through the accessor expect them bare, not wrapped in the CBOR map.
+   */
+  readonly authenticatorData: Uint8Array;
   /** PKCS#8, base64url — encrypted into the vault by the caller. */
   readonly privateKey: string;
 }
@@ -378,6 +384,7 @@ export async function createCredential(request: CreationRequest): Promise<Create
         ['authData', authData],
       ]),
     ),
+    authenticatorData: authData,
     privateKey: toBase64Url(privateKey),
   };
 }

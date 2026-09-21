@@ -31,7 +31,6 @@ function entry(patch: Partial<QueuedWrite> = {}): QueuedWrite {
     payload: { name: '2.abc|def|ghi' },
     baseRevision: '2026-09-01T10:00:00Z',
     queuedAt: 1_000,
-    label: 'My bank',
     ...patch,
   };
 }

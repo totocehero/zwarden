@@ -214,6 +214,16 @@ describe('validateCreationAsk', () => {
   it('declines when the account already has a key here', () => {
     // `excludeCredentials` exists so an authenticator does not hand out a
     // second key for an account that already has one.
+    // As the vault spells it (a UUID) against as the page spells it
+    // (base64url of the same sixteen bytes): compared on bytes, or the
+    // check never fires for a credential this extension made itself.
+    expect(
+      refusal(
+        { excludeCredentials: [{ id: 'EjRWeJq83vASNFZ4mrze8A' }] },
+        'https://bank.example/',
+        ['12345678-9abc-def0-1234-56789abcdef0'],
+      ),
+    ).toBe('already-registered');
     expect(refusal({ excludeCredentials: [{ id: 'already-there' }] }, 'https://bank.example/', ['already-there'])).toBe(
       'already-registered',
     );

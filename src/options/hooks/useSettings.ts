@@ -15,6 +15,7 @@ import {
   type AppSettings,
   DEFAULT_SETTINGS,
   clearAllRememberTokens,
+  clearAllServerPins,
   clearLastUsed,
   clearNeverSaveHosts,
   getDeviceId,
@@ -47,6 +48,8 @@ export interface Settings {
   readonly forgetTwoFa: () => Promise<void>;
   readonly forgetNeverSave: () => Promise<void>;
   readonly forgetLastUsed: () => Promise<void>;
+  /** Forgets the KDF parameters and organisation keys remembered per account. */
+  readonly forgetPins: () => Promise<void>;
   readonly regenerateDevice: () => Promise<void>;
 }
 
@@ -151,6 +154,11 @@ export function useSettings(): Settings {
     async forgetLastUsed() {
       await clearLastUsed();
       flash(t('settingsOrderingForgotten'));
+    },
+
+    async forgetPins() {
+      const n = await clearAllServerPins();
+      flash(n === 0 ? t('settingsNoPins') : t('settingsPinsForgotten', String(n)));
     },
 
     /**

@@ -55,6 +55,17 @@ manager. Stating them avoids false expectations.
   differs from the authorization hash's — and it lives in the same memory
   storage as the vault key, which is strictly more sensitive: keeping it opens
   no new surface.
+- **An organisation the server invents.** This is the one place where "every
+  field authenticated" is not the whole truth. An organisation key arrives
+  RSA-encrypted to the member's **public** key, which the server holds, and
+  nothing in the format binds it to anything the user controls: a server can
+  hand out a key it knows, under an organisation the user never joined, with
+  items that decrypt cleanly. The format cannot detect it, and the official
+  client does not try. Zwarden narrows it (§7): a key is pinned on first sight
+  and refused on change, so an existing organisation cannot be re-keyed under
+  the user, and an organisation seen for the first time gets no automatic
+  write for the rest of the session. What remains is stated: on first sight,
+  a server can plant a shared item and hope the user **edits** it by hand.
 
 ---
 
@@ -277,16 +288,54 @@ uses it.
 
 ### SHA-1: one door, and it does not open onto the vault
 
-`hmacForOtp` is the only place in the code where SHA-1 appears, and it serves
-one-time codes alone (RFC 6238). This is not a concession: TOTP is specified on
-HMAC-SHA1, the vast majority of sites offer nothing else, and refusing it would
-make the second factor unusable without securing anything. SHA-1's weakness is
-collisions; HMAC does not depend on them.
+SHA-1 appears in three places, none on the vault's own path. `hmacForOtp`
+serves one-time codes (RFC 6238): TOTP is specified on HMAC-SHA1, the vast
+majority of sites offer nothing else, and refusing it would make the second
+factor unusable without securing anything. SHA-1's weakness is collisions;
+HMAC does not depend on them. RSA-OAEP type 4 uses SHA-1 as its mask
+function, because that is what Bitwarden emits for organisation keys, and
+OAEP's security does not rest on the hash's collision resistance either. And
+the breach check (`breachCheck.ts`, opt-in) sends the first five hex
+characters of a SHA-1 to Have I Been Pwned, because that is the protocol.
 
 No encrypted data passes through this function: "encrypt-then-MAC" remains
 carried by `hmacSha256`, and it alone. The separation is in the names as much as
 in the calls — a vault HMAC computed with `hmacForOtp` would stand out on
 reading.
+
+### ⚠ Organisation keys: 64 bytes, pinned, refused on change
+
+An organisation key is the one piece of key material a hostile server can
+choose (§1). Three checks, none of which the official client makes:
+
+- **length.** A key that is not 64 bytes is refused before it enters the
+  keyring. A 32-byte one would make the unauthenticated type 0 path reachable
+  for that organisation's items, and the downgrade refusal above rests on key
+  length alone;
+- **pin.** SHA-256 of each organisation key is remembered on disk, per
+  `(server, account)`. A key that differs from the remembered one is refused,
+  its items go unread, and — the point — nothing is ever **encrypted** with it:
+  an update written under a substituted key would hand the server the
+  plaintext by the user's own click. Keys are not rotated in this format, so a
+  changed key is a substituted one;
+- **first sight.** An organisation this device has never seen is pinned and
+  noted for the session. Until the next unlock, the save proposal will not
+  update an item of that organisation. That is the one automatic write the
+  extension performs, and the one a planted item is there to catch.
+
+The fingerprints and the remembered KDF (next entry) can be forgotten from the
+settings page, for the case where the change was the user's own.
+
+### ⚠ KDF parameters are remembered, and a weaker announcement is refused
+
+The floors in §3 are the only line a hostile server cannot cross. Between them
+and an account's real setting lies room: an account created at 600,000 PBKDF2
+iterations can be told 100,000 and derive a hash six times cheaper to crack,
+with nothing on screen. So the parameters that unlocked are remembered per
+`(server, account)`, and the next `prelogin` is compared against them before
+any derivation — fewer iterations, less memory, less parallelism, or Argon2id
+replaced by PBKDF2, and `unlock()` throws `KdfDowngradeError` without a hash
+ever being computed. Moving to Argon2id, or raising anything, is accepted.
 
 ### Verifying the master password without a network
 
@@ -332,10 +381,13 @@ then removed: `scripts/bench-base64.mjs` measures it **slower** than
 `atob`/`btoa` (2.2× on decoding), which are themselves beaten by the dedicated
 native methods. Forty lines of sensitive code deleted for a performance gain.
 
-The platform's decoders **reject** invalid input, where the hand-written one
+The platform's decoders **reject** malformed input, where the hand-written one
 ignored it. That is the right behaviour: on cryptographic material, ignoring
 unreadable bytes would mask corruption or a tampered response. `EncString.parse`
-translates those failures into `EncStringParseError`.
+translates those failures into `EncStringParseError`. One deliberate leniency
+before the decoder: whitespace is stripped and the base64url alphabet is mapped
+to the standard one, because real vaults hold both spellings. Neither changes
+the bytes decoded; both are documented in `encoding.ts`.
 
 ### Reusing imported keys
 
@@ -368,7 +420,7 @@ hibernation without closing it. Do not overestimate this guarantee.
 
 ## 9. Test coverage
 
-`npm test` — 301 tests.
+`npm test` — over seven hundred tests.
 
 | File | Scope |
 |---|---|

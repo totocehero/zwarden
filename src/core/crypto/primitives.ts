@@ -19,7 +19,7 @@
  * refusal) in `cryptoService.ts`. Add nothing here that makes a decision.
  */
 
-import { concatBytes, toUtf8Bytes } from './encoding.js';
+import { concatBytes, toUtf8Bytes, wipe } from './encoding.js';
 
 const subtle = globalThis.crypto.subtle;
 
@@ -247,8 +247,12 @@ export async function hkdfExpandSha256(
     const block = await hmacSha256(prkKey, concatBytes(previous, infoBytes, Uint8Array.of(i)));
     out.set(block.subarray(0, Math.min(HASH_LENGTH, lengthBytes - offset)), offset);
     offset += HASH_LENGTH;
+    // Each block is a slice of the derived key: copied out, then erased, so
+    // the only copy left is the one the caller owns and can wipe.
+    wipe(previous);
     previous = block;
   }
+  wipe(previous);
 
   return out;
 }

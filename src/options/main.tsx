@@ -74,6 +74,7 @@ function App() {
         onForgetTwoFa={() => void s.forgetTwoFa()}
         onForgetNeverSave={() => void s.forgetNeverSave()}
         onForgetLastUsed={() => void s.forgetLastUsed()}
+        onForgetPins={() => void s.forgetPins()}
       />
 
       <DeviceSection deviceId={s.deviceId} onRegenerate={() => void s.regenerateDevice()} />

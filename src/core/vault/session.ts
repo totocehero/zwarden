@@ -37,6 +37,8 @@ import {
   deriveMasterKey,
   derivePasswordHash,
   stretchMasterKey,
+  KdfDowngradeError,
+  isWeakerKdf,
 } from '../crypto/kdf.js';
 import { SymmetricCryptoKey } from '../crypto/symmetricCryptoKey.js';
 
@@ -85,7 +87,10 @@ export interface UnlockResult {
  * @param twoFactor Second factor to attach — a code entered after a first
  *   refusal, or a stored remember token (provider 5).
  * @returns Session, vault key, and the material for offline validation.
+ * @param remembered The KDF parameters this device accepted for the account
+ *   before, if any. Weaker ones announced now are refused.
  * @throws {WeakKdfError} Server KDF parameters out of bounds.
+ * @throws {KdfDowngradeError} Server KDF parameters weaker than `remembered`.
  * @throws {TwoFactorRequiredError} A second step is demanded.
  * @throws {CaptchaRequiredError} The server demands a captcha.
  * @throws {RateLimitedError} The server is rate-limiting.
@@ -99,8 +104,18 @@ export async function unlock(
   email: string,
   password: string,
   twoFactor?: TwoFactorSubmission,
+  remembered?: KdfConfig | null,
 ): Promise<UnlockResult> {
   const kdfConfig = await client.prelogin(email);
+  // Before any derivation, and so before any hash exists to be sent: the
+  // announced parameters are compared with the ones this device accepted for
+  // this account last time. Weaker is refused. The floors alone would let a
+  // server take an account from 600,000 iterations to 100,000 unnoticed.
+  if (remembered != null && isWeakerKdf(kdfConfig, remembered)) {
+    throw new KdfDowngradeError(
+      'The server announces weaker KDF parameters than this device accepted before',
+    );
+  }
   const masterKey = await deriveMasterKey(password, email, kdfConfig);
 
   try {

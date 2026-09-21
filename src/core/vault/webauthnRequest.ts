@@ -40,6 +40,8 @@
  * does. It is a real gap; it is named here rather than left to be discovered.
  */
 
+import { credentialIdMatches } from './passkey.js';
+
 /** The one signature algorithm this authenticator offers: ECDSA with SHA-256. */
 const ES256_ALGORITHM = -7;
 
@@ -303,7 +305,10 @@ export function validateCreationAsk(
         .map((entry) => entry?.['id'])
         .filter((id): id is string => typeof id === 'string')
     : [];
-  if (excluded.some((id) => existing.includes(id))) {
+  // On bytes, not text: the vault spells a credential as a UUID, the page as
+  // base64url, and the two never compare equal as strings — which is how this
+  // check silently never fired for the extension's own credentials.
+  if (excluded.some((id) => existing.some((ours) => credentialIdMatches(ours, id)))) {
     // The account already has a key here. Making a second would leave the user
     // with two and the site expecting one.
     throw new WebAuthnRefusal('already-registered');

@@ -13,7 +13,10 @@
  * already an `EncString`. The cleartext edit is never stored — encrypting at
  * replay would leave a cleartext password waiting on disk for the network to
  * return. What it does add is metadata: the identifiers and revision dates of
- * items edited offline.
+ * items edited offline. **Not their names**: an entry once carried the item's
+ * decrypted name as a label for the user, and nothing ever displayed it. A
+ * list of the names of the items edited offline is a list of the user's
+ * accounts, on disk, in clear, for as long as the network stays away.
  *
  * ## The cap
  *
@@ -44,8 +47,7 @@ function isQueuedWrite(value: unknown): value is QueuedWrite {
     (typeof e.cipherId === 'string' || e.cipherId === null) &&
     typeof e.payload === 'object' &&
     e.payload !== null &&
-    typeof e.queuedAt === 'number' &&
-    typeof e.label === 'string'
+    typeof e.queuedAt === 'number'
   );
 }
 

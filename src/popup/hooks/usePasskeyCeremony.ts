@@ -71,6 +71,8 @@ export interface PasskeyCeremony {
     | { readonly kind: 'create'; readonly id: string; readonly ask: CreationAsk; readonly choices: readonly AssertionChoice[] }
     | null;
   readonly choice: string | null;
+  /** The site asked for verification, or the chosen item carries the guard. */
+  readonly needsVerification: boolean;
   readonly masterPassword: string;
   readonly setChoice: (value: string) => void;
   readonly setMasterPassword: (value: string) => void;
@@ -136,7 +138,7 @@ async function pickUpAssertion(open: CeremonyVault): Promise<void> {
   // them.
   const views = await passkeyViews(open);
   await savePasskeyParties(views.map((view) => view.rpId));
-  console.debug('[zwarden] passkeys this vault can answer for', views.map((v) => v.rpId));
+  console.debug('[zwarden] passkeys this vault can answer with:', views.length);
 
   const pending = await loadPendingAssertion();
   console.debug('[zwarden] ceremony waiting?', pending === null ? 'none' : pending.ceremony);
@@ -190,9 +192,12 @@ async function pickUpAssertion(open: CeremonyVault): Promise<void> {
   }
 
   const choices = selectCredentials(views, ask.rpId, ask.allowCredentials);
-  console.debug('[zwarden] matching for', ask.rpId, {
-    asked: ask.allowCredentials,
-    held: views.map((v) => ({ rpId: v.rpId, credentialId: v.credentialId })),
+  // Counts, not names: the relying parties and credential identifiers this
+  // vault holds are the same class of fact the never-save list is hashed to
+  // protect, and a console is a place things are read from.
+  console.debug('[zwarden] matching:', {
+    asked: ask.allowCredentials.length,
+    held: views.length,
     matched: choices.length,
   });
   if (choices.length === 0) {
@@ -304,7 +309,7 @@ async function onCreatePasskey(): Promise<void> {
   setBusy(t('assertionWorking'));
   try {
     let verified = false;
-    if (ask.requiresVerification) {
+    if (needsVerification()) {
       verified = await verifyMaster(assertionPassword);
       if (!verified) {
         setError(t('exportWrongMaster'));
@@ -366,7 +371,7 @@ async function onCreatePasskey(): Promise<void> {
       credentialId: created.credentialId,
       clientDataJSON: toBase64Url(new TextEncoder().encode(created.clientDataJSON)),
       attestationObject: toBase64Url(created.attestationObject),
-      authenticatorData: toBase64Url(created.attestationObject),
+      authenticatorData: toBase64Url(created.authenticatorData),
     });
     setAssertion(null);
     window.close();
@@ -397,7 +402,7 @@ async function onConfirmAssertion(event: Event): Promise<void> {
   setBusy(t('assertionWorking'));
   try {
     let verified = false;
-    if (assertion.ask.requiresVerification) {
+    if (needsVerification()) {
       verified = await verifyMaster(assertionPassword);
       if (!verified) {
         setError(t('exportWrongMaster'));
@@ -431,6 +436,31 @@ async function onConfirmAssertion(event: Event): Promise<void> {
   }
 }
 
+/**
+ * Whether the master password must be entered before this ceremony goes on.
+ *
+ * Two reasons, either one enough. The site asked that the user be verified,
+ * not merely present. Or the item the passkey lives on — or would be attached
+ * to — carries the per-item guard: an item marked `reprompt` hands over
+ * nothing without a fresh entry (`docs/EXTENSION.md` §3), and a signature made
+ * with its private key is a secret leaving the vault like any other. The
+ * guard held for copy, reveal and fill and not for this, which made the
+ * passkey the one door on a guarded item that opened without a key.
+ */
+function needsVerification(): boolean {
+  if (assertion === null) {
+    return false;
+  }
+  const itemId =
+    assertion.kind === 'get'
+      ? assertion.choices.find((c) => c.credentialId === assertionChoice)?.itemId
+      : assertionChoice;
+  const item = itemId === undefined || itemId === '' || itemId === null
+    ? undefined
+    : open?.items.find((i) => i.id === itemId);
+  return assertion.ask.requiresVerification || (item?.reprompt ?? false);
+}
+
 /** Declines, and lets the browser take over. */
 async function onDeclineAssertion(): Promise<void> {
   if (assertion !== null) {
@@ -443,6 +473,7 @@ async function onDeclineAssertion(): Promise<void> {
   return {
     pending: assertion,
     choice: assertionChoice,
+    needsVerification: needsVerification(),
     masterPassword: assertionPassword,
     setChoice: setAssertionChoice,
     setMasterPassword: setAssertionPassword,

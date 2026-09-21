@@ -35,7 +35,6 @@ export interface WriteQueue {
     cipherId: string | null,
     payload: Record<string, unknown>,
     baseRevision: string | null,
-    label: string,
   ) => Promise<void>;
   readonly replay: (
     client: ApiClient,
@@ -69,7 +68,6 @@ async function holdWrite(
   cipherId: string | null,
   payload: Record<string, unknown>,
   baseRevision: string | null,
-  label: string,
 ): Promise<void> {
   await enqueueWrite({
     id: crypto.randomUUID(),
@@ -78,7 +76,6 @@ async function holdWrite(
     payload,
     baseRevision,
     queuedAt: Date.now(),
-    label,
   });
   await refreshQueueCounts();
   setBusy(null);

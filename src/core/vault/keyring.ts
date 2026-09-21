@@ -20,6 +20,34 @@ import { decryptBytes, decryptRsaBytes } from '../crypto/cryptoService.js';
 import { wipe } from '../crypto/encoding.js';
 import { SymmetricCryptoKey } from '../crypto/symmetricCryptoKey.js';
 
+/**
+ * Raised (through `onError`) when an organisation key is refused.
+ *
+ * Two reasons, both about the server rather than the maths. The key wraps to
+ * the member's **public** key, which the server holds: nothing in the format
+ * binds an organisation key to anything the user controls, so a server can
+ * hand out one it knows. What this code can check, it checks —
+ *
+ * - `length`: an organisation key is 64 bytes, always. A 32-byte one would
+ *   make the unauthenticated legacy path reachable for that organisation's
+ *   items, and the downgrade refusal of `docs/CRYPTO.md` §7 rests on key
+ *   length alone;
+ * - `changed`: the key differs from the one this device saw for the same
+ *   organisation before. Keys are not rotated in this format; a changed key
+ *   is a substituted one.
+ */
+export class OrgKeyRefusedError extends Error {
+  override readonly name = 'OrgKeyRefusedError';
+  readonly code = 'org-key-refused';
+
+  constructor(
+    readonly organizationId: string,
+    readonly reason: 'length' | 'changed',
+  ) {
+    super(`Organisation key refused (${reason}): ${organizationId}`);
+  }
+}
+
 /** Raised (through `onError`) when an organisation item has no known key. */
 export class MissingOrgKeyError extends Error {
   override readonly name = 'MissingOrgKeyError';
@@ -30,6 +58,9 @@ export class MissingOrgKeyError extends Error {
     super(`Organisation key unavailable: ${organizationId}`);
   }
 }
+
+/** An organisation key is an authenticated key: `enc ‖ mac`, 64 bytes. */
+const ORG_KEY_LENGTH = 64;
 
 /** The keys needed to decrypt the whole vault. */
 export interface VaultKeys {
@@ -86,6 +117,10 @@ export async function buildVaultKeys(
       }
       try {
         const raw = await decryptRsaBytes(EncString.parse(wrapped), pkcs8);
+        if (raw.length !== ORG_KEY_LENGTH) {
+          wipe(raw);
+          throw new OrgKeyRefusedError(id, 'length');
+        }
         orgKeys.set(id, new SymmetricCryptoKey(raw));
       } catch (error) {
         onError(error);
@@ -138,4 +173,83 @@ export function keyForCipher(cipher: unknown, keys: VaultKeys): SymmetricCryptoK
     return keys.userKey;
   }
   return keys.orgKeys.get(organizationId) ?? null;
+}
+
+/**
+ * A fingerprint of a key, to recognise it later without keeping it.
+ *
+ * SHA-256 of the key bytes, hex. Comparing fingerprints tells "the same key"
+ * from "a different one"; it does not weaken the key, which is 64 random bytes
+ * and not something a digest can be inverted to.
+ */
+export async function fingerprintKey(key: SymmetricCryptoKey): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', key.key as unknown as BufferSource);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** What reconciling a keyring against remembered fingerprints produced. */
+export interface PinOutcome {
+  /** The fingerprints to remember from now on. */
+  readonly pins: Readonly<Record<string, string>>;
+  /** Organisations whose key differs from the one remembered. */
+  readonly refused: readonly string[];
+  /** Organisations this device had never seen before. */
+  readonly firstSeen: readonly string[];
+}
+
+/**
+ * Compares the organisation keys just unwrapped with the ones seen before.
+ *
+ * Trust on first use, the same bargain as an SSH host key. A key seen for the
+ * first time is remembered; a key that differs from the remembered one is
+ * refused, and the organisation's items go unread rather than be read — or,
+ * worse, **written** — with a key the server chose. An organisation that
+ * disappears from the profile keeps its pin: a server that removes one and
+ * brings it back with a new key is exactly the case a pin is for.
+ *
+ * First use is the gap, and it is stated: a server can still add an
+ * organisation the user never joined. What a pin buys is that it can only do
+ * so **once**, visibly, and cannot touch the organisations already there.
+ * What the caller does with `firstSeen` closes part of the rest.
+ *
+ * Pure: no storage. The caller loads and saves the pins.
+ *
+ * @param remembered Fingerprints by organisation id, as last saved.
+ * @param current Fingerprints of the keys just unwrapped.
+ */
+export function reconcilePins(
+  remembered: Readonly<Record<string, string>>,
+  current: ReadonlyMap<string, string>,
+): PinOutcome {
+  const pins: Record<string, string> = { ...remembered };
+  const refused: string[] = [];
+  const firstSeen: string[] = [];
+  for (const [id, fingerprint] of current) {
+    const known = Object.hasOwn(remembered, id) ? remembered[id] : undefined;
+    if (known === undefined) {
+      pins[id] = fingerprint;
+      firstSeen.push(id);
+    } else if (known !== fingerprint) {
+      refused.push(id);
+    }
+  }
+  return { pins, refused, firstSeen };
+}
+
+/**
+ * The keyring without the organisations named, their keys destroyed.
+ *
+ * For the keys a pin refused: a key that stays in the ring is a key something
+ * will encrypt with.
+ */
+export function withoutOrganisations(keys: VaultKeys, ids: readonly string[]): VaultKeys {
+  if (ids.length === 0) {
+    return keys;
+  }
+  const orgKeys = new Map(keys.orgKeys);
+  for (const id of ids) {
+    orgKeys.get(id)?.destroy();
+    orgKeys.delete(id);
+  }
+  return { userKey: keys.userKey, orgKeys };
 }
