@@ -632,14 +632,22 @@ async function canAnswerFor(options: unknown): Promise<boolean> {
 /** Drops a pending ceremony, however it ended. */
 async function forgetAssertion(id: string): Promise<void> {
   if (!waitingPages.delete(id)) {
+    // Not ours, or already forgotten. Clearing the badge here would take down
+    // a mark another ceremony, or a captured credential, still needs.
     return;
   }
+
+  // The badge comes down because **this** ceremony is over, not because the
+  // stored entry happens to still be there. It usually is not: the popup
+  // clears it before it answers, so the old check — remove the entry, and only
+  // then the badge — matched nothing and left the mark up for ever after a
+  // successful sign-in.
   const stored = await chrome.storage.session.get(PENDING_ASSERTION_KEY);
   const pending = stored[PENDING_ASSERTION_KEY] as { id?: string } | undefined;
   if (pending?.id === id) {
     await chrome.storage.session.remove(PENDING_ASSERTION_KEY);
-    await setBadge(null);
   }
+  await setBadge(null);
 }
 
 /** The origin of a URL, or `null` if it has none worth having. */

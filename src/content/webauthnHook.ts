@@ -296,6 +296,19 @@ credentials.get = async function get(
     console.debug('[zwarden] credentials.get called, but not for WebAuthn');
     return originalGet(options);
   }
+  // Conditional and silent mediation are **passive**: the page is saying "be
+  // ready if you have something", not "ask the user". Sites make that call on
+  // load, to feed an autofill suggestion, and answering it with a badge puts a
+  // mark on the icon minutes before anyone clicks anything — and leaves it
+  // there, since nobody is coming to answer a question they never asked.
+  //
+  // The specification is explicit that no modal interface may appear for
+  // these. Passing them to the browser is both correct and the end of a
+  // badge that arrived early and stayed late.
+  if (options.mediation === 'conditional' || options.mediation === 'silent') {
+    console.debug('[zwarden] passing a', options.mediation, 'request to the browser');
+    return originalGet(options);
+  }
   // One line per WebAuthn call, which is a rare event — not noise, and it is
   // the only way to tell "the hook never ran" from "the hook declined" without
   // guessing from a screenshot. The whole chain logs the same way.

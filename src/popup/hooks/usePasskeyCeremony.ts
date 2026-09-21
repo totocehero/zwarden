@@ -266,8 +266,12 @@ async function hadBadgeWithoutCeremony(): Promise<boolean> {
 
 /** Hands the verdict to the service worker, which carries it to the page. */
 async function answerAssertion(id: string, payload: unknown): Promise<void> {
-  await clearPendingAssertion();
+  // Told first, cleared second. The worker owns the entry it wrote — it is the
+  // one that knows whether any other ceremony is still waiting on the badge —
+  // and clearing it here beforehand simply hid this one from it.
   await chrome.runtime.sendMessage({ type: 'assertion-answer', id, assertion: payload });
+  // Belt and braces, for the case where the worker died between the two.
+  await clearPendingAssertion();
 }
 
 /**
