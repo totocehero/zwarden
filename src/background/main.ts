@@ -508,53 +508,75 @@ async function applyPasskeyRegistration(): Promise<void> {
     });
   }
 
-  // Whether `world: 'MAIN'` may be combined with `persistAcrossSessions` is not
-  // something the documentation settles, and a refusal here is invisible from
-  // the page — it looks exactly like a site that simply never calls WebAuthn.
-  // So the persistent form is tried, and the session-only form after it.
-  for (const persistAcrossSessions of [true, false]) {
-    try {
-      await chrome.scripting.registerContentScripts([
-      {
-        id: PASSKEY_HOOK_ID,
-        js: ['webauthnHook.js'],
-        // The page's own world: an isolated script cannot replace a function
-        // the page will call.
-        world: 'MAIN',
-        // HTTPS only. WebAuthn is a secure-context feature, and an assertion
-        // answered over plain HTTP is a signature handed to whoever is on the
-        // wire — `validateAssertionAsk` refuses it too, one layer down.
-        matches: ['https://*/*'],
-        // Main frame only, as §4 has it for the detector. A sign-in inside an
-        // iframe is therefore **not** intercepted and the browser handles it —
-        // a real limitation, and the first thing to check when a site shows its
-        // own prompt instead of ours.
-        allFrames: false,
-        runAt: 'document_start',
-        persistAcrossSessions,
-      },
-      {
-        id: PASSKEY_BRIDGE_ID,
-        js: ['webauthnBridge.js'],
-        world: 'ISOLATED',
-        matches: ['https://*/*'],
-        allFrames: false,
-        runAt: 'document_start',
-        persistAcrossSessions,
-      },
-      ]);
-      console.debug('[zwarden] passkey hook registered', { persistAcrossSessions });
-      await savePasskeyHookStatus({ registered: true, error: null });
-      return;
-    } catch (error) {
-      // Recorded where the settings page can show it. A registration that fails
-      // silently leaves the feature switched on and absent from every page —
-      // the worst of both, since the user believes it works and has no way to
-      // find out.
-      console.error('[zwarden] could not install the passkey hook:', error);
-      await savePasskeyHookStatus({ registered: false, error: String(error) });
+  // Registered **one at a time**, not as a pair.
+  //
+  // A single call is atomic: if a browser refuses the main-world half — and
+  // whether Firefox accepts `world` here at all is not something its
+  // documentation settles — then neither half installs, and the error names
+  // the call rather than the script. Separately, the bridge still lands, the
+  // failure says which one it was, and what the settings page reports is the
+  // truth about each.
+  const scripts: chrome.scripting.RegisteredContentScript[] = [
+    {
+      id: PASSKEY_HOOK_ID,
+      js: ['webauthnHook.js'],
+      // The page's own world: an isolated script cannot replace a function the
+      // page will call.
+      world: 'MAIN',
+      // HTTPS only. WebAuthn is a secure-context feature, and an assertion
+      // answered over plain HTTP is a signature handed to whoever is on the
+      // wire — `validateAssertionAsk` refuses it too, one layer down.
+      matches: ['https://*/*'],
+      // Main frame only, as §4 has it for the detector: a sign-in inside an
+      // iframe is not intercepted, and the browser handles it.
+      allFrames: false,
+      runAt: 'document_start',
+      persistAcrossSessions: true,
+    },
+    {
+      id: PASSKEY_BRIDGE_ID,
+      js: ['webauthnBridge.js'],
+      world: 'ISOLATED',
+      matches: ['https://*/*'],
+      allFrames: false,
+      runAt: 'document_start',
+      persistAcrossSessions: true,
+    },
+  ];
+
+  const refused: string[] = [];
+  for (const script of scripts) {
+    // The persistent form first, the session-only one after: whether `world`
+    // may be combined with `persistAcrossSessions` is undocumented, and a hook
+    // that must be registered again after a restart still works.
+    let installed = false;
+    for (const persistAcrossSessions of [true, false]) {
+      try {
+        await chrome.scripting.registerContentScripts([{ ...script, persistAcrossSessions }]);
+        installed = true;
+        break;
+      } catch (error) {
+        if (!persistAcrossSessions) {
+          console.error(`[zwarden] could not register ${script.id}:`, error);
+          refused.push(`${script.id}: ${String(error)}`);
+        }
+      }
+    }
+    if (!installed && script.id === PASSKEY_HOOK_ID) {
+      // Without this half there is nothing to intercept with: the bridge alone
+      // is a channel to a page that never speaks.
+      console.error('[zwarden] no passkey hook in pages — nothing will be intercepted');
     }
   }
+
+  console.log('[zwarden] passkey scripts', {
+    registered: (await chrome.scripting.getRegisteredContentScripts({ ids })).map((s) => s.id),
+  });
+  await savePasskeyHookStatus(
+    refused.length === 0
+      ? { registered: true, error: null }
+      : { registered: false, error: refused.join(' \u2014 ') },
+  );
 }
 
 /**
