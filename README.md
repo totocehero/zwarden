@@ -176,7 +176,10 @@ git makes every commit noisy and invites a `dist/` that quietly disagrees with
 the source it claims to come from. Each release is built by
 [`.github/workflows/release.yml`](.github/workflows/release.yml) from the
 tagged commit, after the same checks CI runs — and `npm ci && npm run build`
-reproduces it locally.
+reproduces it locally. Each release also carries a `SHA256SUMS` file and a
+signed build attestation: `gh attestation verify <zip> --owner totocehero`
+checks that GitHub built the archive from that commit, in that workflow. The
+workflows themselves pin every action to a commit, not a tag.
 
 ## Which servers this works with
 

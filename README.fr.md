@@ -194,7 +194,11 @@ rend chaque commit bruyant et invite un `dist/` qui diverge en silence de la
 source dont il se réclame. Chaque version est construite par
 [`.github/workflows/release.yml`](.github/workflows/release.yml) depuis le
 commit étiqueté, après les mêmes contrôles que la CI — et `npm ci && npm run
-build` la reproduit localement.
+build` la reproduit localement. Chaque version embarque aussi un fichier
+`SHA256SUMS` et une attestation de provenance signée :
+`gh attestation verify <zip> --owner totocehero` vérifie que GitHub a bien
+construit l'archive depuis ce commit, dans ce workflow. Les workflows
+eux-mêmes épinglent chaque action sur un commit, pas sur un tag.
 
 ## Avec quels serveurs ça marche
 

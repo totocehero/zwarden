@@ -1,0 +1,9 @@
+# Keeps the commit-pinned actions in the workflows current. Pinning to a SHA
+# is what protects the release token from a moved tag; without something to
+# move the pins forward, it would also freeze them for ever.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

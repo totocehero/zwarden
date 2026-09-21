@@ -11,12 +11,20 @@ on:
     branches: [master]
   pull_request:
 
+# Read-only. Nothing here writes to the repository, so nothing here may.
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # Pinned to a commit, not a tag: a tag can be moved, and a moved tag on
+      # an action that runs with the repository's token is a supply-chain
+      # attack with no diff to review. The version is in the comment so a
+      # human can still read it; Dependabot keeps both in step.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
           cache: npm

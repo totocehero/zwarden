@@ -15,15 +15,25 @@ on:
   # tagging anything.
   workflow_dispatch:
 
-permissions:
-  contents: write
+# Nothing by default. The one job that publishes asks for what it needs,
+# and only that.
+permissions: {}
 
 jobs:
   package:
     runs-on: ubuntu-latest
+    permissions:
+      # To create the release and attach the files.
+      contents: write
+      # To sign the provenance attestation with the workflow's own identity.
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # Pinned to a commit, not a tag — see ci.yml. This workflow's token can
+      # rewrite release assets, and a release asset of a password manager is
+      # exactly what a moved tag would be moved for.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
           cache: npm
@@ -44,34 +54,54 @@ jobs:
           [ "$GITHUB_REF_TYPE" = tag ] || base="zwarden-${version}-$(git rev-parse --short HEAD)"
           (cd dist && zip -qr "../${base}-chrome.zip" .)
           (cd dist-firefox && zip -qr "../${base}-firefox.zip" .)
+          # So a download can be checked against what this run produced.
+          sha256sum "${base}"-*.zip > SHA256SUMS
           echo "BASE=${base}" >> "$GITHUB_ENV"
           ls -l "${base}"-*.zip
+          cat SHA256SUMS
+
+      # Signed provenance: which workflow, on which commit, built these bytes.
+      # Verifiable by anyone with `gh attestation verify <zip> --owner <owner>`.
+      - uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f # v3.2.0
+        with:
+          subject-path: ${{ env.BASE }}-*.zip
 
       # For a hand-run build: downloadable from the run itself.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ env.BASE }}
-          path: ${{ env.BASE }}-*.zip
+          path: |
+            ${{ env.BASE }}-*.zip
+            SHA256SUMS
 
+      # With the built-in `gh`, under the built-in token: no third-party action
+      # between the build and the published bytes.
       - name: Attach it to the release
         if: github.ref_type == 'tag'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ env.BASE }}-*.zip
-          body: |
-            Two packages, same code, different manifests.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > release-notes.md <<'NOTES'
+          Two packages, same code, different manifests.
 
-            **Chrome / Edge** — `…-chrome.zip`. Unzip somewhere permanent, the
-            browser reloads it from that folder at every start-up. Then
-            `chrome://extensions`, Developer mode, *Load unpacked*, choose the
-            folder holding `manifest.json`.
+          **Chrome / Edge** — `…-chrome.zip`. Unzip somewhere permanent, the
+          browser reloads it from that folder at every start-up. Then
+          `chrome://extensions`, Developer mode, *Load unpacked*, choose the
+          folder holding `manifest.json`.
 
-            **Firefox 128+** — `…-firefox.zip`. `about:debugging#/runtime/this-firefox`,
-            *Load Temporary Add-on*, choose the `manifest.json` inside. It is
-            temporary: Firefox forgets it when it closes. The deferred
-            clipboard wipe is Chrome-only, since Firefox has no offscreen
-            documents — the wipe still happens, just not after the popup has
-            gone.
+          **Firefox 128+** — `…-firefox.zip`. `about:debugging#/runtime/this-firefox`,
+          *Load Temporary Add-on*, choose the `manifest.json` inside. It is
+          temporary: Firefox forgets it when it closes. The deferred
+          clipboard wipe is Chrome-only, since Firefox has no offscreen
+          documents — the wipe still happens, just not after the popup has
+          gone.
 
-            Built by this workflow from the tagged commit, after the same
-            checks CI runs. See the README for updating.
+          Built by this workflow from the tagged commit, after the same
+          checks CI runs. `SHA256SUMS` lists the digests of both archives, and
+          `gh attestation verify <zip> --owner ${{ github.repository_owner }}`
+          checks that GitHub built them from this commit. See the README for
+          updating.
+          NOTES
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md
+          gh release upload "$GITHUB_REF_NAME" "${BASE}"-*.zip SHA256SUMS --clobber
