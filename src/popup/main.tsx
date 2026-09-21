@@ -50,6 +50,8 @@ import { HealthPanel } from './components/HealthPanel.js';
 import { TypeFilter } from './components/TypeFilter.js';
 import { type MenuAction, VaultHeader } from './components/VaultHeader.js';
 import { usePasskeyCeremony } from './hooks/usePasskeyCeremony.js';
+import { useVaultHealth } from './hooks/useVaultHealth.js';
+import { useWriteQueue } from './hooks/useWriteQueue.js';
 import { useVaultExport } from './hooks/useVaultExport.js';
 import { chipsFor, ItemRow } from './components/ItemRow.js';
 import { RepromptGuard } from './components/RepromptGuard.js';
@@ -92,15 +94,7 @@ import {
 import { buildVaultKeys, destroyVaultKeys } from '@core/vault/keyring.js';
 import { type VaultLabels, decryptLabels } from '@core/vault/labels.js';
 import { matchesOrigin } from '@core/vault/uriMatch.js';
-import { decideReplay, isUnreachable } from '@core/vault/offlineQueue.js';
-import { buildHealthReport, type HealthReport } from '@core/vault/health.js';
-import { checkPasswords } from '@core/vault/breachCheck.js';
-import {
-  clearWriteQueue,
-  enqueueWrite,
-  loadWriteQueue,
-  removeWrites,
-} from '@shared/writeQueue.js';
+import { isUnreachable } from '@core/vault/offlineQueue.js';
 import { type TotpConfig, generateTotp, parseTotp } from '@core/vault/totp.js';
 import { type UnlockResult, unlock } from '@core/vault/session.js';
 import {
@@ -363,9 +357,17 @@ function App() {
    * Writes made while the server was unreachable: how many are waiting, and how
    * many could not be applied because the item changed elsewhere.
    */
-  const [queued, setQueued] = useState({ pending: 0, held: 0 });
+  const queue = useWriteQueue({ setBusy, setError });
   /** The health report, while its screen is open. */
-  const [health, setHealth] = useState<HealthReport | null>(null);
+  const health = useVaultHealth({
+    vault,
+    settings,
+    authorize: () => authorize(),
+    afterWrite: (auth, userKey) => refreshAfterWrite(auth, userKey),
+    setBusy,
+    setError,
+    messageFor,
+  });
   /** The export form's three secrets, while its screen is open. */
   const vaultExport = useVaultExport({ vault, setBusy, setError, messageFor });
   /** The passkey ceremony a page is waiting on, once it has been validated. */
@@ -425,7 +427,7 @@ function App() {
       setSettings(loaded);
       // Held writes survive the browser closing, so the count is read at every
       // opening, not only after a failure.
-      void refreshQueueCounts();
+      void queue.refreshCounts();
       setServerUrl(loaded.serverUrl);
       setEmail(loaded.email);
       await restoreSession(loaded);
@@ -554,13 +556,13 @@ function App() {
     // The server is answering again: send what was held while it was not.
     // Decided against this very sync, so a conflict is read off the server's
     // own current state rather than guessed.
-    const replayed = await replayQueue(client, accessToken, sync);
+    const replayed = await queue.replay(client, accessToken, sync);
     if (replayed.sent > 0) {
       // A second sync, and only when something actually went out: the list must
       // show what was just written, not the state from before it.
       sync = await client.sync(accessToken);
     }
-    await refreshQueueCounts(replayed.held);
+    await queue.refreshCounts(replayed.held);
 
     await saveStoredSession({
       ...stored,
@@ -813,7 +815,7 @@ function App() {
     setEditOriginalPassword('');
     setEditShowPassword(false);
     setEditPasskeys([]);
-    setHealth(null);
+    health.close();
     // The export form holds the master password and a passphrase in its own
     // state: locking must take those with it, like every other secret on
     // screen (`docs/EXTENSION.md` §2).
@@ -949,7 +951,7 @@ function App() {
           throw err;
         }
         await dismissProposal();
-        await holdWrite(
+        await queue.hold(
           existing === null ? 'create' : 'update',
           existing?.id ?? null,
           payload,
@@ -1352,170 +1354,6 @@ function App() {
     await showVault(sync, userKey, false);
   }
 
-  /**
-   * Holds a write the server never received.
-   *
-   * Only called for a failure that means "no answer" — `isUnreachable` keeps a
-   * refusal out of the queue, since retrying a refusal never succeeds and would
-   * hide a real error behind a reassuring "saved locally".
-   *
-   * What is stored is the **already-encrypted** body. The cleartext edit never
-   * reaches disk (`docs/STORAGE.md` §4).
-   */
-  async function holdWrite(
-    kind: 'create' | 'update',
-    cipherId: string | null,
-    payload: Record<string, unknown>,
-    baseRevision: string | null,
-    label: string,
-  ): Promise<void> {
-    await enqueueWrite({
-      id: crypto.randomUUID(),
-      kind,
-      cipherId,
-      payload,
-      baseRevision,
-      queuedAt: Date.now(),
-      label,
-    });
-    await refreshQueueCounts();
-    setBusy(null);
-    setError(t('queueSavedOffline'));
-  }
-
-  /** Reflects the queue's size on screen. */
-  async function refreshQueueCounts(held = 0): Promise<void> {
-    const queue = await loadWriteQueue();
-    setQueued({ pending: queue.length, held });
-  }
-
-  /**
-   * Sends what was held, once the server answers again.
-   *
-   * Decided against the sync that has just come back, so a conflict is detected
-   * from the server's own current state rather than from a guess.
-   *
-   * @returns How many were sent, and how many were held back.
-   */
-  async function replayQueue(
-    client: ApiClient,
-    accessToken: string,
-    sync: SyncResponse,
-  ): Promise<{ sent: number; held: number }> {
-    const queue = await loadWriteQueue();
-    if (queue.length === 0) {
-      return { sent: 0, held: 0 };
-    }
-    const byId = new Map((sync.ciphers ?? []).map((c) => [c.id, c]));
-    const done: string[] = [];
-    let held = 0;
-
-    for (const entry of queue) {
-      const outcome = decideReplay(entry, byId.get(entry.cipherId ?? ''));
-      if (outcome.kind !== 'replay') {
-        // Nothing is overwritten and nothing is resurrected. The user is told,
-        // and decides.
-        held += 1;
-        continue;
-      }
-      try {
-        if (entry.kind === 'create') {
-          await client.createCipher(accessToken, entry.payload);
-        } else {
-          await client.updateCipher(accessToken, entry.cipherId!, entry.payload);
-        }
-        done.push(entry.id);
-      } catch (err) {
-        if (isUnreachable(err)) {
-          // Still offline: stop, keep the rest, try again next time.
-          break;
-        }
-        // Refused. Retrying would refuse again for ever; it is dropped and
-        // counted as held so the user hears about it.
-        done.push(entry.id);
-        held += 1;
-      }
-    }
-
-    await removeWrites(done);
-    return { sent: done.length - held, held };
-  }
-
-  /** Abandons the held writes the user has given up on. */
-  async function onDiscardQueue(): Promise<void> {
-    const n = await clearWriteQueue();
-    setQueued({ pending: 0, held: 0 });
-    setError(n === 0 ? null : t('queueDiscarded', String(n)));
-  }
-
-  /**
-   * Examines the vault and opens the report.
-   *
-   * Every password has to be decrypted for this, which is why it happens on an
-   * explicit gesture and not on opening: it is exactly the work the list was
-   * just taught to avoid. Items guarded by `reprompt` are handed over
-   * untouched — `buildHealthReport` skips them, and says how many.
-   */
-  async function onCheckHealth(): Promise<void> {
-    if (vault === null) {
-      return;
-    }
-    setError(null);
-    setBusy(t('healthChecking'));
-    try {
-      const open = vault;
-      const inputs = await Promise.all(
-        open.items.map(async (item) => {
-          const cipher = open.raw.get(item.id);
-          // A guarded item is never decrypted, not even to be counted.
-          const details =
-            item.reprompt || cipher === undefined
-              ? null
-              : await decryptCipherDetails(cipher, open.keys, () => undefined);
-          const login = cipher === undefined ? undefined : readField<unknown>(cipher, 'login');
-          return {
-            id: item.id,
-            name: item.name,
-            username: item.username,
-            uris: item.uris,
-            type: item.type,
-            reprompt: item.reprompt,
-            password: details?.password ?? null,
-            // Neither is encrypted, so reading them costs nothing and asks
-            // nothing of the guard.
-            //
-            // The fallback is the point: Bitwarden sets `passwordRevisionDate`
-            // only when a password is **changed after creation**, so an item
-            // made years ago and never edited has none at all. Skipping those
-            // would hide exactly the oldest passwords, which is the opposite of
-            // what this list is for. If the password was never revised, it is
-            // as old as the item.
-            passwordUpdatedAt:
-              readField<string>(login, 'passwordRevisionDate') ??
-              readField<string>(cipher, 'creationDate') ??
-              null,
-            card: details?.card ?? null,
-          };
-        }),
-      );
-      // The corpus is consulted only if the user asked for it to be, and only
-      // as part of a report they explicitly requested. Never on opening, never
-      // in the background.
-      let breached: ReadonlyMap<string, number> | undefined;
-      if (settings.breachCheckEnabled) {
-        const passwords = inputs
-          .map((input) => input.password)
-          .filter((password): password is string => password !== null && password !== '');
-        setBusy(t('healthBreachChecking', String(new Set(passwords).size)));
-        breached = await checkPasswords(passwords);
-      }
-      setHealth(buildHealthReport(inputs, new Date(), breached === undefined ? {} : { breached }));
-    } catch (err) {
-      setError(messageFor(err));
-    } finally {
-      setBusy(null);
-    }
-  }
 
   /**
    * Opens an item's site in a new tab.
@@ -1531,45 +1369,6 @@ function App() {
   }
 
   /**
-   * Moves an item to the trash, from the health report.
-   *
-   * The trash and not the permanent deletion: the official clients keep a
-   * trashed item for thirty days, so a misclick on a list one is skimming costs
-   * a trip to the web vault rather than a password that exists nowhere any
-   * more.
-   *
-   * Not queued when the server is unreachable, unlike an edit. A held deletion
-   * would have to decide what to do about an item changed in the meantime, and
-   * "delete it anyway" is the wrong answer often enough that the honest
-   * behaviour is to fail visibly and let the user try again.
-   */
-  async function onTrashItem(cipherId: string): Promise<void> {
-    if (vault === null) {
-      return;
-    }
-    const name = vault.items.find((i) => i.id === cipherId)?.name ?? cipherId;
-    setError(null);
-    setBusy(t('statusSaving'));
-    try {
-      const auth = await authorize();
-      await auth.client.trashCipher(auth.accessToken, cipherId);
-      await refreshAfterWrite(auth, vault.userKey);
-      // The report described a vault that no longer holds this item: the row
-      // goes, rather than staying until the panel is reopened.
-      setHealth((current) =>
-        current === null
-          ? null
-          : { ...current, stale: current.stale.filter((f) => f.id !== cipherId) },
-      );
-      setError(t('healthDeleted', name));
-    } catch (err) {
-      setError(messageFor(err));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  /**
    * What the header's menu holds.
    *
    * Built here rather than in the header: the header knows how to show a menu,
@@ -1579,7 +1378,7 @@ function App() {
    */
   function menuActions(unlocked: boolean): readonly MenuAction[] {
     return [
-      { key: 'health', label: 'actionHealth', run: unlocked ? () => void onCheckHealth() : undefined },
+      { key: 'health', label: 'actionHealth', run: unlocked ? () => void health.check() : undefined },
       { key: 'export', label: 'actionExport', run: unlocked ? vaultExport.open : undefined },
       { key: 'settings', label: 'actionSettings', run: openOptions },
       { key: 'lock', label: 'actionLock', run: onLock },
@@ -1667,7 +1466,7 @@ function App() {
         if (!isUnreachable(err)) {
           throw err;
         }
-        await holdWrite(
+        await queue.hold(
           raw === undefined ? 'create' : 'update',
           editing?.id ?? null,
           payload,
@@ -1838,13 +1637,13 @@ function App() {
   }
 
   // --- Vault health ---------------------------------------------------------
-  if (health !== null) {
+  if (health.report !== null) {
     return (
       <div>
         <HealthPanel
-          report={health}
-          onBack={() => setHealth(null)}
-          onDelete={(id) => void onTrashItem(id)}
+          report={health.report}
+          onBack={health.close}
+          onDelete={(id) => void health.trash(id)}
           onOpen={openSite}
         />
         {busy !== null && <p class="status">{busy}</p>}
@@ -1905,17 +1704,17 @@ function App() {
           />
         )}
         {generator.render()}
-        {queued.pending > 0 && (
-          <div class={`queue-banner${queued.held > 0 ? ' queue-held' : ''}`}>
+        {queue.pending > 0 && (
+          <div class={`queue-banner${queue.held > 0 ? ' queue-held' : ''}`}>
             <p>
-              {queued.held > 0
-                ? t('queueHeld', String(queued.held))
-                : t('queuePending', String(queued.pending))}
+              {queue.held > 0
+                ? t('queueHeld', String(queue.held))
+                : t('queuePending', String(queue.pending))}
             </p>
-            {queued.held > 0 && (
+            {queue.held > 0 && (
               <>
                 <p class="hint-diag">{t('queueHeldDetail')}</p>
-                <button class="secondary" onClick={() => void onDiscardQueue()}>
+                <button class="secondary" onClick={() => void queue.discard()}>
                   {t('queueDiscard')}
                 </button>
               </>

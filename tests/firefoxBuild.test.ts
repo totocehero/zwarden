@@ -8,13 +8,26 @@
  * silently stops loading.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
 const root = (path: string): string => fileURLToPath(new URL(`../${path}`, import.meta.url));
-const built = existsSync(root('dist-firefox/manifest.json'));
+/**
+ * Only when there is a Firefox package, and only when it is not older than the
+ * Chrome one.
+ *
+ * `npm test` must not demand `npm run build:firefox` first, and a `dist/`
+ * rebuilt on its own would otherwise fail the byte comparison for a reason
+ * that is not a defect. CI runs the two builds in order, so the comparison
+ * always happens there.
+ */
+const built =
+  existsSync(root('dist-firefox/manifest.json')) &&
+  existsSync(root('dist/manifest.json')) &&
+  statSync(root('dist-firefox/manifest.json')).mtimeMs >=
+    statSync(root('dist/manifest.json')).mtimeMs;
 
 const read = (path: string): Record<string, unknown> =>
   JSON.parse(readFileSync(root(path), 'utf8')) as Record<string, unknown>;
