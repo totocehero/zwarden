@@ -672,10 +672,12 @@ async function onAssertionRequest(
   // nothing would make Zwarden a ninety-second delay on every sign-in done with
   // a hardware key — which is most of them.
   if (ceremony === 'get' && !(await canAnswerFor(options))) {
+    // Counts, not names: the parties the vault holds passkeys for are the
+    // same class of fact the never-save list is hashed to protect.
     console.debug(
       `[zwarden] declined before asking: rpId=${String(
         (options as { rpId?: unknown }).rpId ?? "(the page's own host)",
-      )}, known=[${(await loadPasskeyParties())?.join(', ') ?? '(not published yet)'}]`,
+      )}, known=${(await loadPasskeyParties())?.length ?? '(not published yet)'}`,
     );
     port.postMessage({ result: null });
     return;
