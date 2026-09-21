@@ -9,6 +9,10 @@
  * rendering in `components/`.
  */
 
+// First, and for its effect: in Firefox this makes `chrome.*` the promise-
+// returning namespace, which every `await chrome.…` in this project assumes.
+import '@shared/browserApi.js';
+
 import { applyLocale, t } from '@shared/i18n.js';
 import { loadSettings } from '@shared/storage.js';
 import { render } from 'preact';

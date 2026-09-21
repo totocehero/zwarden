@@ -44,6 +44,10 @@
  * popup with no key — will gradually replace this file.
  */
 
+// First, and for its effect: in Firefox this makes `chrome.*` the promise-
+// returning namespace, which every `await chrome.…` in this project assumes.
+import '@shared/browserApi.js';
+
 import { generatePassword } from '@core/generator/password.js';
 import { vaultMayAnswer } from '@core/vault/webauthnRequest.js';
 import { applyToolbarIcon, variantFor } from '@shared/theme.js';

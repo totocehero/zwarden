@@ -35,6 +35,10 @@
  * secret into a field not made for it.
  */
 
+// First, and for its effect: in Firefox this makes `chrome.*` the promise-
+// returning namespace, which every `await chrome.…` in this project assumes.
+import '../shared/browserApi.js';
+
 import { findCapture } from './heuristics.js';
 
 /** Message type, shared with the service worker. */

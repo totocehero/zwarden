@@ -5,14 +5,20 @@
 Un gestionnaire de mots de passe libre pour navigateur, compatible avec
 [Vaultwarden](https://github.com/dani-garcia/vaultwarden) et l'API Bitwarden.
 
-L'objectif : la même compatibilité, un ordre de grandeur de moins sur la balance.
+L'objectif : la même compatibilité, un ordre de grandeur de moins sur la
+balance — le calcul est [à la fin](#où-était-le-poids).
 
 ## D'où vient ce code
 
-**Ce dépôt ne contient aucune ligne écrite par un humain.** Le code, les tests et
-la documentation ont été produits entièrement par un modèle de langage (Claude),
-sous direction humaine : périmètre, arbitrages et validation. Les mentions
-`Co-Authored-By` des commits en gardent la trace.
+Je l'ai d'abord fait pour moi. Je voulais un gestionnaire qui parle à mon
+Vaultwarden sans trimballer quarante-six mégaoctets pour ça, et le résultat m'a
+paru assez bon pour que le garder eût été du gâchis. Toute l'ambition est là :
+il ne cherche à remplacer personne, et ce n'est pas un produit.
+
+**Ce dépôt ne contient aucune ligne écrite par un humain.** Le code, les tests
+et la documentation ont été produits entièrement par un modèle de langage
+(Claude), sous direction humaine : périmètre, arbitrages et validation. Les
+mentions `Co-Authored-By` des commits en gardent la trace.
 
 Ce que cela implique, dit franchement : les choix cryptographiques sont vérifiés
 contre les vecteurs officiels (RFC 4231 / 5869 / 6238 / 7914) et par un
@@ -20,34 +26,11 @@ aller-retour d'interopérabilité contre un vrai Vaultwarden, mais **aucun audit
 sécurité humain indépendant n'a été mené**. Pour un gestionnaire de mots de
 passe, c'est un fait auquel vous avez droit avant de lui confier un coffre.
 
-## Pourquoi
-
-L'extension Bitwarden officielle (2026.7.0), mesurée sur le disque — **46,4 Mo**
-décompressés, hors source maps :
-
-| Élément | Taille | Conséquence |
-|---|---|---|
-| `background.js` | 3,3 Mo | un service worker MV3 tué après 30 s d'inactivité → 3,3 Mo réanalysés à chaque réveil |
-| module WASM (SDK Rust) | 7,4 Mo **× 2** | chargé au démarrage — et le paquet en contient deux copies **identiques octet pour octet** |
-| bundles d'autofill (`bootstrap-autofill-overlay*.js` × 3) | 4,9 Mo | candidats à l'injection dans les pages visitées ; le « détecteur » de `document_start` est en réalité un déclencheur inconditionnel de 164 octets, sans aucune détection de formulaire |
-| popup Angular (JS + CSS) | 6,7 Mo | plusieurs centaines de ms avant le premier rendu |
-| traductions (63 langues) | 15 Mo | livrées en entier, quelle que soit la langue |
-
-Zwarden vise **moins de 300 Ko** au total.
-
-Les leviers, par ordre d'impact :
-
-1. **WebCrypto natif** plutôt qu'un SDK Rust compilé en WASM. AES-256-CBC,
-   HMAC-SHA256, PBKDF2-SHA256 et SHA-2 sont déjà dans le navigateur : natifs, à
-   temps constant, audités, et 0 octet de bundle. Seul Argon2id exige du WASM
-   (~45 Ko), chargé par import dynamique et uniquement au déverrouillage d'un
-   compte configuré ainsi.
-2. **Autofill en deux étages** : un détecteur de formulaire léger à
-   `document_start`, le moteur de remplissage injecté seulement une fois un
-   champ pertinent détecté.
-3. **Preact** (~10 Ko de runtime) au lieu d'Angular.
-4. **Un service worker mince** : logique lourde en modules dynamiques, état
-   volatile dans `chrome.storage.session`.
+Et c'est là que vous entrez en scène, si le cœur vous en dit. Si vous connaissez
+le terrain et que l'envie vous prend d'y jeter un œil — la crypto, le modèle de
+stockage, n'importe quoi — la porte est ouverte et une issue est la bienvenue.
+Rien n'est attendu, rien n'est dû. Une relecture, un doute, un « tu as pensé
+à… » : à votre bon cœur. 🙂
 
 ## État
 
@@ -274,6 +257,35 @@ qui divergeraient à la première correction.
 - [`docs/STORAGE.md`](docs/STORAGE.md) — ce qui est stocké où, et ce qu'obtient
   réellement un attaquant qui atteint chaque espace. Écrit à l'envers, depuis
   les capacités de l'attaquant plutôt que depuis la liste des fonctions.
+
+## Où était le poids
+
+L'extension Bitwarden officielle (2026.7.0), mesurée sur le disque — **46,4 Mo**
+décompressés, hors source maps :
+
+| Élément | Taille | Conséquence |
+|---|---|---|
+| `background.js` | 3,3 Mo | un service worker MV3 tué après 30 s d'inactivité → 3,3 Mo réanalysés à chaque réveil |
+| module WASM (SDK Rust) | 7,4 Mo **× 2** | chargé au démarrage — et le paquet en contient deux copies **identiques octet pour octet** |
+| bundles d'autofill (`bootstrap-autofill-overlay*.js` × 3) | 4,9 Mo | candidats à l'injection dans les pages visitées ; le « détecteur » de `document_start` est en réalité un déclencheur inconditionnel de 164 octets, sans aucune détection de formulaire |
+| popup Angular (JS + CSS) | 6,7 Mo | plusieurs centaines de ms avant le premier rendu |
+| traductions (63 langues) | 15 Mo | livrées en entier, quelle que soit la langue |
+
+Zwarden vise **moins de 300 Ko** au total.
+
+Les leviers, par ordre d'impact :
+
+1. **WebCrypto natif** plutôt qu'un SDK Rust compilé en WASM. AES-256-CBC,
+   HMAC-SHA256, PBKDF2-SHA256 et SHA-2 sont déjà dans le navigateur : natifs, à
+   temps constant, audités, et 0 octet de bundle. Seul Argon2id exige du WASM
+   (~45 Ko), chargé par import dynamique et uniquement au déverrouillage d'un
+   compte configuré ainsi.
+2. **Autofill en deux étages** : un détecteur de formulaire léger à
+   `document_start`, le moteur de remplissage injecté seulement une fois un
+   champ pertinent détecté.
+3. **Preact** (~10 Ko de runtime) au lieu d'Angular.
+4. **Un service worker mince** : logique lourde en modules dynamiques, état
+   volatile dans `chrome.storage.session`.
 
 ## Licence
 

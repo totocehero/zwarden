@@ -5,9 +5,15 @@
 An open-source browser password manager, compatible with
 [Vaultwarden](https://github.com/dani-garcia/vaultwarden) and the Bitwarden API.
 
-The goal: the same compatibility, an order of magnitude less weight.
+The goal: the same compatibility, an order of magnitude less weight — the
+arithmetic is at the [end](#where-the-weight-went).
 
 ## Where this code comes from
+
+I built this for myself first. I wanted a manager that talks to my own
+Vaultwarden without carrying forty-six megabytes to do it, and it turned out
+well enough that keeping it to myself seemed a waste. That is the whole of the
+ambition: it is not trying to replace anything, and it is not a product.
 
 **This repository contains no line written by a human.** Code, tests and
 documentation were produced entirely by a language model (Claude), under human
@@ -20,33 +26,10 @@ trip against a real Vaultwarden, but **no independent human security audit has
 been conducted**. For a password manager, that is a fact you are entitled to
 before trusting it with a vault.
 
-## Why
-
-The official Bitwarden extension (2026.7.0), measured on disk — **46.4 MB**
-uncompressed, excluding source maps:
-
-| Item | Size | Consequence |
-|---|---|---|
-| `background.js` | 3.3 MB | an MV3 service worker killed after 30 s idle → 3.3 MB reparsed on every wake-up |
-| WASM module (Rust SDK) | 7.4 MB **× 2** | loaded at start-up — and the package holds two **byte-for-byte identical** copies |
-| autofill bundles (`bootstrap-autofill-overlay*.js` × 3) | 4.9 MB | candidates for injection into visited pages; the "detector" at `document_start` is in fact a 164-byte unconditional trigger, with no form detection |
-| Angular popup (JS + CSS) | 6.7 MB | several hundred ms before the first render |
-| translations (63 locales) | 15 MB | shipped in full, whatever the language |
-
-Zwarden aims for **under 300 KB** in total.
-
-The levers, in order of impact:
-
-1. **Native WebCrypto** rather than a Rust SDK compiled to WASM. AES-256-CBC,
-   HMAC-SHA256, PBKDF2-SHA256 and SHA-2 are already in the browser: native,
-   constant-time, audited, and 0 bytes of bundle. Argon2id alone needs WASM
-   (~45 KB), loaded through a dynamic import and only when unlocking an account
-   configured that way.
-2. **Two-stage autofill**: a light form detector at `document_start`, the
-   autofill engine injected only once a relevant field is detected.
-3. **Preact** (~10 KB of runtime) instead of Angular.
-4. **A thin service worker**: heavy logic in dynamic modules, volatile state in
-   `chrome.storage.session`.
+Which is where you come in, if you feel like it. If you know this territory and
+fancy a look — at the crypto, at the storage model, at anything — the door is
+open and an issue is welcome. Nothing is expected and nothing is owed. A
+review, a doubt, a "have you thought about", all gratefully received. 🙂
 
 ## Status
 
@@ -252,6 +235,34 @@ npm run size      # size budget for dist/
 - [`docs/STORAGE.md`](docs/STORAGE.md) — what is stored where, and what an
   attacker reaching each store actually gets. Written backwards, from the
   attacker's capabilities rather than from the feature list.
+
+## Where the weight went
+
+The official Bitwarden extension (2026.7.0), measured on disk — **46.4 MB**
+uncompressed, excluding source maps:
+
+| Item | Size | Consequence |
+|---|---|---|
+| `background.js` | 3.3 MB | an MV3 service worker killed after 30 s idle → 3.3 MB reparsed on every wake-up |
+| WASM module (Rust SDK) | 7.4 MB **× 2** | loaded at start-up — and the package holds two **byte-for-byte identical** copies |
+| autofill bundles (`bootstrap-autofill-overlay*.js` × 3) | 4.9 MB | candidates for injection into visited pages; the "detector" at `document_start` is in fact a 164-byte unconditional trigger, with no form detection |
+| Angular popup (JS + CSS) | 6.7 MB | several hundred ms before the first render |
+| translations (63 locales) | 15 MB | shipped in full, whatever the language |
+
+Zwarden aims for **under 300 KB** in total.
+
+The levers, in order of impact:
+
+1. **Native WebCrypto** rather than a Rust SDK compiled to WASM. AES-256-CBC,
+   HMAC-SHA256, PBKDF2-SHA256 and SHA-2 are already in the browser: native,
+   constant-time, audited, and 0 bytes of bundle. Argon2id alone needs WASM
+   (~45 KB), loaded through a dynamic import and only when unlocking an account
+   configured that way.
+2. **Two-stage autofill**: a light form detector at `document_start`, the
+   autofill engine injected only once a relevant field is detected.
+3. **Preact** (~10 KB of runtime) instead of Angular.
+4. **A thin service worker**: heavy logic in dynamic modules, volatile state in
+   `chrome.storage.session`.
 
 ## Licence
 
