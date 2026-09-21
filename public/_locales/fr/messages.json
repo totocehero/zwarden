@@ -443,6 +443,9 @@
   "settingsPasskeyReload": {
     "message": "Les onglets déjà ouverts ne sont pas couverts — ouvrez-en un nouveau."
   },
+  "settingsPasskeyTraces": {
+    "message": "Traces : chaque étape est journalisée au niveau « verbose ». Pour en suivre une, ouvrez la console de la page, levez le filtre Verbose, et cherchez les lignes commençant par [zwarden]."
+  },
   "assertionTitle": {
     "message": "Se connecter par passkey"
   },

@@ -470,7 +470,7 @@ async function applyPasskeyRegistration(): Promise<void> {
   // Said on every start-up. Whether the setting is even on was the one fact
   // never confirmed while several real but unrelated faults were found and
   // fixed; it should not have taken that long, and it will not again.
-  console.log('[zwarden] passkey sign-in', {
+  console.debug('[zwarden] passkey sign-in', {
     setting: passkeySignIn ? 'on' : 'off',
     alreadyRegistered: existing.map((script) => script.id),
   });
@@ -530,7 +530,7 @@ async function applyPasskeyRegistration(): Promise<void> {
         persistAcrossSessions,
       },
       ]);
-      console.log('[zwarden] passkey hook registered', { persistAcrossSessions });
+      console.debug('[zwarden] passkey hook registered', { persistAcrossSessions });
       await savePasskeyHookStatus({ registered: true, error: null });
       return;
     } catch (error) {
@@ -595,14 +595,14 @@ async function onAssertionRequest(
   // nothing would make Zwarden a ninety-second delay on every sign-in done with
   // a hardware key — which is most of them.
   if (ceremony === 'get' && !(await canAnswerFor(options))) {
-    console.log('[zwarden] declined before asking: no related passkey', {
+    console.debug('[zwarden] declined before asking: no related passkey', {
       rpId: (options as { rpId?: unknown }).rpId ?? '(the page\u2019s own host)',
       known: await loadPasskeyParties(),
     });
     port.postMessage({ result: null });
     return;
   }
-  console.log('[zwarden] holding a', ceremony, 'ceremony for', origin);
+  console.debug('[zwarden] holding a', ceremony, 'ceremony for', origin);
 
   const id = crypto.randomUUID();
   waitingPages.set(id, port);

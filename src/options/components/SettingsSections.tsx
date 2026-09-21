@@ -207,7 +207,17 @@ export function PasskeySection({
             {status.error !== null ? ` ${status.error}` : ''}
           </p>
         )}
-        {settings.passkeySignIn && <p class="hint-diag">{t('settingsPasskeyReload')}</p>}
+        {settings.passkeySignIn && (
+          <>
+            <p class="hint-diag">{t('settingsPasskeyReload')}</p>
+            {/* Where the traces are, said here rather than left to be
+                discovered. They sit at verbose level because this runs on
+                every page and the lines name the sites where passkeys are
+                used — but a diagnostic nobody can find is one that does not
+                exist, which cost several rounds of looking. */}
+            <p class="hint-diag">{t('settingsPasskeyTraces')}</p>
+          </>
+        )}
         <p class="hint">{t('settingsPasskeyHint')}</p>
       </div>
     </section>

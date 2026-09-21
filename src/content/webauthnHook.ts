@@ -269,10 +269,17 @@ Object.defineProperty(window, 'zwardenPasskeyHook', {
   configurable: true,
 });
 
-// Announced at `log` level, not `debug`: Chrome's console hides `debug` behind
-// a filter nobody thinks to lift, so a diagnostic written there is a diagnostic
-// that reads as silence — which is exactly the answer it was meant to rule out.
-console.log('[zwarden] passkey hook installed on', window.location.origin);
+// At `debug` level, which Chrome hides behind its Verbose filter.
+//
+// That is deliberate, and it is the only level that suits: this runs on every
+// page visited, so anything louder is noise in somebody else's console, and
+// these lines name the sites where passkeys are used. Nothing is lost — one
+// click on Verbose brings the whole chain back — and the settings page says
+// where to find it, which is what was missing the first time.
+//
+// A setting would not reach here: this half runs in the page's own world and
+// cannot read the extension's storage. The console's own filter is the switch.
+console.debug('[zwarden] passkey hook installed on', window.location.origin);
 
 const credentials = navigator.credentials;
 const originalGet = credentials.get.bind(credentials);
@@ -286,24 +293,24 @@ credentials.get = async function get(
     // all the same: the useful question is not "did we decline" but "did the
     // page ever call this function in this frame", and silence has to mean
     // one thing only.
-    console.log('[zwarden] credentials.get called, but not for WebAuthn');
+    console.debug('[zwarden] credentials.get called, but not for WebAuthn');
     return originalGet(options);
   }
   // One line per WebAuthn call, which is a rare event — not noise, and it is
   // the only way to tell "the hook never ran" from "the hook declined" without
   // guessing from a screenshot. The whole chain logs the same way.
-  console.log('[zwarden] intercepted credentials.get', {
+  console.debug('[zwarden] intercepted credentials.get', {
     rpId: options.publicKey.rpId,
     allowCredentials: (options.publicKey.allowCredentials ?? []).length,
   });
   try {
     const assertion = await ask('get', serialiseOptions(options.publicKey));
-    console.log('[zwarden] credentials.get answered', assertion === null ? 'nothing' : 'signed');
+    console.debug('[zwarden] credentials.get answered', assertion === null ? 'nothing' : 'signed');
     // Nothing to offer, or the user said no: the browser takes over, and the
     // hardware key in their pocket still works.
     return assertion === null ? originalGet(options) : buildCredential(assertion);
   } catch (error) {
-    console.log('[zwarden] credentials.get failed, falling back', error);
+    console.debug('[zwarden] credentials.get failed, falling back', error);
     return originalGet(options);
   }
 };
@@ -312,18 +319,18 @@ credentials.create = async function create(
   options?: CredentialCreationOptions,
 ): Promise<Credential | null> {
   if (options?.publicKey === undefined) {
-    console.log('[zwarden] credentials.create called, but not for WebAuthn');
+    console.debug('[zwarden] credentials.create called, but not for WebAuthn');
     return originalCreate(options);
   }
-  console.log('[zwarden] intercepted credentials.create', { rp: options.publicKey.rp?.id });
+  console.debug('[zwarden] intercepted credentials.create', { rp: options.publicKey.rp?.id });
   try {
     const created = await ask('create', serialiseCreation(options.publicKey));
-    console.log('[zwarden] credentials.create answered', created === null ? 'nothing' : 'created');
+    console.debug('[zwarden] credentials.create answered', created === null ? 'nothing' : 'created');
     // Declined, or an algorithm we do not implement, or an account that already
     // has a key here: the browser offers its own authenticator instead.
     return created === null ? originalCreate(options) : buildRegistration(created);
   } catch (error) {
-    console.log('[zwarden] credentials.create failed, falling back', error);
+    console.debug('[zwarden] credentials.create failed, falling back', error);
     return originalCreate(options);
   }
 };

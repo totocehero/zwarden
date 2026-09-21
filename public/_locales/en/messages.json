@@ -443,6 +443,9 @@
   "settingsPasskeyReload": {
     "message": "Already-open tabs are not covered — open a new one."
   },
+  "settingsPasskeyTraces": {
+    "message": "Traces: every step is logged at “verbose” level. To follow one, open the page console, lift the Verbose filter, and look for lines beginning with [zwarden]."
+  },
   "assertionTitle": {
     "message": "Sign in with a passkey"
   },

@@ -234,6 +234,7 @@ export const MESSAGE_KEYS = [
   'settingsPasskeyInstalled',
   'settingsPasskeyMissing',
   'settingsPasskeyReload',
+  'settingsPasskeyTraces',
   'assertionTitle',
   'assertionAsks',
   'assertionChoose',
