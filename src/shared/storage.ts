@@ -348,6 +348,88 @@ export async function setBadge(kind: 'save' | 'passkey' | null): Promise<void> {
   }
 }
 
+// --- What we have just filled ourselves --------------------------------------
+
+const JUST_FILLED_KEY = 'justFilled';
+
+/** How long a fill is remembered. A form is submitted seconds after it. */
+const JUST_FILLED_MS = 10 * 60_000;
+
+/**
+ * A fingerprint of what was filled, so the capture that follows can be ignored.
+ *
+ * Filling a form from the vault and then being asked whether to save what was
+ * filled is a question with no useful answer: the item exists, with that exact
+ * password. The badge went up regardless, because the service worker captures
+ * without keys and cannot tell.
+ *
+ * **The password is stored as a digest, never as itself.** A comparison is all
+ * this needs, and a second cleartext copy of a password sitting in memory for
+ * ten minutes to spare one badge would be a poor trade.
+ *
+ * The digest covers the password alone; the origin and username are kept beside
+ * it in clear, as they already are in a pending capture.
+ */
+interface JustFilled {
+  readonly origin: string;
+  readonly username: string;
+  readonly digest: string;
+  readonly at: number;
+}
+
+/** SHA-256, hex. Enough to say "the same", which is all that is asked. */
+async function digestOf(password: string): Promise<string> {
+  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(password));
+  return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/** Remembers a fill, so the submission that follows is not offered back. */
+export async function noteFilled(
+  origin: string,
+  username: string,
+  password: string,
+): Promise<void> {
+  if (!hasSession || password === '') {
+    return;
+  }
+  const filled: JustFilled = {
+    origin,
+    username,
+    digest: await digestOf(password),
+    at: Date.now(),
+  };
+  await chrome.storage.session.set({ [JUST_FILLED_KEY]: filled });
+}
+
+/**
+ * Whether this is the very thing Zwarden just filled.
+ *
+ * Matched on all three — origin, username and the password's digest — so a
+ * password **changed** after filling is still captured: that is a rotation,
+ * and it is exactly what the offer is for.
+ */
+export async function wasJustFilled(
+  origin: string,
+  username: string,
+  password: string,
+): Promise<boolean> {
+  if (!hasSession) {
+    return false;
+  }
+  const stored = await chrome.storage.session.get(JUST_FILLED_KEY);
+  const filled = stored[JUST_FILLED_KEY] as Partial<JustFilled> | undefined;
+  if (
+    filled === undefined ||
+    filled.origin !== origin ||
+    filled.username !== username ||
+    typeof filled.at !== 'number' ||
+    Date.now() - filled.at > JUST_FILLED_MS
+  ) {
+    return false;
+  }
+  return filled.digest === (await digestOf(password));
+}
+
 // --- Sites never to offer on -------------------------------------------------
 
 const NEVER_SAVE_KEY = 'neverSaveHosts';

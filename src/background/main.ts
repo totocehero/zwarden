@@ -53,6 +53,7 @@ import {
   loadGeneratorOptions,
   loadLastActivity,
   isNeverSaveHost,
+  wasJustFilled,
   loadPasskeyParties,
   savePasskeyHookStatus,
   loadSettings,
@@ -361,6 +362,14 @@ async function onCredentials(
     return;
   }
   if (await isNeverSaveHost(host)) {
+    return;
+  }
+  // Filled from the vault a moment ago: offering to save it back is a question
+  // with no useful answer, and the badge that asks it is noise on every
+  // sign-in the extension itself performed. A password *changed* since the
+  // fill still gets through — that is a rotation, and it is what the offer is
+  // for.
+  if (await wasJustFilled(origin, username, password)) {
     return;
   }
 

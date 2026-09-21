@@ -110,6 +110,7 @@ import {
   getDeviceId,
   loadLastUsed,
   loadPendingSave,
+  noteFilled,
   loadRememberToken,
   loadSettings,
   loadStoredSession,
@@ -1252,6 +1253,9 @@ function App() {
       func: fillCredentials,
       args: [details.username ?? '', details.password ?? ''],
     });
+    // Noted before the popup closes, so the capture that follows this form's
+    // submission is recognised as our own and offered back to nobody.
+    await noteFilled(tabOrigin ?? '', details.username ?? '', details.password ?? '');
     // Awaited, not fired and forgotten: `window.close()` kills the popup before
     // the write leaves, and the most frequent use would be the only one never
     // counted.
