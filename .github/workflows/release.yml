@@ -57,12 +57,13 @@ jobs:
         with:
           files: ${{ env.ARCHIVE }}
           body: |
-            Unzip, then load it in the browser:
+            **Chrome / Edge.** Unzip somewhere permanent — the browser reloads
+            it from that folder at every start-up — then `chrome://extensions`,
+            turn on Developer mode, *Load unpacked*, and choose the folder
+            containing `manifest.json`.
 
-            - **Chrome / Edge** — `chrome://extensions`, turn on Developer mode,
-              *Load unpacked*, and choose the unzipped folder.
-            - **Firefox** — `about:debugging#/runtime/this-firefox`,
-              *Load Temporary Add-on*, and choose the `manifest.json` inside it.
+            **Firefox** cannot load this yet: the background is declared as a
+            service worker, which it does not accept.
 
             Built by this workflow from the tagged commit, after the same
-            checks CI runs.
+            checks CI runs. See the README for updating.

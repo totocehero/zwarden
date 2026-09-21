@@ -157,16 +157,36 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
 
 ## Installation
 
-Aucune compilation nécessaire : chaque version publiée embarque un `dist/`
-empaqueté.
+Aucune compilation nécessaire. Chaque version publiée embarque l'extension
+déjà construite.
 
-1. Téléchargez `zwarden-<version>.zip` depuis les
-   [Releases](https://github.com/totocehero/zwarden/releases) et décompressez.
-2. **Chrome / Edge** — `chrome://extensions`, activez le mode développeur,
-   *Charger l'extension non empaquetée*, choisissez le dossier décompressé.
-   **Firefox** — `about:debugging#/runtime/this-firefox`, *Charger un module
-   temporaire*, choisissez le `manifest.json` qu'il contient.
-3. Ouvrez les paramètres de l'extension et indiquez votre serveur.
+1. **Téléchargez** `zwarden-<version>.zip` depuis les
+   [Releases](https://github.com/totocehero/zwarden/releases).
+2. **Décompressez-le dans un dossier permanent** — vos Documents, pas
+   Téléchargements. Chrome recharge une extension non empaquetée *depuis ce
+   dossier, à chaque démarrage* : le déplacer ou le supprimer fait disparaître
+   l'extension.
+3. Ouvrez `chrome://extensions` (ou `edge://extensions`).
+4. Activez le **mode développeur**, l'interrupteur en haut à droite.
+5. Cliquez **Charger l'extension non empaquetée** et choisissez le dossier
+   décompressé — celui qui contient directement `manifest.json`. Si la
+   décompression a créé un dossier dans un dossier, prenez celui de l'intérieur.
+6. Ouvrez les paramètres de Zwarden et indiquez votre serveur.
+
+Chrome signalera à chaque démarrage qu'une extension tourne en mode
+développeur. C'est à quoi ressemble une installation hors magasin, et fermer
+l'avertissement ne désactive rien.
+
+**Pour mettre à jour**, téléchargez le nouveau zip, décompressez par-dessus le
+même dossier, puis cliquez la flèche de rechargement sur la carte de Zwarden
+dans `chrome://extensions`. Vos réglages et votre session vivent dans le profil
+du navigateur, pas dans ce dossier, et survivent.
+
+**Firefox n'est pas encore pris en charge.** Le manifeste déclare un service
+worker comme arrière-plan, ce que Chrome et Edge acceptent et que Firefox
+refuse — il lui faut une page d'événements. C'est une cible de construction à
+ajouter, pas un réglage à changer, et d'ici là le zip refusera simplement de
+s'y charger.
 
 `dist/` n'est volontairement pas commité : un artefact de construction dans git
 rend chaque commit bruyant et invite un `dist/` qui diverge en silence de la

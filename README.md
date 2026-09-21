@@ -144,15 +144,32 @@ The cryptographic core is implemented and tested. The rest is in progress.
 
 ## Installing
 
-No build needed: each release carries a packaged `dist/`.
+No build needed. Each release carries the extension already built.
 
-1. Download `zwarden-<version>.zip` from
-   [Releases](https://github.com/totocehero/zwarden/releases) and unzip it.
-2. **Chrome / Edge** — `chrome://extensions`, turn on Developer mode,
-   *Load unpacked*, choose the unzipped folder.
-   **Firefox** — `about:debugging#/runtime/this-firefox`, *Load Temporary
-   Add-on*, choose the `manifest.json` inside it.
-3. Open the extension's settings and point it at your server.
+1. **Download** `zwarden-<version>.zip` from
+   [Releases](https://github.com/totocehero/zwarden/releases).
+2. **Unzip it somewhere permanent** — your Documents folder, not Downloads.
+   Chrome loads an unpacked extension *from that folder, every time it
+   starts*: move or delete it and the extension disappears.
+3. Open `chrome://extensions` (or `edge://extensions`).
+4. Turn on **Developer mode**, the switch at the top right.
+5. Click **Load unpacked** and choose the unzipped folder — the one that
+   contains `manifest.json` directly. If unzipping gave you a folder inside a
+   folder, pick the inner one.
+6. Open Zwarden's settings and point it at your server.
+
+Chrome will say, at each start-up, that an extension is running in developer
+mode. That is what installing outside a store looks like, and dismissing it
+does not disable anything.
+
+**To update**, download the new zip, unzip it over the same folder, then press
+the reload arrow on Zwarden's card in `chrome://extensions`. Your settings and
+your session live in the browser profile, not in that folder, and survive.
+
+**Firefox is not supported yet.** The manifest declares a service worker for
+its background, which Chrome and Edge accept and Firefox does not — it wants
+an event page instead. That is a build target to add, not a setting to change,
+and until it exists the zip will simply refuse to load there.
 
 `dist/` is deliberately not committed to this repository: a build artefact in
 git makes every commit noisy and invites a `dist/` that quietly disagrees with
