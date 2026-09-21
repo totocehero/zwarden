@@ -467,6 +467,13 @@ async function applyPasskeyRegistration(): Promise<void> {
   const { passkeySignIn } = await loadSettings();
   const ids = [PASSKEY_HOOK_ID, PASSKEY_BRIDGE_ID];
   const existing = await chrome.scripting.getRegisteredContentScripts({ ids });
+  // Said on every start-up. Whether the setting is even on was the one fact
+  // never confirmed while several real but unrelated faults were found and
+  // fixed; it should not have taken that long, and it will not again.
+  console.log('[zwarden] passkey sign-in', {
+    setting: passkeySignIn ? 'on' : 'off',
+    alreadyRegistered: existing.map((script) => script.id),
+  });
 
   if (!passkeySignIn) {
     if (existing.length > 0) {
