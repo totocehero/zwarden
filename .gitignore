@@ -10,3 +10,11 @@ coverage/
 *.local
 .env
 .env.*
+
+# Screenshots dropped at the root while debugging. They are private — a vault
+# list, a two-factor screen, a browser window — and `git add -A` swept three of
+# them into the history before anyone noticed.
+/*.png
+/*.jpg
+/*.jpeg
+/*.webp
