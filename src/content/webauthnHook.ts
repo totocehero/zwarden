@@ -282,7 +282,11 @@ credentials.get = async function get(
   options?: CredentialRequestOptions,
 ): Promise<Credential | null> {
   if (options?.publicKey === undefined) {
-    // Not a WebAuthn call at all — a federated or password credential.
+    // Not a WebAuthn call at all — a federated or password credential. Logged
+    // all the same: the useful question is not "did we decline" but "did the
+    // page ever call this function in this frame", and silence has to mean
+    // one thing only.
+    console.log('[zwarden] credentials.get called, but not for WebAuthn');
     return originalGet(options);
   }
   // One line per WebAuthn call, which is a rare event — not noise, and it is
@@ -308,14 +312,18 @@ credentials.create = async function create(
   options?: CredentialCreationOptions,
 ): Promise<Credential | null> {
   if (options?.publicKey === undefined) {
+    console.log('[zwarden] credentials.create called, but not for WebAuthn');
     return originalCreate(options);
   }
+  console.log('[zwarden] intercepted credentials.create', { rp: options.publicKey.rp?.id });
   try {
     const created = await ask('create', serialiseCreation(options.publicKey));
+    console.log('[zwarden] credentials.create answered', created === null ? 'nothing' : 'created');
     // Declined, or an algorithm we do not implement, or an account that already
     // has a key here: the browser offers its own authenticator instead.
     return created === null ? originalCreate(options) : buildRegistration(created);
-  } catch {
+  } catch (error) {
+    console.log('[zwarden] credentials.create failed, falling back', error);
     return originalCreate(options);
   }
 };
