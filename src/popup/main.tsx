@@ -40,11 +40,12 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 
 import { type EditForm, EMPTY_EDIT, EditItemForm } from './components/EditItemForm.js';
 import type { RevealedContent } from './components/ItemRow.js';
-import { type AssertionChoice, AssertionScreen } from './components/AssertionScreen.js';
+import { AssertionScreen } from './components/AssertionScreen.js';
 import { ExportScreen } from './components/ExportScreen.js';
 import { HealthPanel } from './components/HealthPanel.js';
 import { TypeFilter } from './components/TypeFilter.js';
 import { type MenuAction, VaultHeader } from './components/VaultHeader.js';
+import { usePasskeyCeremony } from './hooks/usePasskeyCeremony.js';
 import { useVaultExport } from './hooks/useVaultExport.js';
 import { chipsFor, ItemRow } from './components/ItemRow.js';
 import { RepromptGuard } from './components/RepromptGuard.js';
@@ -66,7 +67,6 @@ import {
   type SyncResponse,
 } from '@core/api/models.js';
 import { SymmetricCryptoKey } from '@core/crypto/symmetricCryptoKey.js';
-import { toBase64Url } from '@core/crypto/encoding.js';
 import { digitsOf, EMPTY_CARD_EDIT } from '@core/vault/card.js';
 import { EMPTY_IDENTITY_EDIT, fullName } from '@core/vault/identity.js';
 import {
@@ -81,7 +81,6 @@ import {
   decideProposal,
   decryptCipherDetails,
   decryptCipherList,
-  decryptPasskeys,
   findSaveCandidate,
   reuseByRevision,
   sortCiphersByLastUsed,
@@ -92,14 +91,6 @@ import { matchesOrigin } from '@core/vault/uriMatch.js';
 import { decideReplay, isUnreachable } from '@core/vault/offlineQueue.js';
 import { buildHealthReport, type HealthReport } from '@core/vault/health.js';
 import { checkPasswords } from '@core/vault/breachCheck.js';
-import { createCredential, selectCredentials, signAssertion } from '@core/vault/passkey.js';
-import {
-  type AssertionAsk,
-  type CreationAsk,
-  validateAssertionAsk,
-  validateCreationAsk,
-  WebAuthnRefusal,
-} from '@core/vault/webauthnRequest.js';
 import {
   clearWriteQueue,
   enqueueWrite,
@@ -108,7 +99,6 @@ import {
 } from '@shared/writeQueue.js';
 import { type TotpConfig, generateTotp, parseTotp } from '@core/vault/totp.js';
 import { type UnlockResult, unlock } from '@core/vault/session.js';
-import { deriveMasterKey, verifyLocalPasswordHash } from '@core/crypto/kdf.js';
 import {
   type AppSettings,
   type PendingSave,
@@ -119,9 +109,6 @@ import {
   clearRememberToken,
   getDeviceId,
   loadLastUsed,
-  clearPendingAssertion,
-  loadPendingAssertion,
-  savePasskeyParties,
   loadPendingSave,
   loadRememberToken,
   loadSettings,
@@ -377,13 +364,14 @@ function App() {
   /** The export form's three secrets, while its screen is open. */
   const vaultExport = useVaultExport({ vault, setBusy, setError, messageFor });
   /** The passkey ceremony a page is waiting on, once it has been validated. */
-  const [assertion, setAssertion] = useState<
-    | { readonly kind: 'get'; readonly id: string; readonly ask: AssertionAsk; readonly choices: readonly AssertionChoice[] }
-    | { readonly kind: 'create'; readonly id: string; readonly ask: CreationAsk; readonly choices: readonly AssertionChoice[] }
-    | null
-  >(null);
-  const [assertionChoice, setAssertionChoice] = useState<string | null>(null);
-  const [assertionPassword, setAssertionPassword] = useState('');
+  const ceremony = usePasskeyCeremony({
+    vault,
+    authorize: () => authorize(),
+    noteUsage: (item) => noteUsage(item),
+    setBusy,
+    setError,
+    messageFor,
+  });
   const [showPassword, setShowPassword] = useState(false);
   const [proposal, setProposal] = useState<SaveProposal | null>(null);
   const reprompt = useReprompt(messageFor);
@@ -677,7 +665,7 @@ function App() {
     // Both of these need the whole vault: a save candidate missed because its
     // item was still encrypted would offer to create a duplicate.
     await evaluatePending(items, raw, keys, onDecryptError);
-    await pickUpAssertion({ userKey, keys, raw, labels, errors, items, pending: 0 });
+    await ceremony.pickUp({ userKey, keys, raw, items });
 
     // Active tab: strict origin for "Fill", domain for the pre-filled filter —
     // without overwriting a search already typed, and only if it matches
@@ -825,8 +813,7 @@ function App() {
     // state: locking must take those with it, like every other secret on
     // screen (`docs/EXTENSION.md` §2).
     vaultExport.close();
-    setAssertion(null);
-    setAssertionPassword('');
+    ceremony.reset();
     reprompt.cancel();
   }
 
@@ -1523,336 +1510,6 @@ function App() {
   }
 
   /**
-   * Picks up a page waiting on a passkey, if there is one.
-   *
-   * Runs once the vault is open, because answering needs keys — a locked vault
-   * simply leaves the page waiting until the user unlocks, which is the same
-   * position they would be in with any other authenticator.
-   *
-   * The request is validated **before anything is shown**: whether this page
-   * may ask for this relying party is not a question to put to the user, who
-   * would be looking at the name of a site they trust and clicking yes.
-   */
-  async function pickUpAssertion(open: OpenVault): Promise<void> {
-    // Read from storage, not from `settings`. This runs inside the very turn
-    // that loads the settings, before the state update has been applied, so
-    // the closure would still hold the defaults — and `passkeySignIn` defaults
-    // to false, which silently disabled the whole feature.
-    const { passkeySignIn } = await loadSettings();
-    if (!passkeySignIn) {
-      return;
-    }
-
-    // Computed on every opening, before anything else, and left where the
-    // service worker can read it. That worker has no keys and cannot work out
-    // whether this vault can answer for a site; without this list it must hold
-    // every ceremony open until somebody opens this window to find out there
-    // was nothing to offer — which is most ceremonies, since most sign-ins use
-    // a hardware key, and it makes Zwarden a ninety-second delay on all of
-    // them.
-    const views = await passkeyViews(open);
-    await savePasskeyParties(views.map((view) => view.rpId));
-    console.debug('[zwarden] passkeys this vault can answer for', views.map((v) => v.rpId));
-
-    const pending = await loadPendingAssertion();
-    console.debug('[zwarden] ceremony waiting?', pending === null ? 'none' : pending.ceremony);
-    if (pending === null) {
-      // The badge may still be up from a ceremony that has since gone. Better
-      // to say so than to leave the user looking for something to click.
-      if (await hadBadgeWithoutCeremony()) {
-        setError(t('assertionGone'));
-      }
-      return;
-    }
-    if (pending.ceremony === 'create') {
-      try {
-        const ask = validateCreationAsk(
-          pending.options,
-          pending.origin,
-          views.map((view) => view.credentialId),
-        );
-        setAssertion({
-          kind: 'create',
-          id: pending.id,
-          ask,
-          // Where to put it: any item, or a new one — the empty value.
-          choices: [
-            { itemId: '', credentialId: '', label: t('registrationNewItem') },
-            ...open.items.map((item) => ({
-              itemId: item.id,
-              credentialId: item.id,
-              label: item.name ?? item.id,
-            })),
-          ],
-        });
-        setAssertionChoice('');
-        setAssertionPassword('');
-      } catch (error) {
-        await answerAssertion(pending.id, null);
-        setError(error instanceof WebAuthnRefusal ? t('assertionRefused') : messageFor(error));
-      }
-      return;
-    }
-
-    let ask: AssertionAsk;
-    try {
-      ask = validateAssertionAsk(pending.options, pending.origin);
-    } catch (error) {
-      // Refused outright, and the page is told nothing beyond "we have
-      // nothing" — it falls back to the browser.
-      await answerAssertion(pending.id, null);
-      setError(error instanceof WebAuthnRefusal ? t('assertionRefused') : messageFor(error));
-      return;
-    }
-
-    const choices = selectCredentials(views, ask.rpId, ask.allowCredentials);
-    console.debug('[zwarden] matching for', ask.rpId, {
-      asked: ask.allowCredentials,
-      held: views.map((v) => ({ rpId: v.rpId, credentialId: v.credentialId })),
-      matched: choices.length,
-    });
-    if (choices.length === 0) {
-      // Answered **at once**, so the page falls back to the browser now rather
-      // than after the ninety-second timeout.
-      await answerAssertion(pending.id, null);
-      // And said out loud. This window was opened because a badge asked for it;
-      // showing nothing in return is the worst possible answer, and it was what
-      // happened. The message names the relying party, which is also the one
-      // thing needed to tell "no passkey here" from "the wrong name matched".
-      setError(t('assertionNoneFor', ask.rpId, String(views.length)));
-      return;
-    }
-    setAssertion({ kind: 'get', id: pending.id, ask, choices });
-    setAssertionChoice(choices[0]?.credentialId ?? null);
-    setAssertionPassword('');
-  }
-
-  /**
-   * Every passkey the vault holds, as metadata.
-   *
-   * No private key is decrypted here. Signing opens exactly the one the user
-   * chose, afterwards; registering never opens any.
-   */
-  async function passkeyViews(
-    open: OpenVault,
-  ): Promise<readonly (AssertionChoice & { readonly rpId: string })[]> {
-    const perItem = await Promise.all(
-      open.items
-        .filter((item) => item.hasPasskey)
-        .map(async (item) => {
-          const cipher = open.raw.get(item.id);
-          if (cipher === undefined) {
-            return [];
-          }
-          const details = await decryptCipherDetails(cipher, open.keys, () => undefined);
-          return details.passkeys
-            .filter((view) => view.credentialId !== null && view.rpId !== null)
-            .map((view) => ({
-              itemId: item.id,
-              credentialId: view.credentialId!,
-              rpId: view.rpId!,
-              label:
-                view.userName === null
-                  ? (item.name ?? item.id)
-                  : `${item.name ?? item.id} — ${view.userName}`,
-            }));
-        }),
-    );
-    return perItem.flat();
-  }
-
-  /**
-   * Whether the icon is carrying a badge with nothing behind it.
-   *
-   * The badge itself is read, not inferred. Inferring it from "no capture and
-   * no proposal" was the first attempt and it was wrong in the ordinary case:
-   * every normal opening satisfies that, and the window would have announced a
-   * vanished sign-in to someone who had simply clicked the icon.
-   *
-   * The badge is shared with the save proposal, so it only means a lost
-   * ceremony when no capture is waiting either.
-   */
-  async function hadBadgeWithoutCeremony(): Promise<boolean> {
-    if (typeof chrome === 'undefined' || typeof chrome.action?.getBadgeText !== 'function') {
-      return false;
-    }
-    const badge = await chrome.action.getBadgeText({});
-    return badge !== '' && (await loadPendingSave()) === null;
-  }
-
-  /** Hands the verdict to the service worker, which carries it to the page. */
-  async function answerAssertion(id: string, payload: unknown): Promise<void> {
-    await clearPendingAssertion();
-    await chrome.runtime.sendMessage({ type: 'assertion-answer', id, assertion: payload });
-  }
-
-  /**
-   * Verifies the master password, when the ceremony asked for it.
-   *
-   * The same offline check a per-item guard makes: re-derive and compare
-   * against the witness kept at unlock. Having the server confirm it would
-   * hand whoever controls the network the power to wave a passkey through.
-   */
-  async function verifyMaster(candidate: string): Promise<boolean> {
-    const stored = await loadStoredSession();
-    if (stored === null) {
-      throw new Error(t('errorSessionExpired'));
-    }
-    const masterKey = await deriveMasterKey(candidate, stored.email, stored.kdfConfig);
-    try {
-      return await verifyLocalPasswordHash(masterKey, candidate, stored.localPasswordHash);
-    } finally {
-      masterKey.destroy();
-    }
-  }
-
-  /** Creates a passkey and puts it in the vault. */
-  async function onCreatePasskey(): Promise<void> {
-    if (vault === null || assertion === null || assertion.kind !== 'create') {
-      return;
-    }
-    const ask = assertion.ask;
-    setError(null);
-    setBusy(t('assertionWorking'));
-    try {
-      let verified = false;
-      if (ask.requiresVerification) {
-        verified = await verifyMaster(assertionPassword);
-        if (!verified) {
-          setError(t('exportWrongMaster'));
-          return;
-        }
-      }
-
-      const created = await createCredential({
-        rpId: ask.rpId,
-        origin: ask.origin,
-        challenge: ask.challenge,
-        userId: ask.userId,
-        userName: ask.userName,
-        userDisplayName: ask.userDisplayName,
-        userVerified: verified,
-      });
-
-      const addPasskey = {
-        // The vault records the UUID spelling; the site was given the bytes.
-        credentialId: created.storedCredentialId,
-        rpId: ask.rpId,
-        rpName: ask.rpName,
-        userHandle: toBase64Url(ask.userId),
-        userName: ask.userName,
-        userDisplayName: ask.userDisplayName,
-        keyValue: created.privateKey,
-      };
-
-      // Attached to an item the user chose, or to one made for it. Either way
-      // through the write path every other edit uses.
-      const target = assertionChoice === '' ? undefined : vault.raw.get(assertionChoice ?? '');
-      const edit = {
-        name: target === undefined ? ask.rpName : (vault.items.find((i) => i.id === assertionChoice)?.name ?? ask.rpName),
-        username: ask.userName,
-        password: '',
-        totp: '',
-        notes: '',
-        uris: [ask.origin],
-        addPasskey,
-      };
-
-      const auth = await authorize();
-      if (target === undefined) {
-        await auth.client.createCipher(
-          auth.accessToken,
-          await buildCipherCreatePayload(edit, vault.userKey),
-        );
-      } else {
-        await auth.client.updateCipher(
-          auth.accessToken,
-          assertionChoice!,
-          await buildCipherUpdatePayload(target, edit, vault.keys, false),
-        );
-      }
-
-      // The site only hears about it once the vault has it: a passkey a site
-      // believes in and the vault has lost is an account locked shut.
-      await answerAssertion(assertion.id, {
-        credentialId: created.credentialId,
-        clientDataJSON: toBase64Url(new TextEncoder().encode(created.clientDataJSON)),
-        attestationObject: toBase64Url(created.attestationObject),
-        authenticatorData: toBase64Url(created.attestationObject),
-      });
-      setAssertion(null);
-      window.close();
-    } catch (err) {
-      setError(messageFor(err));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  /** Signs, and lets the page in. */
-  async function onConfirmAssertion(event: Event): Promise<void> {
-    event.preventDefault();
-    if (vault === null || assertion === null || assertionChoice === null) {
-      return;
-    }
-    if (assertion.kind === 'create') {
-      await onCreatePasskey();
-      return;
-    }
-    const choice = assertion.choices.find((c) => c.credentialId === assertionChoice);
-    const cipher = choice === undefined ? undefined : vault.raw.get(choice.itemId);
-    if (choice === undefined || cipher === undefined) {
-      return;
-    }
-
-    setError(null);
-    setBusy(t('assertionWorking'));
-    try {
-      let verified = false;
-      if (assertion.ask.requiresVerification) {
-        verified = await verifyMaster(assertionPassword);
-        if (!verified) {
-          setError(t('exportWrongMaster'));
-          return;
-        }
-      }
-
-      // The one call that decrypts a private key, on the one credential the
-      // user has just chosen.
-      const credentials = await decryptPasskeys(cipher, vault.keys, () => undefined);
-      const credential = credentials.find((c) => c.credentialId === choice.credentialId);
-      if (credential === undefined) {
-        throw new Error(t('errorItemNotFound'));
-      }
-
-      const signed = await signAssertion(credential, { ...assertion.ask, userVerified: verified });
-      await answerAssertion(assertion.id, {
-        credentialId: signed.credentialId,
-        clientDataJSON: toBase64Url(new TextEncoder().encode(signed.clientDataJSON)),
-        authenticatorData: toBase64Url(signed.authenticatorData),
-        signature: toBase64Url(signed.signature),
-        userHandle: signed.userHandle,
-      });
-      void noteUsage(vault.items.find((i) => i.id === choice.itemId)!);
-      setAssertion(null);
-      window.close();
-    } catch (err) {
-      setError(messageFor(err));
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  /** Declines, and lets the browser take over. */
-  async function onDeclineAssertion(): Promise<void> {
-    if (assertion !== null) {
-      await answerAssertion(assertion.id, null);
-    }
-    setAssertion(null);
-    setAssertionPassword('');
-  }
-
-  /**
    * Opens an item's site in a new tab.
    *
    * The URL is one `openableUri` has already narrowed to `http`/`https`: a
@@ -2133,22 +1790,23 @@ function App() {
   //
   // Before every other screen: a ceremony is a page held open, waiting, and
   // anything else shown first would be the extension ignoring it.
-  if (assertion !== null) {
+  if (ceremony.pending !== null) {
+    const pending = ceremony.pending;
     return (
       <AssertionScreen
-        ceremony={assertion.kind}
-        origin={assertion.ask.origin}
-        siteName={assertion.kind === 'create' ? assertion.ask.rpName : assertion.ask.rpId}
-        choices={assertion.choices}
-        chosen={assertionChoice}
-        needsVerification={assertion.ask.requiresVerification}
-        masterPassword={assertionPassword}
+        ceremony={pending.kind}
+        origin={pending.ask.origin}
+        siteName={pending.kind === 'create' ? pending.ask.rpName : pending.ask.rpId}
+        choices={pending.choices}
+        chosen={ceremony.choice}
+        needsVerification={pending.ask.requiresVerification}
+        masterPassword={ceremony.masterPassword}
         busy={busy}
         error={error}
-        onChoose={setAssertionChoice}
-        onMasterPassword={setAssertionPassword}
-        onConfirm={(e) => void onConfirmAssertion(e)}
-        onDecline={() => void onDeclineAssertion()}
+        onChoose={ceremony.setChoice}
+        onMasterPassword={ceremony.setMasterPassword}
+        onConfirm={(e) => void ceremony.confirm(e)}
+        onDecline={() => void ceremony.decline()}
       />
     );
   }
