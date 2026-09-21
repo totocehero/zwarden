@@ -35,9 +35,10 @@
  * secret into a field not made for it.
  */
 
-// First, and for its effect: in Firefox this makes `chrome.*` the promise-
-// returning namespace, which every `await chrome.…` in this project assumes.
-import '../shared/browserApi.js';
+// The namespace bridge is deliberately **not** imported here, unlike in every
+// other entry. A content script cannot import anything — there is no module
+// loader where it runs — and this one has no need of it: it awaits no
+// `chrome.*` call, it only fires `sendMessage` and forgets it.
 
 import { findCapture } from './heuristics.js';
 

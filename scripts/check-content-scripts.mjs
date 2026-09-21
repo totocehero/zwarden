@@ -36,8 +36,19 @@ for (const name of SCRIPTS) {
     console.error(`✗ ${name}: not wrapped — its declarations reach a shared global scope`);
     failed = true;
   }
-  if (/^\s*import[\s{*'"]/m.test(code)) {
-    console.error(`✗ ${name}: contains an import, which cannot be resolved where it runs`);
+  // Anywhere, not at the start of a line.
+  //
+  // This check was first written as `/^\s*import/m` and passed a bundle whose
+  // very first statement was an `import` — because the wrapper added in the
+  // same commit put the whole file on one line, and the anchor never matched
+  // again. The guard meant to prevent exactly this failure reported success
+  // while shipping it.
+  const importer = /(^|[;{\s])import\s*[{*'"(]|(^|[;{\s])import\s+[A-Za-z_$]/.exec(code);
+  if (importer !== null) {
+    console.error(
+      `✗ ${name}: imports (\`${code.slice(importer.index, importer.index + 40).trim()}…\`),` +
+        ' which cannot be resolved where it runs',
+    );
     failed = true;
   }
   if (!failed) {
