@@ -142,6 +142,41 @@ The cryptographic core is implemented and tested. The rest is in progress.
       the autofill shortcut
 - [ ] Automatic autofill (form detection, in-page suggestion)
 
+## Installing
+
+No build needed: each release carries a packaged `dist/`.
+
+1. Download `zwarden-<version>.zip` from
+   [Releases](https://github.com/totocehero/zwarden/releases) and unzip it.
+2. **Chrome / Edge** — `chrome://extensions`, turn on Developer mode,
+   *Load unpacked*, choose the unzipped folder.
+   **Firefox** — `about:debugging#/runtime/this-firefox`, *Load Temporary
+   Add-on*, choose the `manifest.json` inside it.
+3. Open the extension's settings and point it at your server.
+
+`dist/` is deliberately not committed to this repository: a build artefact in
+git makes every commit noisy and invites a `dist/` that quietly disagrees with
+the source it claims to come from. Each release is built by
+[`.github/workflows/release.yml`](.github/workflows/release.yml) from the
+tagged commit, after the same checks CI runs — and `npm ci && npm run build`
+reproduces it locally.
+
+## Which servers this works with
+
+| Server | Works | Why |
+|---|---|---|
+| **Vaultwarden** | Yes — validated against 2026.6.0 | Interoperability round trip in `tests/integration` |
+| **Bitwarden, self-hosted** | Expected to | Same single-origin layout: `/api/…` and `/identity/…` under one host |
+| **Bitwarden cloud** (bitwarden.com, .eu) | **No** | Its API and identity endpoints live on separate hosts, and it accepts only its own client identifiers |
+
+Two things decide this, and both are visible in `src/core/api/apiClient.ts`.
+Every URL is built as `<your server>/api/…` or `<your server>/identity/…`,
+which is how Vaultwarden and a self-hosted Bitwarden serve; the cloud splits
+them across `api.bitwarden.com` and `identity.bitwarden.com`. And Zwarden
+authenticates as `client_id: zwarden` — its own name, rather than
+impersonating an official client — which Vaultwarden accepts and the cloud
+does not.
+
 ## Security model
 
 The server is treated as **untrusted**. It never sees the master password, the

@@ -155,6 +155,42 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
       elle, le raccourci de remplissage
 - [ ] Remplissage automatique (détection de formulaire, suggestion dans la page)
 
+## Installation
+
+Aucune compilation nécessaire : chaque version publiée embarque un `dist/`
+empaqueté.
+
+1. Téléchargez `zwarden-<version>.zip` depuis les
+   [Releases](https://github.com/totocehero/zwarden/releases) et décompressez.
+2. **Chrome / Edge** — `chrome://extensions`, activez le mode développeur,
+   *Charger l'extension non empaquetée*, choisissez le dossier décompressé.
+   **Firefox** — `about:debugging#/runtime/this-firefox`, *Charger un module
+   temporaire*, choisissez le `manifest.json` qu'il contient.
+3. Ouvrez les paramètres de l'extension et indiquez votre serveur.
+
+`dist/` n'est volontairement pas commité : un artefact de construction dans git
+rend chaque commit bruyant et invite un `dist/` qui diverge en silence de la
+source dont il se réclame. Chaque version est construite par
+[`.github/workflows/release.yml`](.github/workflows/release.yml) depuis le
+commit étiqueté, après les mêmes contrôles que la CI — et `npm ci && npm run
+build` la reproduit localement.
+
+## Avec quels serveurs ça marche
+
+| Serveur | Ça marche | Pourquoi |
+|---|---|---|
+| **Vaultwarden** | Oui — validé contre 2026.6.0 | Aller-retour d'interopérabilité dans `tests/integration` |
+| **Bitwarden auto-hébergé** | Attendu oui | Même disposition à origine unique : `/api/…` et `/identity/…` sous un seul hôte |
+| **Cloud Bitwarden** (bitwarden.com, .eu) | **Non** | Ses points d'entrée API et identité vivent sur des hôtes séparés, et il n'accepte que ses propres identifiants de client |
+
+Deux choses en décident, toutes deux visibles dans
+`src/core/api/apiClient.ts`. Chaque URL est bâtie en `<votre serveur>/api/…` ou
+`<votre serveur>/identity/…`, ce qui est la façon dont servent Vaultwarden et un
+Bitwarden auto-hébergé ; le cloud les répartit entre `api.bitwarden.com` et
+`identity.bitwarden.com`. Et Zwarden s'authentifie en `client_id: zwarden` —
+son propre nom, plutôt que d'usurper celui d'un client officiel — ce que
+Vaultwarden accepte et que le cloud refuse.
+
 ## Modèle de sécurité
 
 Le serveur est traité comme **non fiable**. Il ne voit jamais le mot de passe

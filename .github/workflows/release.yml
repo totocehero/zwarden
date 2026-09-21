@@ -1,0 +1,68 @@
+# Builds the extension and attaches it to a release, so it can be installed
+# without a toolchain.
+#
+# `dist/` is deliberately **not** committed. A build artefact in git makes every
+# commit noisy, invites a `dist/` that quietly disagrees with the source it
+# claims to come from, and asks a reader to trust bytes nobody reviews. A
+# release built here from a tagged commit is reproducible by anyone: the
+# workflow is short enough to read, and `npm ci` pins what it installs.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  # Also runnable by hand, to produce a build from the current branch without
+  # tagging anything.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      # The same gate as CI: nothing is packaged that would not have merged.
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: npm run size
+
+      - name: Pack dist/
+        run: |
+          version=$(node -p "require('./package.json').version")
+          name="zwarden-${GITHUB_REF_NAME#v}"
+          [ "$GITHUB_REF_TYPE" = tag ] || name="zwarden-${version}-$(git rev-parse --short HEAD)"
+          cd dist && zip -qr "../${name}.zip" . && cd ..
+          echo "ARCHIVE=${name}.zip" >> "$GITHUB_ENV"
+          ls -l "${name}.zip"
+
+      # For a hand-run build: downloadable from the run itself.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARCHIVE }}
+          path: ${{ env.ARCHIVE }}
+
+      - name: Attach it to the release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ARCHIVE }}
+          body: |
+            Unzip, then load it in the browser:
+
+            - **Chrome / Edge** — `chrome://extensions`, turn on Developer mode,
+              *Load unpacked*, and choose the unzipped folder.
+            - **Firefox** — `about:debugging#/runtime/this-firefox`,
+              *Load Temporary Add-on*, and choose the `manifest.json` inside it.
+
+            Built by this workflow from the tagged commit, after the same
+            checks CI runs.
