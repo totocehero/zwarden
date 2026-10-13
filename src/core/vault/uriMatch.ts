@@ -240,3 +240,27 @@ function uriMatchesPage(saved: LoginUri, page: URL): boolean {
 export function matchesPage(uris: readonly LoginUri[], page: URL): boolean {
   return uris.some((saved) => uriMatchesPage(saved, page));
 }
+
+/**
+ * The items that match the page, then the rest, each in their original order.
+ *
+ * The popup lists the whole vault and puts the matches first under their own
+ * heading, rather than hiding everything else: a vault is also opened to copy
+ * a password for another site, and a list that showed only this page's items
+ * would have to be undone before that. No page — a browser page, a new tab —
+ * means no split: everything is "the rest".
+ */
+export function splitForPage<T extends { readonly uris: readonly LoginUri[] }>(
+  items: readonly T[],
+  page: URL | null,
+): { readonly forPage: readonly T[]; readonly others: readonly T[] } {
+  if (page === null) {
+    return { forPage: [], others: items };
+  }
+  const forPage: T[] = [];
+  const others: T[] = [];
+  for (const item of items) {
+    (matchesPage(item.uris, page) ? forPage : others).push(item);
+  }
+  return { forPage, others };
+}

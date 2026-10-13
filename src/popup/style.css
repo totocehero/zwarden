@@ -351,6 +351,17 @@ ul.items li {
   border-bottom: 1px solid var(--border);
 }
 
+/* A heading inside the list, not a second list: one scroll for both. */
+ul.items li.list-section {
+  padding: 8px 6px 3px;
+  border-bottom: none;
+  color: var(--text-2);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .item-row {
   display: flex;
   align-items: center;

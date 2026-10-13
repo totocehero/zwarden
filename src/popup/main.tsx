@@ -95,7 +95,7 @@ import {
 import { KdfDowngradeError } from '@core/crypto/kdf.js';
 import { buildVaultKeys, destroyVaultKeys } from '@core/vault/keyring.js';
 import { type VaultLabels, decryptLabels } from '@core/vault/labels.js';
-import { matchesOrigin, matchesPage } from '@core/vault/uriMatch.js';
+import { matchesOrigin, matchesPage, splitForPage } from '@core/vault/uriMatch.js';
 import { isUnreachable } from '@core/vault/offlineQueue.js';
 import { type TotpConfig, generateTotp, parseTotp } from '@core/vault/totp.js';
 import { type UnlockResult, unlock } from '@core/vault/session.js';
@@ -734,13 +734,21 @@ function App() {
     await evaluatePending(items, raw, keys, onDecryptError);
     await ceremony.pickUp({ userKey, keys, raw, items });
 
-    // Active tab: strict origin for "Fill", domain for the pre-filled filter —
-    // without overwriting a search already typed, and only if it matches
-    // something, since an empty list would be baffling.
+    // Active tab. Items that match it get their own section at the top of the
+    // list, so the filter is only pre-filled with the host when nothing
+    // matches — a text filter would hide an item matched by a domain rule
+    // whose URI does not contain this host, which is the single-sign-on case
+    // the rule exists for. Never over a search already typed, and only if the
+    // host finds something, since an empty list would be baffling.
     const tab = await activeWebTab();
     setTabUrl(tab === null ? null : tab.url);
     const host = tab?.url.hostname.replace(/^www\./, '');
-    if (host !== undefined && items.some((item) => matchesNeedle(item, host, labels))) {
+    if (
+      tab !== null &&
+      host !== undefined &&
+      !items.some((item) => matchesPage(item.uris, tab.url)) &&
+      items.some((item) => matchesNeedle(item, host, labels))
+    ) {
       setFilter((current) => (current === '' ? host : current));
     }
   }
@@ -1766,6 +1774,39 @@ function App() {
       ),
     [vault.items, vault.labels, needle, typeFilter],
   );
+  // The page's items first, under a heading, then the rest under another —
+  // one list, one scroll. A single heading would be noise: with nothing
+  // matching, or everything, the list is simply the list.
+  const { forPage, others } = useMemo(() => splitForPage(visible, tabUrl), [visible, tabUrl]);
+  const sectioned = forPage.length > 0 && others.length > 0;
+
+  // An arrow, not a declaration: a declaration is hoisted above the `vault ===
+  // null` return and loses its narrowing.
+  const row = (item: CipherOverview, fillable: boolean) => {
+    return (
+      <ItemRow
+        key={item.id}
+        item={item}
+        labels={vault.labels}
+        passwordCopied={copiedId === item.id}
+        usernameCopied={copiedUserId === item.id}
+        revealed={revealed?.id === item.id ? revealed.content : null}
+        copiedField={copiedField}
+        otp={otp?.id === item.id ? otp : null}
+        otpCopied={copiedOtp}
+        fillable={fillable}
+        onCopyUsername={() => void onCopyUsername(item)}
+        onCopyPassword={() => onCopyPassword(item)}
+        onToggleReveal={() => onToggleReveal(item)}
+        onToggleOtp={() => onToggleOtp(item)}
+        onEdit={() => onEdit(item)}
+        onFill={() => void onFill(item)}
+        onCopyOtp={(code) => void copyOtp(code)}
+        onCopyField={(label, value) => void onCopyField(label, value)}
+        onFilter={setFilter}
+      />
+    );
+  };
 
   return (
     <div>
@@ -1848,29 +1889,10 @@ function App() {
           <p class="empty">{t('listEmpty')}</p>
         ) : (
           <ul class="items">
-            {visible.map((item) => (
-              <ItemRow
-                key={item.id}
-                item={item}
-                labels={vault.labels}
-                passwordCopied={copiedId === item.id}
-                usernameCopied={copiedUserId === item.id}
-                revealed={revealed?.id === item.id ? revealed.content : null}
-                copiedField={copiedField}
-                otp={otp?.id === item.id ? otp : null}
-                otpCopied={copiedOtp}
-                fillable={tabUrl !== null && matchesPage(item.uris, tabUrl)}
-                onCopyUsername={() => void onCopyUsername(item)}
-                onCopyPassword={() => onCopyPassword(item)}
-                onToggleReveal={() => onToggleReveal(item)}
-                onToggleOtp={() => onToggleOtp(item)}
-                onEdit={() => onEdit(item)}
-                onFill={() => void onFill(item)}
-                onCopyOtp={(code) => void copyOtp(code)}
-                onCopyField={(label, value) => void onCopyField(label, value)}
-                onFilter={setFilter}
-              />
-            ))}
+            {sectioned && <li class="list-section">{t('listForThisPage')}</li>}
+            {forPage.map((item) => row(item, true))}
+            {sectioned && <li class="list-section">{t('listRestOfVault')}</li>}
+            {others.map((item) => row(item, false))}
           </ul>
         )}
       </main>

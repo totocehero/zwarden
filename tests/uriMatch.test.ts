@@ -15,6 +15,7 @@ import {
   UriMatchType,
   matchesPage,
   sameBaseDomain,
+  splitForPage,
 } from '../src/core/vault/uriMatch.js';
 
 function saved(uri: string, match: number | null = null): LoginUri {
@@ -124,5 +125,23 @@ describe('matchesPage with the rules it will not run', () => {
   it('is unmoved by a URI that is not one', () => {
     expect(matchesPage([saved('not a url', UriMatchType.Domain)], page('https://sso.example.org/'))).toBe(false);
     expect(matchesPage([saved('', UriMatchType.Host)], page('https://sso.example.org/'))).toBe(false);
+  });
+});
+
+describe('splitForPage', () => {
+  const app = { id: 'app', uris: [saved('https://app.example.org', UriMatchType.Domain)] };
+  const bank = { id: 'bank', uris: [saved('https://bank.example')] };
+  const note = { id: 'note', uris: [] };
+
+  it('puts the page’s items first and keeps every order', () => {
+    const { forPage, others } = splitForPage([bank, app, note], page('https://sso.example.org/'));
+    expect(forPage.map((i) => i.id)).toEqual(['app']);
+    expect(others.map((i) => i.id)).toEqual(['bank', 'note']);
+  });
+
+  it('splits nothing without a page', () => {
+    const { forPage, others } = splitForPage([bank, app], null);
+    expect(forPage).toEqual([]);
+    expect(others.map((i) => i.id)).toEqual(['bank', 'app']);
   });
 });

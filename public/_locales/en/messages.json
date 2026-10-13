@@ -113,6 +113,12 @@
   "listEmpty": {
     "message": "No items."
   },
+  "listForThisPage": {
+    "message": "For this page"
+  },
+  "listRestOfVault": {
+    "message": "The rest of the vault"
+  },
   "listUnreadableFields": {
     "message": "$1 unreadable field(s) — details"
   },

@@ -57,7 +57,8 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
 - [ ] Deux vues de popup commutables : « à la Bitwarden » (la disposition
       classique, rien à réapprendre pour qui migre) et « Zwarden » (filtrée sur
       l'onglet actif, pilotée au clavier). Une seule vue aujourd'hui, la seconde
-      reste à faire
+      reste à faire ; celle qui existe place en tête les éléments de la page
+      active, sous leur propre titre, et le reste du coffre dessous
 - [x] Coffres d'organisation : clé privée RSA et clés d'organisation
       désenveloppées, éléments partagés lisibles
 - [x] Étiquettes : dossiers et collections déchiffrés, puces de filtrage

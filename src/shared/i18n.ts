@@ -102,6 +102,8 @@ export const MESSAGE_KEYS = [
   'listSearchUnknown',
   'listStillOpening',
   'listEmpty',
+  'listForThisPage',
+  'listRestOfVault',
   'listUnreadableFields',
   'listFullLog',
   'listOpening',

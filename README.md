@@ -52,7 +52,9 @@ The cryptographic core is implemented and tested. The rest is in progress.
 - [x] Popup: unlock, list, search, copy
 - [ ] Two switchable popup views: "Bitwarden-like" (the classic layout, nothing
       to relearn for people migrating) and "Zwarden" (filtered on the active
-      tab, keyboard-driven). One view today, the second still to come
+      tab, keyboard-driven). One view today, the second still to come; the one
+      there is puts the active page's items first, under their own heading,
+      and the rest of the vault below
 - [x] Organisation vaults: RSA private key and organisation keys unwrapped,
       shared items readable
 - [x] Tags: folders and collections decrypted, filtering chips (phase 1 of 3 —

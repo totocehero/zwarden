@@ -96,6 +96,14 @@ The two views are two Preact renderings of the **same view model**
 (`core/vault/cipherService`); the choice is a persisted preference. No vault
 logic in the components.
 
+What exists today is one view, and it opens like this: the whole vault, with
+the items that match the active page first under a "For this page" heading and
+the rest under another — one list, one scroll (`splitForPage`, `uriMatch.ts`).
+Hiding the rest was rejected: a vault is also opened to copy a password for
+another site. The filter is pre-filled with the page's host only when nothing
+matches, since a text filter would hide an item matched by a domain rule whose
+URI does not contain this host — the single-sign-on case the rule exists for.
+
 Common rules:
 
 - **Partial decryption**: at unlock, only names and URIs are decrypted
