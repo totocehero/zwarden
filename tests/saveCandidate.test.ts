@@ -19,7 +19,7 @@ function item(id: string, username: string, uris: string[]): CipherOverview {
     type: 1,
     name: id,
     username,
-    uris,
+    uris: uris.map((uri) => ({ uri, match: null })),
     subtitle: null,
     hasPasskey: false,
     hasTotp: false,

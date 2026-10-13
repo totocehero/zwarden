@@ -34,6 +34,7 @@ import { EncString } from '../crypto/encString.js';
 import { decryptBytes, decryptStringOrNull, encryptString } from '../crypto/cryptoService.js';
 import { SymmetricCryptoKey } from '../crypto/symmetricCryptoKey.js';
 import { type CipherResponse, readField } from '../api/models.js';
+import type { LoginUri } from './uriMatch.js';
 import {
   BRAND_LABELS,
   CARD_FIELDS,
@@ -90,8 +91,8 @@ export interface CipherOverview {
    * several accounts on the same site apart.
    */
   readonly username: string | null;
-  /** Decrypted URIs, for filtering by active tab. */
-  readonly uris: readonly string[];
+  /** Decrypted URIs, each with the matching rule its owner attached to it. */
+  readonly uris: readonly LoginUri[];
   /**
    * What identifies the item in the list when a username does not: the masked
    * card, the full name of an identity.
@@ -168,7 +169,10 @@ export function findSaveCandidate(
         item.type === 1 &&
         item.username !== null &&
         item.username.trim().toLowerCase() === needle &&
-        matchesOrigin(item.uris, origin),
+        matchesOrigin(
+          item.uris.map((entry) => entry.uri),
+          origin,
+        ),
     ) ?? null
   );
 }
@@ -486,8 +490,18 @@ export async function decryptCipherOverview(
     name: name ?? null,
     username: username ?? null,
     subtitle: subtitle ?? null,
-    uris: decryptedUris.filter((uri): uri is string => uri !== null),
+    // The rule travels with the URI it was set on; a URI that would not decrypt
+    // takes its rule with it, so the two lists cannot drift apart.
+    uris: decryptedUris.flatMap((uri, index) =>
+      uri === null ? [] : [{ uri, match: uriMatchRule(rawUris[index]) }],
+    ),
   };
+}
+
+/** The matching rule stored on a raw URI entry, or `null` for the client's default. */
+function uriMatchRule(entry: RawUriEntry | undefined): number | null {
+  const match = readField<unknown>(entry, 'match');
+  return typeof match === 'number' && Number.isInteger(match) ? match : null;
 }
 
 /**
@@ -764,6 +778,11 @@ export async function decryptCipherList(
   return out;
 }
 
+/** The rule an unchanged URI carried, or `null` for one that is new or was changed. */
+function ruleKeptFor(uri: string, rules: readonly LoginUri[] | undefined): number | null {
+  return rules?.find((rule) => rule.uri.trim() === uri)?.match ?? null;
+}
+
 /** An item's editable fields. Empty string = field cleared. */
 export interface CipherEdit {
   readonly name: string;
@@ -772,6 +791,15 @@ export interface CipherEdit {
   readonly totp: string;
   readonly notes: string;
   readonly uris: readonly string[];
+  /**
+   * The item's URIs as they were before the edit, rule included.
+   *
+   * The editor shows URIs as text and knows nothing of rules. A URI kept
+   * verbatim keeps the rule its owner set in another client; a URI typed anew
+   * gets none. Without this, every edit here silently reset every rule to the
+   * default, which is how a choice made in Bitwarden kept disappearing.
+   */
+  readonly uriRules?: readonly LoginUri[];
   /**
    * The type to create. Only read on creation — an update never changes an
    * item's type, which would orphan the section it already carries.
@@ -971,7 +999,7 @@ export async function buildCipherCreatePayload(
       edit.uris
         .map((uri) => uri.trim())
         .filter((uri) => uri !== '')
-        .map(async (uri) => ({ uri: await enc(uri), match: null })),
+        .map(async (uri) => ({ uri: await enc(uri), match: ruleKeptFor(uri, edit.uriRules) })),
     );
     payload['login'] = {
       username: await encOrNull(edit.username),
@@ -1157,7 +1185,7 @@ async function buildLoginSection(
     edit.uris
       .map((uri) => uri.trim())
       .filter((uri) => uri !== '')
-      .map(async (uri) => ({ uri: await enc(uri), match: null })),
+      .map(async (uri) => ({ uri: await enc(uri), match: ruleKeptFor(uri, edit.uriRules) })),
   );
 
   return {

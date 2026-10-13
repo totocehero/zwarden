@@ -95,7 +95,7 @@ import {
 import { KdfDowngradeError } from '@core/crypto/kdf.js';
 import { buildVaultKeys, destroyVaultKeys } from '@core/vault/keyring.js';
 import { type VaultLabels, decryptLabels } from '@core/vault/labels.js';
-import { matchesOrigin } from '@core/vault/uriMatch.js';
+import { matchesOrigin, matchesPage } from '@core/vault/uriMatch.js';
 import { isUnreachable } from '@core/vault/offlineQueue.js';
 import { type TotpConfig, generateTotp, parseTotp } from '@core/vault/totp.js';
 import { type UnlockResult, unlock } from '@core/vault/session.js';
@@ -361,7 +361,8 @@ function App() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [vault, setVault] = useState<OpenVault | null>(null);
-  const [tabOrigin, setTabOrigin] = useState<string | null>(null);
+  // The whole URL, not just the origin: a URI rule may compare the path too.
+  const [tabUrl, setTabUrl] = useState<URL | null>(null);
   const [filter, setFilter] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedUserId, setCopiedUserId] = useState<string | null>(null);
@@ -737,7 +738,7 @@ function App() {
     // without overwriting a search already typed, and only if it matches
     // something, since an empty list would be baffling.
     const tab = await activeWebTab();
-    setTabOrigin(tab === null ? null : tab.url.origin);
+    setTabUrl(tab === null ? null : tab.url);
     const host = tab?.url.hostname.replace(/^www\./, '');
     if (host !== undefined && items.some((item) => matchesNeedle(item, host, labels))) {
       setFilter((current) => (current === '' ? host : current));
@@ -1104,7 +1105,8 @@ function App() {
         password: capture.password,
         totp: details.totp ?? '',
         notes: details.notes ?? '',
-        uris: existing.uris.length > 0 ? existing.uris : [capture.origin],
+        uris: existing.uris.length > 0 ? existing.uris.map((e) => e.uri) : [capture.origin],
+        uriRules: existing.uris,
       },
       open.keys,
       true,
@@ -1317,7 +1319,7 @@ function App() {
    */
   async function onFill(item: CipherOverview): Promise<void> {
     const tab = await activeWebTab();
-    if (tab === null || !matchesOrigin(item.uris, tab.url.origin)) {
+    if (tab === null || !matchesPage(item.uris, tab.url)) {
       setError(t('errorTabMismatch'));
       return;
     }
@@ -1339,7 +1341,7 @@ function App() {
     });
     // Noted before the popup closes, so the capture that follows this form's
     // submission is recognised as our own and offered back to nobody.
-    await noteFilled(tabOrigin ?? '', details.username ?? '', details.password ?? '');
+    await noteFilled(tabUrl?.origin ?? '', details.username ?? '', details.password ?? '');
     // Awaited, not fired and forgotten: `window.close()` kills the popup before
     // the write leaves, and the most frequent use would be the only one never
     // counted.
@@ -1366,7 +1368,7 @@ function App() {
       password: details.password ?? '',
       totp: details.totp ?? '',
       notes: details.notes ?? '',
-      uris: item.uris.join('\n'),
+      uris: item.uris.map((entry) => entry.uri).join('\n'),
       card: toEditValues(details.card, EMPTY_CARD_EDIT),
       identity: toEditValues(details.identity, EMPTY_IDENTITY_EDIT),
     });
@@ -1491,6 +1493,8 @@ function App() {
       totp: form.totp,
       notes: form.notes,
       uris: form.uris.split('\n'),
+      // Rules ride along with the URIs the user left as they were.
+      uriRules: editing?.uris ?? [],
     };
     if (form.type === 3) {
       return { ...base, card: form.card };
@@ -1577,7 +1581,7 @@ function App() {
       (item.username ?? '').toLowerCase().includes(needle) ||
       // Typing the last four digits of a card, or a surname, finds the item.
       (item.subtitle ?? '').toLowerCase().includes(needle) ||
-      item.uris.some((uri) => uri.toLowerCase().includes(needle)) ||
+      item.uris.some((entry) => entry.uri.toLowerCase().includes(needle)) ||
       chipsFor(item, labels).some((chip) => chip.name.toLowerCase().includes(needle))
     );
   }
@@ -1855,7 +1859,7 @@ function App() {
                 copiedField={copiedField}
                 otp={otp?.id === item.id ? otp : null}
                 otpCopied={copiedOtp}
-                fillable={tabOrigin !== null && matchesOrigin(item.uris, tabOrigin)}
+                fillable={tabUrl !== null && matchesPage(item.uris, tabUrl)}
                 onCopyUsername={() => void onCopyUsername(item)}
                 onCopyPassword={() => onCopyPassword(item)}
                 onToggleReveal={() => onToggleReveal(item)}

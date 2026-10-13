@@ -84,7 +84,7 @@ export interface ExportedItem {
     readonly username: string | null;
     readonly password: string | null;
     readonly totp: string | null;
-    readonly uris: readonly { readonly uri: string }[];
+    readonly uris: readonly { readonly uri: string; readonly match?: number | null }[];
   };
   readonly card?: Readonly<Record<string, string | null>>;
   readonly identity?: Readonly<Record<string, string | null>>;

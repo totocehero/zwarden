@@ -171,7 +171,9 @@ async function buildExportPayload(open: ExportableVault): Promise<ExportPayload>
             username: details?.username ?? null,
             password: details?.password ?? null,
             totp: details?.totp ?? null,
-            uris: item.uris.map((uri: string) => ({ uri })),
+            // The rule too: an export that dropped it would import as a vault
+            // where every item is offered on fewer pages than before.
+            uris: item.uris.map((entry) => ({ uri: entry.uri, match: entry.match })),
           },
         };
       }

@@ -204,6 +204,19 @@ to have failed in other managers:
    Base-domain matching would require the Public Suffix List (unacceptable for
    the size budget); strict origin is safe without it.
 
+   That is the default. The Bitwarden format lets the owner attach a rule to
+   each URI — base domain, host, starts-with, exact, regular expression,
+   never — and the rule is stored with the item, so a choice made in another
+   client arrives here with the sync. `matchesPage` (`uriMatch.ts`) honours
+   it: host, starts-with and exact as written; base domain approximated
+   without the list (two shared labels, three under `co.uk`-shaped
+   registries, IP addresses never); regular expression and never as "nothing"
+   — a pattern written for another engine is not something this code can
+   vouch for. Editing an item here keeps the rule on every URI left as it
+   was; it used to reset them all to the default. Zwarden offers no way to
+   set a rule, on purpose: it is a decision about security, and one client is
+   enough to make it.
+
 A two-stage architecture (see the README): a light detector at
 `document_start`, the engine injected only if a relevant field exists, and only
 into `http(s)` pages.

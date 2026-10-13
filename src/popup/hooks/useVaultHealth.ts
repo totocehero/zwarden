@@ -103,7 +103,7 @@ async function onCheckHealth(): Promise<void> {
           id: item.id,
           name: item.name,
           username: item.username,
-          uris: item.uris,
+          uris: item.uris.map((entry) => entry.uri),
           type: item.type,
           reprompt: item.reprompt,
           password: details?.password ?? null,

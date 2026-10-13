@@ -57,7 +57,9 @@ The cryptographic core is implemented and tested. The rest is in progress.
       shared items readable
 - [x] Tags: folders and collections decrypted, filtering chips (phase 1 of 3 —
       assignment then sharing by tag to come)
-- [x] Filling from the popup — an explicit gesture, strict origin matching
+- [x] Filling from the popup — an explicit gesture, strict origin matching by
+      default. The rule set on a URI in another client (host, base domain,
+      starts-with, exact) is honoured, and survives an edit here
 - [x] Editing items from the popup — fields preserved, item key and organisation
       keys respected, password history
 - [x] Recently used items at the top of the list

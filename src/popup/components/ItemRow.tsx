@@ -161,7 +161,7 @@ export function ItemRow({
               {usernameCopied ? t('itemUsernameCopied') : ''}
             </div>
           )}
-          {item.uris[0] !== undefined && <div class="item-uri">{item.uris[0]}</div>}
+          {item.uris[0] !== undefined && <div class="item-uri">{item.uris[0].uri}</div>}
           {chips.length > 0 && (
             <div class="chips">
               {chips.map((chip) => (

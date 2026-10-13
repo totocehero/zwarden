@@ -63,7 +63,9 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
 - [x] Étiquettes : dossiers et collections déchiffrés, puces de filtrage
       (phase 1 sur 3 — l'affectation puis le partage par étiquette suivront)
 - [x] Remplissage depuis la popup — un geste explicite, correspondance stricte
-      d'origine
+      d'origine par défaut. La règle posée sur une URI dans un autre client
+      (hôte, domaine de base, commence par, exact) est respectée, et survit à
+      une modification faite ici
 - [x] Édition d'éléments depuis la popup — champs préservés, clé d'élément et
       clés d'organisation respectées, historique des mots de passe
 - [x] Éléments récemment utilisés en tête de liste

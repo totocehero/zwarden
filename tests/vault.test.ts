@@ -100,7 +100,7 @@ describe('cipherService', () => {
       username: 'alice@example.org',
       // A login identifies itself by its username: no subtitle to add.
       subtitle: null,
-      uris: ['https://bank.example.org'],
+      uris: [{ uri: 'https://bank.example.org', match: null }],
       hasPasskey: false,
       // The test item carries a TOTP: detected without being decrypted.
       hasTotp: true,
@@ -207,7 +207,7 @@ describe('cipherService', () => {
     expect(view.id).toBe('item-pascal');
     expect(view.name).toBe('Titre');
     expect(view.username).toBe('bob');
-    expect(view.uris).toEqual(['https://example.org']);
+    expect(view.uris).toEqual([{ uri: 'https://example.org', match: null }]);
 
     const details = await decryptCipherDetails(pascal, userKey, onError);
     expect(details.username).toBe('bob');
@@ -266,7 +266,7 @@ describe('cipherService', () => {
     const view = await decryptCipherOverview(cipher, userKey, (e) => errors.push(e));
 
     expect(view.name).toBeNull();
-    expect(view.uris).toEqual(['https://bank.example.org']);
+    expect(view.uris).toEqual([{ uri: 'https://bank.example.org', match: null }]);
     expect(errors).toHaveLength(1);
   });
 
@@ -371,6 +371,39 @@ describe('item update (buildCipherUpdatePayload)', () => {
     expect(payload['reprompt']).toBe(1);
     expect(payload['fields']).toEqual([{ name: 'champ-personal' }]);
     expect(payload['organizationId']).toBeNull();
+  });
+
+  it('keeps the rule of a URI left as it was, and gives a new one none', async () => {
+    const stored = {
+      ...(await rawCipher(userKey)),
+      login: {
+        username: (await encryptString('old@example.org', userKey)).toString(),
+        password: (await encryptString('old-password', userKey)).toString(),
+        uris: [
+          { uri: (await encryptString('https://old.example.org', userKey)).toString(), match: 0 },
+          { uri: (await encryptString('https://gone.example.org', userKey)).toString(), match: 1 },
+        ],
+      },
+    } as unknown as CipherResponse;
+    const view = await decryptCipherOverview(stored, userKey, (e) => {
+      throw e;
+    });
+    expect(view.uris).toEqual([
+      { uri: 'https://old.example.org', match: 0 },
+      { uri: 'https://gone.example.org', match: 1 },
+    ]);
+
+    // The editor hands back text: one URI kept, one dropped, one typed.
+    const payload = await buildCipherUpdatePayload(
+      stored,
+      { ...EDIT, uris: ['https://old.example.org', 'https://new.example.org'], uriRules: view.uris },
+      userKey,
+      false,
+    );
+    const login = payload['login'] as Record<string, unknown>;
+    const uris = login['uris'] as ReadonlyArray<Record<string, unknown>>;
+    expect(uris.map((u) => u['match'])).toEqual([0, null]);
+    expect(await dec(uris[0]!['uri'], userKey)).toBe('https://old.example.org');
   });
 
   it('keeps the item key and encrypts with it', async () => {
