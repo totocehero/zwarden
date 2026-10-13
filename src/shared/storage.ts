@@ -18,6 +18,7 @@ import type { KdfConfig } from '../core/crypto/kdf.js';
 import { KdfType } from '../core/crypto/kdf.js';
 import type { SyncResponse } from '../core/api/models.js';
 import { toBase64 } from '../core/crypto/encoding.js';
+import type { UpdateStatus } from '../core/update/updateCheck.js';
 import {
   fingerprintKey,
   OrgKeyRefusedError,
@@ -85,6 +86,16 @@ export interface AppSettings {
    * like every other decision here.
    */
   readonly passkeySignIn: boolean;
+  /**
+   * Ask the repository, once a day, whether a newer release exists.
+   *
+   * **Off by default.** It is a request to GitHub on a schedule, carrying what
+   * every request carries — the user's address, the browser's identity — and
+   * nothing else; but a password manager that phones anyone without being
+   * asked has to say so first. The manual check on the settings page works
+   * either way: a click is consent.
+   */
+  readonly updateCheckEnabled: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -99,6 +110,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   language: '',
   breachCheckEnabled: false,
   passkeySignIn: false,
+  updateCheckEnabled: false,
 };
 
 const hasLocal = typeof chrome !== 'undefined' && typeof chrome.storage?.local !== 'undefined';
@@ -137,6 +149,7 @@ export async function loadSettings(): Promise<AppSettings> {
     'language',
     'breachCheckEnabled',
     'passkeySignIn',
+    'updateCheckEnabled',
   ]);
   return {
     serverUrl: readString(stored, 'serverUrl', DEFAULT_SETTINGS.serverUrl),
@@ -158,6 +171,11 @@ export async function loadSettings(): Promise<AppSettings> {
       DEFAULT_SETTINGS.breachCheckEnabled,
     ),
     passkeySignIn: readBoolean(stored, 'passkeySignIn', DEFAULT_SETTINGS.passkeySignIn),
+    updateCheckEnabled: readBoolean(
+      stored,
+      'updateCheckEnabled',
+      DEFAULT_SETTINGS.updateCheckEnabled,
+    ),
   };
 }
 
@@ -1039,6 +1057,67 @@ export async function loadPasskeyHookStatus(): Promise<PasskeyHookStatus | null>
     return null;
   }
   return { registered: value.registered, error: typeof value.error === 'string' ? value.error : null };
+}
+
+// --- Is there a newer release? -----------------------------------------------
+
+const UPDATE_STATUS_KEY = 'updateStatus';
+const UPDATE_DISMISSED_KEY = 'updateDismissedVersion';
+
+/**
+ * Records what the last check established.
+ *
+ * Written by whoever ran the check — the worker on its alarm, the settings page
+ * on its button — and read by the popup and the settings page. Durable, because
+ * a notice that vanished with the worker would be seen once in a day, if ever.
+ */
+export async function saveUpdateStatus(status: UpdateStatus): Promise<void> {
+  if (hasLocal) {
+    await chrome.storage.local.set({ [UPDATE_STATUS_KEY]: status });
+  }
+}
+
+/** The last check, or `null` if none has run. */
+export async function loadUpdateStatus(): Promise<UpdateStatus | null> {
+  if (!hasLocal) {
+    return null;
+  }
+  const stored = await chrome.storage.local.get(UPDATE_STATUS_KEY);
+  const value = stored[UPDATE_STATUS_KEY] as Partial<UpdateStatus> | undefined;
+  if (value === undefined || typeof value.checkedAt !== 'number') {
+    return null;
+  }
+  const latest = value.latest;
+  const usable =
+    typeof latest === 'object' &&
+    latest !== null &&
+    typeof latest.version === 'string' &&
+    typeof latest.url === 'string';
+  return {
+    checkedAt: value.checkedAt,
+    latest: usable ? { version: latest.version, url: latest.url } : null,
+  };
+}
+
+/**
+ * The version the user has asked not to be told about again.
+ *
+ * One version, not a switch: dismissing 0.2.0 must not also silence 0.3.0,
+ * or the notice would be turned off for good the first time it was in the way.
+ */
+export async function saveDismissedUpdate(version: string): Promise<void> {
+  if (hasLocal) {
+    await chrome.storage.local.set({ [UPDATE_DISMISSED_KEY]: version });
+  }
+}
+
+export async function loadDismissedUpdate(): Promise<string | null> {
+  if (!hasLocal) {
+    return null;
+  }
+  const stored = await chrome.storage.local.get(UPDATE_DISMISSED_KEY);
+  const value = stored[UPDATE_DISMISSED_KEY];
+  return typeof value === 'string' ? value : null;
 }
 
 // --- Which sites the vault can answer for ------------------------------------

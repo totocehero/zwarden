@@ -13,8 +13,16 @@ import {
   type AppSettings,
   DEFAULT_SETTINGS,
   loadPasskeyHookStatus,
+  loadUpdateStatus,
   type PasskeyHookStatus,
+  saveUpdateStatus,
 } from '@shared/storage.js';
+import {
+  checkForUpdate,
+  fetchGitHubJson,
+  isNewer,
+  type UpdateStatus,
+} from '@core/update/updateCheck.js';
 
 /** A partial settings change, raised to `App`. */
 export type PatchSettings = (patch: Partial<AppSettings>) => void;
@@ -299,5 +307,91 @@ export function SaveSection({ settings, toggle }: { settings: AppSettings; toggl
         <p class="hint">{t('settingsOfferToSaveHint')}</p>
       </div>
     </section>
+  );
+}
+
+/**
+ * Updates: a daily question to the repository, and a button to ask it now.
+ *
+ * The switch is off by default and the hint says exactly what the request
+ * carries, in the same voice as the breach section: a request to a third party
+ * is the kind of thing a password manager says out loud. The button needs no
+ * switch — pressing it is the consent — and whatever either finds is shown
+ * here with its date, so "up to date" can be told from "never looked".
+ */
+export function UpdateSection({
+  settings,
+  toggle,
+  version,
+}: {
+  settings: AppSettings;
+  toggle: ToggleSetting;
+  version: string;
+}) {
+  const [status, setStatus] = useState<UpdateStatus | null>(null);
+  const [checking, setChecking] = useState(false);
+
+  // Re-read when the switch moves: the worker checks at once when it is turned
+  // on, and the answer should appear here without a reload.
+  useEffect(() => {
+    void loadUpdateStatus().then(setStatus);
+    const timer = setTimeout(() => void loadUpdateStatus().then(setStatus), 3000);
+    return () => clearTimeout(timer);
+  }, [settings.updateCheckEnabled]);
+
+  async function checkNow(): Promise<void> {
+    setChecking(true);
+    try {
+      const found = await checkForUpdate(fetchGitHubJson);
+      await saveUpdateStatus(found);
+      setStatus(found);
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  return (
+    <section>
+      <h2>{t('settingsUpdateSection')}</h2>
+      <div class="fields">
+        <label class="row">
+          <input
+            type="checkbox"
+            checked={settings.updateCheckEnabled}
+            onInput={(e) => void toggle({ updateCheckEnabled: e.currentTarget.checked })}
+          />
+          {t('settingsUpdateEnable')}
+        </label>
+        <p class="hint">{t('settingsUpdateHint')}</p>
+        <div class="actions">
+          <button type="button" class="secondary" disabled={checking} onClick={() => void checkNow()}>
+            {checking ? t('settingsUpdateChecking') : t('settingsUpdateCheckNow')}
+          </button>
+        </div>
+        <UpdateVerdict status={status} version={version} />
+      </div>
+    </section>
+  );
+}
+
+/** What the last check found, in one line, with a link when there is somewhere to go. */
+function UpdateVerdict({ status, version }: { status: UpdateStatus | null; version: string }) {
+  if (status === null) {
+    return <p class="hint">{t('settingsUpdateNever')}</p>;
+  }
+  const when = new Date(status.checkedAt).toLocaleString();
+  if (status.latest === null) {
+    return <p class="error">{t('settingsUpdateFailed', when)}</p>;
+  }
+  if (!isNewer(version, status.latest.version)) {
+    return <p class="hint">{t('settingsUpdateUpToDate', status.latest.version, when)}</p>;
+  }
+  return (
+    <p class="hint">
+      {t('settingsUpdateAvailable', status.latest.version, version, when)}{' '}
+      <a href={status.latest.url} target="_blank" rel="noopener noreferrer">
+        {t('settingsUpdateOpen')}
+      </a>
+    </p>
   );
 }

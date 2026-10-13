@@ -92,7 +92,7 @@ The cryptographic core is implemented and tested. The rest is in progress.
       the whole argument against shipping 63 translations to everyone
 - [x] Filtering the list by item type, several types at once
 - [x] Optional breach checking against Have I Been Pwned, **off by default**
-      and the only thing here that talks to anyone but your own server. The
+      and one of two things here that talk to anyone but your own server. The
       password never leaves and neither does its full hash: five hex characters
       of its SHA-1 go out, some eight hundred suffixes come back, and the
       comparison happens locally. What it does leak is written out in the
@@ -126,6 +126,13 @@ The cryptographic core is implemented and tested. The rest is in progress.
       page, and even then only a replacement for one function: nothing is
       drawn, and the confirmation happens in the popup. When Zwarden has
       nothing to offer, the browser takes over and a hardware key still works
+- [x] An update check, **off by default**: the other thing here that talks to
+      a third party. Installed from a zip, Zwarden has no store to tell it a
+      newer release exists, so once a day — or on a button in the settings —
+      it asks this repository's release endpoint, compares locally, and shows
+      a line with a link to the release page. The request carries your
+      address and your browser's identity, and not even the version you have.
+      Nothing installs itself
 - [ ] Key derivation in the service worker (a popup with no key) — and, with it,
       the autofill shortcut
 - [ ] Automatic autofill (form detection, in-page suggestion)

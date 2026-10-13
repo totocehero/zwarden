@@ -392,6 +392,23 @@ export const MESSAGE_KEYS = [
   'settingsRegenerateConfirm',
   'settingsVersion',
 
+  // Settings — updates
+  'settingsUpdateSection',
+  'settingsUpdateEnable',
+  'settingsUpdateHint',
+  'settingsUpdateCheckNow',
+  'settingsUpdateChecking',
+  'settingsUpdateNever',
+  'settingsUpdateUpToDate',
+  'settingsUpdateAvailable',
+  'settingsUpdateOpen',
+  'settingsUpdateFailed',
+
+  // Popup — update notice
+  'updateNoticeAvailable',
+  'updateNoticeOpen',
+  'updateNoticeDismiss',
+
   // Settings — confirmations
   'settingsSaved',
   'settingsVaultLocked',

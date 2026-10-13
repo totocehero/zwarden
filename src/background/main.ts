@@ -49,6 +49,7 @@
 import '@shared/browserApi.js';
 
 import { generatePassword } from '@core/generator/password.js';
+import { checkForUpdate, fetchGitHubJson } from '@core/update/updateCheck.js';
 import { pageMayAsk, vaultMayAnswer } from '@core/vault/webauthnRequest.js';
 import { applyToolbarIcon, variantFor } from '@shared/theme.js';
 import {
@@ -65,6 +66,7 @@ import {
   lockVault,
   recordActivity,
   savePendingSave,
+  saveUpdateStatus,
   scheduleClipboardWipe,
   setBadge,
   setSaveBadge,
@@ -124,6 +126,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     void tick();
   } else if (alarm.name === CLIPBOARD_ALARM_NAME) {
     void writeClipboard('');
+  } else if (alarm.name === UPDATE_ALARM_NAME) {
+    void runUpdateCheck();
   }
 });
 
@@ -173,6 +177,7 @@ async function resync(): Promise<void> {
   await syncToolbarIcon();
   await applyDetectorRegistration();
   await applyPasskeyRegistration();
+  await applyUpdateSchedule();
   if (!(await hasStoredSession())) {
     await lockVault();
     return;
@@ -452,7 +457,51 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && 'passkeySignIn' in changes) {
     void applyPasskeyRegistration();
   }
+  if (area === 'local' && 'updateCheckEnabled' in changes) {
+    void applyUpdateSchedule();
+  }
 });
+
+// --- Is there a newer release? -----------------------------------------------
+
+const UPDATE_ALARM_NAME = 'zwarden-update-check';
+
+/** Once a day. A release is a rare event, and each check is a request to GitHub. */
+const UPDATE_PERIOD_MINUTES = 24 * 60;
+
+/**
+ * Arms, or disarms, the daily check to match the setting.
+ *
+ * Turning it on checks at once as well: a user who has just said yes wants an
+ * answer, not an appointment in twenty-four hours. Turning it off leaves the
+ * last result where it is — the settings page still shows what was found, and
+ * says when.
+ */
+async function applyUpdateSchedule(): Promise<void> {
+  const { updateCheckEnabled } = await loadSettings();
+  if (!updateCheckEnabled) {
+    await chrome.alarms.clear(UPDATE_ALARM_NAME);
+    return;
+  }
+  const existing = await chrome.alarms.get(UPDATE_ALARM_NAME);
+  if (existing === undefined) {
+    await chrome.alarms.create(UPDATE_ALARM_NAME, {
+      delayInMinutes: UPDATE_PERIOD_MINUTES,
+      periodInMinutes: UPDATE_PERIOD_MINUTES,
+    });
+    await runUpdateCheck();
+  }
+}
+
+/** One check, its result stored for the popup and the settings page to show. */
+async function runUpdateCheck(): Promise<void> {
+  const status = await checkForUpdate(fetchGitHubJson);
+  console.debug(
+    `[zwarden] update check: latest=${status.latest?.version ?? '(unknown)'}, ` +
+      `installed=${chrome.runtime.getManifest().version}`,
+  );
+  await saveUpdateStatus(status);
+}
 
 // --- Passkey sign-in ---------------------------------------------------------
 

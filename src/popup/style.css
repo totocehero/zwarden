@@ -924,3 +924,10 @@ button.health-discard {
   font-size: 12px;
   word-break: break-all;
 }
+
+/* One line, quiet: a release is news, not an alarm. */
+.update-notice {
+  margin: 0 0 8px;
+  color: var(--text-2);
+  font-size: 12px;
+}

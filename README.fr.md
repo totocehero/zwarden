@@ -103,8 +103,8 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
       traductions à tout le monde
 - [x] Filtrage de la liste par type d'élément, plusieurs types à la fois
 - [x] Vérification optionnelle des fuites auprès de Have I Been Pwned,
-      **désactivée par défaut** et seule chose ici qui parle à quelqu'un
-      d'autre que votre serveur. Le mot de passe ne sort pas, ni son empreinte
+      **désactivée par défaut** et l'une des deux choses ici qui parlent à
+      quelqu'un d'autre que votre serveur. Le mot de passe ne sort pas, ni son empreinte
       complète : cinq caractères hexadécimaux de son SHA-1 partent, quelque
       huit cents suffixes reviennent, la comparaison se fait localement. Ce que
       ça laisse fuir est écrit dans les paramètres, pas résumé en rassurance
@@ -140,6 +140,14 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
       dessiné, la confirmation dans la popup. Quand Zwarden n'a rien à
       proposer, le navigateur reprend la main et une clé matérielle marche
       toujours
+- [x] Une vérification des mises à jour, **désactivée par défaut** : l'autre
+      chose ici qui parle à un tiers. Installé depuis un zip, Zwarden n'a aucun
+      store pour lui dire qu'une version plus récente existe ; une fois par
+      jour — ou sur un bouton des paramètres — il interroge donc le point de
+      publication de ce dépôt, compare localement, et affiche une ligne avec
+      un lien vers la page de la version. La requête emporte votre adresse et
+      l'identité de votre navigateur, pas même votre version. Rien ne
+      s'installe tout seul
 - [ ] Dérivation de clé dans le service worker (une popup sans clé) — et, avec
       elle, le raccourci de remplissage
 - [ ] Remplissage automatique (détection de formulaire, suggestion dans la page)

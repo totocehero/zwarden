@@ -848,6 +848,45 @@
   "settingsVersion": {
     "message": "Version $1"
   },
+  "settingsUpdateSection": {
+    "message": "Updates"
+  },
+  "settingsUpdateEnable": {
+    "message": "Check once a day whether a new release has been published"
+  },
+  "settingsUpdateHint": {
+    "message": "Off by default. Zwarden is installed from a zip, so no store will ever tell you it is out of date; this asks the GitHub repository instead. The request carries what every request carries — your address and your browser’s identity — and nothing else: no account, no vault data, not even the version you have, which is compared here after the answer comes back. Nothing installs itself: you download the new zip and reload, as at the first install."
+  },
+  "settingsUpdateCheckNow": {
+    "message": "Check now"
+  },
+  "settingsUpdateChecking": {
+    "message": "Checking…"
+  },
+  "settingsUpdateNever": {
+    "message": "Never checked."
+  },
+  "settingsUpdateUpToDate": {
+    "message": "Up to date — $1 is the latest release (checked $2)."
+  },
+  "settingsUpdateAvailable": {
+    "message": "Version $1 is available — you have $2 (checked $3)."
+  },
+  "settingsUpdateOpen": {
+    "message": "Open the release page"
+  },
+  "settingsUpdateFailed": {
+    "message": "Could not check ($1): the repository did not answer."
+  },
+  "updateNoticeAvailable": {
+    "message": "Zwarden $1 is available."
+  },
+  "updateNoticeOpen": {
+    "message": "See"
+  },
+  "updateNoticeDismiss": {
+    "message": "Not this version"
+  },
   "settingsSaved": {
     "message": "Settings saved."
   },

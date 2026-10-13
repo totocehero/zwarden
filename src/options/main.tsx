@@ -26,6 +26,7 @@ import {
   SaveSection,
   SecuritySection,
   ServerSection,
+  UpdateSection,
 } from './components/SettingsSections.js';
 import { useSettings } from './hooks/useSettings.js';
 import { followPageColorScheme } from '@shared/theme.js';
@@ -64,6 +65,11 @@ function App() {
         <SaveSection settings={s.settings} toggle={(f) => void s.toggle(f)} />
         <PasskeySection settings={s.settings} toggle={(f) => void s.toggle(f)} />
         <BreachSection settings={s.settings} toggle={(f) => void s.toggle(f)} />
+        <UpdateSection
+          settings={s.settings}
+          toggle={(f) => void s.toggle(f)}
+          version={appVersion()}
+        />
 
         <button type="submit">{t('actionSave')}</button>
         <p class="status">{s.status}</p>

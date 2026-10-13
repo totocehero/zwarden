@@ -848,6 +848,45 @@
   "settingsVersion": {
     "message": "Version $1"
   },
+  "settingsUpdateSection": {
+    "message": "Mises à jour"
+  },
+  "settingsUpdateEnable": {
+    "message": "Vérifier une fois par jour si une nouvelle version a été publiée"
+  },
+  "settingsUpdateHint": {
+    "message": "Désactivé par défaut. Zwarden s’installe depuis un zip, aucun store ne vous dira donc qu’il est dépassé ; c’est au dépôt GitHub que la question est posée. La requête emporte ce que toute requête emporte — votre adresse et l’identité de votre navigateur — et rien d’autre : ni compte, ni donnée du coffre, pas même votre version, comparée ici une fois la réponse revenue. Rien ne s’installe tout seul : vous téléchargez le nouveau zip et rechargez, comme à la première installation."
+  },
+  "settingsUpdateCheckNow": {
+    "message": "Vérifier maintenant"
+  },
+  "settingsUpdateChecking": {
+    "message": "Vérification…"
+  },
+  "settingsUpdateNever": {
+    "message": "Jamais vérifié."
+  },
+  "settingsUpdateUpToDate": {
+    "message": "À jour — $1 est la dernière version publiée (vérifié le $2)."
+  },
+  "settingsUpdateAvailable": {
+    "message": "La version $1 est disponible — vous avez la $2 (vérifié le $3)."
+  },
+  "settingsUpdateOpen": {
+    "message": "Ouvrir la page de la version"
+  },
+  "settingsUpdateFailed": {
+    "message": "Vérification impossible ($1) : le dépôt n’a pas répondu."
+  },
+  "updateNoticeAvailable": {
+    "message": "Zwarden $1 est disponible."
+  },
+  "updateNoticeOpen": {
+    "message": "Voir"
+  },
+  "updateNoticeDismiss": {
+    "message": "Pas cette version"
+  },
   "settingsSaved": {
     "message": "Paramètres enregistrés."
   },

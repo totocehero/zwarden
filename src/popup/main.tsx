@@ -48,6 +48,7 @@ import { AssertionScreen } from './components/AssertionScreen.js';
 import { ExportScreen } from './components/ExportScreen.js';
 import { HealthPanel } from './components/HealthPanel.js';
 import { TypeFilter } from './components/TypeFilter.js';
+import { UpdateNotice } from './components/UpdateNotice.js';
 import { type MenuAction, VaultHeader } from './components/VaultHeader.js';
 import { usePasskeyCeremony } from './hooks/usePasskeyCeremony.js';
 import { useVaultHealth } from './hooks/useVaultHealth.js';
@@ -1780,6 +1781,7 @@ function App() {
           />
         )}
         {generator.render()}
+        <UpdateNotice onOpen={openSite} />
         {queue.pending > 0 && (
           <div class={`queue-banner${queue.held > 0 ? ' queue-held' : ''}`}>
             <p>
