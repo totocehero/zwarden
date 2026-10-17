@@ -290,6 +290,11 @@ qui divergeraient à la première correction.
 - [`docs/STORAGE.md`](docs/STORAGE.md) — ce qui est stocké où, et ce qu'obtient
   réellement un attaquant qui atteint chaque espace. Écrit à l'envers, depuis
   les capacités de l'attaquant plutôt que depuis la liste des fonctions.
+- [`docs/PRIVACY.md`](docs/PRIVACY.md) — la politique de confidentialité : ce
+  qui sort du navigateur, vers qui, et ce qui est conservé. La page vers
+  laquelle la fiche du store renvoie.
+- [`docs/STORE.md`](docs/STORE.md) — publier sur le Chrome Web Store, avec
+  chaque texte que le dashboard demande.
 
 ## Où était le poids
 

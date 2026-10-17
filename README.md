@@ -266,6 +266,10 @@ npm run size      # size budget for dist/
 - [`docs/STORAGE.md`](docs/STORAGE.md) — what is stored where, and what an
   attacker reaching each store actually gets. Written backwards, from the
   attacker's capabilities rather than from the feature list.
+- [`docs/PRIVACY.md`](docs/PRIVACY.md) — the privacy policy: what leaves the
+  browser, to whom, and what is kept. The page the store listing points at.
+- [`docs/STORE.md`](docs/STORE.md) — publishing on the Chrome Web Store, with
+  every text the dashboard asks for.
 
 ## Where the weight went
 
