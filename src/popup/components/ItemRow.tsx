@@ -99,6 +99,7 @@ export function ItemRow({
   otp,
   otpCopied,
   fillable,
+  fillTitle,
   onCopyUsername,
   onCopyPassword,
   onToggleReveal,
@@ -125,6 +126,8 @@ export function ItemRow({
   otpCopied: boolean;
   /** True if the active tab's origin matches: gates the "Fill" button. */
   fillable: boolean;
+  /** What the Fill button says it fills: a login form, or a payment form. */
+  fillTitle: string;
   onCopyUsername: () => void;
   onCopyPassword: () => void;
   onToggleReveal: () => void;
@@ -224,7 +227,7 @@ export function ItemRow({
           </button>
         )}
         {fillable && (
-          <button class="fill" title={t('itemFillTitle')} onClick={onFill}>
+          <button class="fill" title={fillTitle} onClick={onFill}>
             {t('itemFill')}
           </button>
         )}

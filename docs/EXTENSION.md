@@ -235,6 +235,19 @@ explicit gesture required, the button visible only when the item's origin
 matches the tab's (`uriMatch.ts`), and rechecked at click time. Still to come in
 v2: the in-page detector, the inline suggestion, and iframes.
 
+**Cards** have no origin, so the second rule takes another form: a card is
+offered, and its Fill button shown, only when the page has a visible
+card-number field — asked of the page by a probe (`pageFillers.ts`) when the
+popup opens on a vault that holds cards, and asked again on the click. The
+filler writes nothing unless it finds that field, for the same reason the login
+filler writes nothing without a password field: the anchoring field is what
+tells a payment form from a text box a hostile page put there. Fields are found
+by their `autocomplete` token first (`cc-number`, `cc-name`, `cc-exp`,
+`cc-exp-month`, `cc-exp-year`, `cc-csc`), then by what they call themselves, in
+English and French; the expiry is written as the form asks — two fields or one,
+input or select, `MM/YY` or `MM/YYYY`. Everything is the vault's business, not
+the page's: the probe reports one boolean and reads nothing else.
+
 ## 4 bis. Offering to save an entered credential
 
 Three actors, with deliberately disjoint roles — it is the split that keeps the

@@ -49,6 +49,7 @@ import { ExportScreen } from './components/ExportScreen.js';
 import { HealthPanel } from './components/HealthPanel.js';
 import { TypeFilter } from './components/TypeFilter.js';
 import { UpdateNotice } from './components/UpdateNotice.js';
+import { fillCredentials, fillPaymentCard, probePaymentForm } from './pageFillers.js';
 import { type MenuAction, VaultHeader } from './components/VaultHeader.js';
 import { usePasskeyCeremony } from './hooks/usePasskeyCeremony.js';
 import { useVaultHealth } from './hooks/useVaultHealth.js';
@@ -220,60 +221,21 @@ async function activeWebTab(): Promise<{ tabId: number; url: URL } | null> {
 }
 
 /**
- * Fills the page's first visible sign-in form.
+ * Whether the active tab shows a payment form.
  *
- * This function is **serialised** and then executed inside the page through
- * `chrome.scripting`: it must reference no outside variable. Main frame only,
- * never an automatic submission.
+ * `false` on any refusal — a page the extension may not script, a tab that
+ * closed — because the question is "may a card be offered here", and the
+ * answer to "unknown" is no.
  */
-function fillCredentials(username: string, password: string): void {
-  // Visible means painted and not made transparent: `getClientRects()` alone
-  // let through `opacity: 0` and `visibility: hidden`, the two ways a field is
-  // hidden without leaving the layout. `checkVisibility` is Chrome 105+, and
-  // the manifest asks for 120.
-  const visible = (el: HTMLElement): boolean =>
-    el.getClientRects().length > 0 &&
-    (typeof el.checkVisibility !== 'function' ||
-      el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }));
-  const setValue = (input: HTMLInputElement, value: string): void => {
-    // Go through the prototype's native setter, so that frameworks intercepting
-    // `value` (React and friends) actually see the change.
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-    setter?.call(input, value);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dispatchEvent(new Event('change', { bubbles: true }));
-  };
-
-  const passwordInput = Array.from(
-    document.querySelectorAll<HTMLInputElement>('input[type="password"]'),
-  ).find(visible);
-  if (passwordInput === undefined) {
-    // No password field, no fill. A username alone would land in whatever
-    // text field comes first — a search box, as often as not — and a search
-    // box posts what it is given.
-    return;
-  }
-  if (password !== '') {
-    setValue(passwordInput, password);
-  }
-  if (username === '') {
-    return;
-  }
-
-  // The field the page announces first; the generic text field only as a
-  // fallback, and only within the same form.
-  const scope = passwordInput.form ?? document;
-  const announced = scope.querySelectorAll<HTMLInputElement>(
-    'input[autocomplete="username"], input[autocomplete="email"], input[type="email"]',
-  );
-  const generic = scope.querySelectorAll<HTMLInputElement>(
-    'input[type="text"], input:not([type])',
-  );
-  const usernameInput =
-    Array.from(announced).find(visible) ??
-    Array.from(generic).find((el) => visible(el) && el !== passwordInput);
-  if (usernameInput !== undefined) {
-    setValue(usernameInput, username);
+async function pageHasPaymentForm(tabId: number): Promise<boolean> {
+  try {
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: probePaymentForm,
+    });
+    return result?.result === true;
+  } catch {
+    return false;
   }
 }
 
@@ -363,6 +325,9 @@ function App() {
   const [vault, setVault] = useState<OpenVault | null>(null);
   // The whole URL, not just the origin: a URI rule may compare the path too.
   const [tabUrl, setTabUrl] = useState<URL | null>(null);
+  // Whether the page shows a card-number field: a card has no URI, so this is
+  // what puts cards under "For this page" and behind a Fill button.
+  const [pageWantsCard, setPageWantsCard] = useState(false);
   const [filter, setFilter] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copiedUserId, setCopiedUserId] = useState<string | null>(null);
@@ -742,6 +707,11 @@ function App() {
     // host finds something, since an empty list would be baffling.
     const tab = await activeWebTab();
     setTabUrl(tab === null ? null : tab.url);
+    // Asked of the page only when there is a card to offer: the probe is a
+    // script run in the tab, and a vault without cards has no reason to run one.
+    if (tab !== null && items.some((item) => item.type === 3)) {
+      setPageWantsCard(await pageHasPaymentForm(tab.tabId));
+    }
     const host = tab?.url.hostname.replace(/^www\./, '');
     if (
       tab !== null &&
@@ -1327,6 +1297,16 @@ function App() {
    */
   async function onFill(item: CipherOverview): Promise<void> {
     const tab = await activeWebTab();
+    if (item.type === 3) {
+      // A card has no origin to match; the page having a payment form is the
+      // whole of the condition, rechecked now for the same reason as below.
+      if (tab === null || !(await pageHasPaymentForm(tab.tabId))) {
+        setError(t('errorNoCardForm'));
+        return;
+      }
+      reprompt.guarded(item, () => doFillCard(item, tab));
+      return;
+    }
     if (tab === null || !matchesPage(item.uris, tab.url)) {
       setError(t('errorTabMismatch'));
       return;
@@ -1334,6 +1314,36 @@ function App() {
     // Origin first, guard second: asking for a password only to then refuse the
     // fill would be the worst of the two orders.
     reprompt.guarded(item, () => doFill(item, tab));
+  }
+
+  /** Fills the page's payment form with the card, and closes. */
+  async function doFillCard(item: CipherOverview, tab: { tabId: number }): Promise<void> {
+    const details = await detailsOf(item);
+    const card = details?.card ?? null;
+    if (card === null || (card.number ?? '') === '') {
+      return;
+    }
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId: tab.tabId },
+      func: fillPaymentCard,
+      args: [
+        {
+          number: card.number ?? '',
+          name: card.cardholderName ?? '',
+          month: card.expMonth ?? '',
+          year: card.expYear ?? '',
+          code: card.code ?? '',
+        },
+      ],
+    });
+    if (result?.result !== true) {
+      // The form was there a moment ago and is not now: say so rather than
+      // close on a page that received nothing.
+      setError(t('errorNoCardForm'));
+      return;
+    }
+    await noteUsage(item);
+    window.close();
   }
 
   async function doFill(item: CipherOverview, tab: { tabId: number }): Promise<void> {
@@ -1777,7 +1787,18 @@ function App() {
   // The page's items first, under a heading, then the rest under another —
   // one list, one scroll. A single heading would be noise: with nothing
   // matching, or everything, the list is simply the list.
-  const { forPage, others } = useMemo(() => splitForPage(visible, tabUrl), [visible, tabUrl]);
+  const { forPage, others } = useMemo(() => {
+    const split = splitForPage(visible, tabUrl);
+    if (!pageWantsCard) {
+      return split;
+    }
+    // Cards join the page's items when the page has a payment form — after the
+    // logins, which are the more specific match.
+    return {
+      forPage: [...split.forPage, ...split.others.filter((item) => item.type === 3)],
+      others: split.others.filter((item) => item.type !== 3),
+    };
+  }, [visible, tabUrl, pageWantsCard]);
   const sectioned = forPage.length > 0 && others.length > 0;
 
   // An arrow, not a declaration: a declaration is hoisted above the `vault ===
@@ -1795,6 +1816,7 @@ function App() {
         otp={otp?.id === item.id ? otp : null}
         otpCopied={copiedOtp}
         fillable={fillable}
+        fillTitle={item.type === 3 ? t('itemFillCardTitle') : t('itemFillTitle')}
         onCopyUsername={() => void onCopyUsername(item)}
         onCopyPassword={() => onCopyPassword(item)}
         onToggleReveal={() => onToggleReveal(item)}

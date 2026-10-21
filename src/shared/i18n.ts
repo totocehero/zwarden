@@ -122,6 +122,7 @@ export const MESSAGE_KEYS = [
   'itemEdit',
   'itemFill',
   'itemFillTitle',
+  'itemFillCardTitle',
   'itemChipFolder',
   'itemChipCollection',
   'itemChipReadOnly',
@@ -341,6 +342,7 @@ export const MESSAGE_KEYS = [
   'errorSessionNoRefresh',
   'errorItemNotFound',
   'errorTabMismatch',
+  'errorNoCardForm',
   'errorKdfDowngrade',
 
   // Settings — server

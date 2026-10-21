@@ -320,6 +320,20 @@ export function expiryStatus(month: string, year: string, now: Date): ExpiryStat
 }
 
 /** The expiry date as printed on the card, or an empty string. */
+/**
+ * The month as the vault spells it: `1` to `12`, no leading zero, or `''`.
+ *
+ * Bitwarden stores `expMonth` as `"7"`, and its own clients offer a select
+ * whose values are `1`–`12`. The edit form here offered `01`–`12`, so a stored
+ * `7` matched no option and showed as blank — the month looked lost when it
+ * was only unspelled — and a month chosen here was saved as `07`, which the
+ * official clients in turn show as blank. One spelling, on both paths.
+ */
+export function normaliseMonth(raw: string): string {
+  const value = Number(raw.trim());
+  return Number.isInteger(value) && value >= 1 && value <= 12 ? String(value) : '';
+}
+
 export function formatExpiry(month: string, year: string): string {
   const monthValue = Number(month.trim());
   const yearValue = fullYear(year);

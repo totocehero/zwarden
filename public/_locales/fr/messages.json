@@ -167,6 +167,9 @@
   "itemFillTitle": {
     "message": "Remplir le formulaire de l’onglet actif"
   },
+  "itemFillCardTitle": {
+    "message": "Remplir le formulaire de paiement de l’onglet actif"
+  },
   "itemChipFolder": {
     "message": "Dossier : $1"
   },
@@ -727,6 +730,9 @@
   },
   "errorTabMismatch": {
     "message": "L’onglet actif ne correspond plus à cet item."
+  },
+  "errorNoCardForm": {
+    "message": "L’onglet actif n’affiche pas de formulaire de paiement."
   },
   "errorKdfDowngrade": {
     "message": "Le serveur annonce des paramètres de dérivation plus faibles que ceux acceptés sur cet appareil. Refusé. Si vous les avez abaissés vous-même, oubliez les paramètres serveur mémorisés dans les réglages."

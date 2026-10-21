@@ -24,10 +24,12 @@ import {
   digitsOf,
   groupNumber,
   isLuhnValid,
+  normaliseMonth,
 } from '@core/vault/card.js';
 
 /** The twelve months, as they are printed on a card. */
-const MONTHS = Array.from({ length: 12 }, (_, index) => String(index + 1).padStart(2, '0'));
+// Values as the vault spells them (`1`–`12`), labels padded for the eye.
+const MONTHS = Array.from({ length: 12 }, (_, index) => String(index + 1));
 
 export function CardFields({
   card,
@@ -77,13 +79,13 @@ export function CardFields({
         <label>
           {t('cardExpMonth')}
           <select
-            value={card.expMonth}
+            value={normaliseMonth(card.expMonth)}
             onChange={(e) => onPatch({ expMonth: e.currentTarget.value })}
           >
             <option value=""></option>
             {MONTHS.map((month) => (
               <option key={month} value={month}>
-                {month}
+                {month.padStart(2, '0')}
               </option>
             ))}
           </select>

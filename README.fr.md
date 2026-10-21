@@ -89,7 +89,10 @@ Le cœur cryptographique est implémenté et testé. Le reste avance.
       contrôle vérifiée à la frappe, l'échéance comparée à aujourd'hui, le numéro
       copié en chiffres nus, le nom complet et l'adresse postale composés et
       copiés d'un geste, les papiers masqués, et la liste affichant
-      `Visa •••• 4242` sans jamais détenir de numéro débitable
+      `Visa •••• 4242` sans jamais détenir de numéro débitable. Une carte est
+      proposée, et remplie d'un clic, quand la page montre un formulaire de
+      paiement — numéro, nom, échéance sous la forme que le formulaire lui
+      donne, cryptogramme
 - [x] Un paquet Firefox à côté de celui pour Chrome — même code, un manifeste
       transformé pour lui, et les deux différences nommées plutôt que
       découvertes : il se charge temporairement, et l'effacement différé du

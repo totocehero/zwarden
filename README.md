@@ -81,7 +81,9 @@ The cryptographic core is implemented and tested. The rest is in progress.
       is typed, the expiry compared to today, the number copied as bare digits,
       the full name and the postal address composed and copied in one gesture,
       the papers masked, and the list showing `Visa •••• 4242` without ever
-      holding a chargeable number
+      holding a chargeable number. A card is offered, and filled on a click,
+      when the page shows a payment form — number, name, expiry in whichever
+      shape the form gives it, code
 - [x] A Firefox package alongside the Chrome one — same code, a manifest
       transformed for it, and the two differences named rather than left to be
       met: it loads temporarily, and the deferred clipboard wipe is Chrome's

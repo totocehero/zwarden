@@ -167,6 +167,9 @@
   "itemFillTitle": {
     "message": "Fill the active tab's form"
   },
+  "itemFillCardTitle": {
+    "message": "Fill the active tab's payment form"
+  },
   "itemChipFolder": {
     "message": "Folder: $1"
   },
@@ -727,6 +730,9 @@
   },
   "errorTabMismatch": {
     "message": "The active tab no longer matches this item."
+  },
+  "errorNoCardForm": {
+    "message": "The active tab shows no payment form."
   },
   "errorKdfDowngrade": {
     "message": "The server announces weaker key-derivation parameters than this device accepted before. Refused. If you lowered them yourself, forget the remembered server parameters in the settings."

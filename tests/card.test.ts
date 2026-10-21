@@ -20,6 +20,7 @@ import {
   isEmptyCard,
   isLuhnValid,
   maskNumber,
+  normaliseMonth,
   SENSITIVE_CARD_FIELDS,
 } from '../src/core/vault/card.js';
 
@@ -203,5 +204,20 @@ describe('card shape', () => {
   it('is empty only when nothing at all is set', () => {
     expect(isEmptyCard(EMPTY_CARD)).toBe(true);
     expect(isEmptyCard({ ...EMPTY_CARD, number: '4242424242424242' })).toBe(false);
+  });
+});
+
+describe('normaliseMonth', () => {
+  it('spells the month as the vault does: no leading zero', () => {
+    expect(normaliseMonth('07')).toBe('7');
+    expect(normaliseMonth('7')).toBe('7');
+    expect(normaliseMonth(' 12 ')).toBe('12');
+  });
+
+  it('answers nothing for what is not a month', () => {
+    expect(normaliseMonth('')).toBe('');
+    expect(normaliseMonth('13')).toBe('');
+    expect(normaliseMonth('0')).toBe('');
+    expect(normaliseMonth('juillet')).toBe('');
   });
 });
