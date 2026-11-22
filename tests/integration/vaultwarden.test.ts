@@ -30,6 +30,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { ApiClient, type LoginResult } from '../../src/core/api/apiClient.js';
+import { readField } from '../../src/core/api/models.js';
 import { EncString } from '../../src/core/crypto/encString.js';
 import { SymmetricCryptoKey } from '../../src/core/crypto/symmetricCryptoKey.js';
 import { decryptBytes, encryptString } from '../../src/core/crypto/cryptoService.js';
@@ -205,6 +206,7 @@ describe.skipIf(!configured)('Vaultwarden interoperability', () => {
         },
         userKey,
         true,
+        readField<string>(sync.profile, 'id')!,
       );
       await client.updateCipher(session.accessToken, created.id, payload);
 

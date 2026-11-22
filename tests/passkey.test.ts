@@ -31,6 +31,9 @@ import {
   signAssertion,
 } from '../src/core/vault/passkey.js';
 
+/** The account's id, as every write names it (`encryptedFor`). */
+const USER_ID = 'a1b2c3d4-0000-4000-8000-000000000001';
+
 let credential: PasskeyCredential;
 let publicKey: CryptoKey;
 
@@ -551,6 +554,7 @@ describe('storing a created passkey', () => {
       { ...EDIT, addPasskey: NEW_PASSKEY },
       key,
       false,
+      USER_ID,
     );
 
     const stored = (payload['login'] as Record<string, unknown>)['fido2Credentials'] as unknown[];
@@ -560,7 +564,7 @@ describe('storing a created passkey', () => {
   });
 
   it('encrypts every field of the new one', async () => {
-    const payload = await buildCipherCreatePayload({ ...EDIT, addPasskey: NEW_PASSKEY }, key);
+    const payload = await buildCipherCreatePayload({ ...EDIT, addPasskey: NEW_PASSKEY }, key, USER_ID);
     const stored = (payload['login'] as Record<string, unknown>)['fido2Credentials'] as Record<
       string,
       unknown
@@ -575,7 +579,7 @@ describe('storing a created passkey', () => {
   });
 
   it('reads back exactly what was put in', async () => {
-    const payload = await buildCipherCreatePayload({ ...EDIT, addPasskey: NEW_PASSKEY }, key);
+    const payload = await buildCipherCreatePayload({ ...EDIT, addPasskey: NEW_PASSKEY }, key, USER_ID);
     const cipher = { id: 'i1', type: 1, ...payload, organizationId: null } as unknown as CipherResponse;
 
     const [credential] = await decryptPasskeys(cipher, key, () => undefined);
@@ -589,7 +593,7 @@ describe('storing a created passkey', () => {
   });
 
   it('records what the official clients expect alongside it', async () => {
-    const payload = await buildCipherCreatePayload({ ...EDIT, addPasskey: NEW_PASSKEY }, key);
+    const payload = await buildCipherCreatePayload({ ...EDIT, addPasskey: NEW_PASSKEY }, key, USER_ID);
     const stored = ((payload['login'] as Record<string, unknown>)['fido2Credentials'] as Record<
       string,
       unknown
@@ -603,7 +607,7 @@ describe('storing a created passkey', () => {
   });
 
   it('leaves an item alone when no passkey is being added', async () => {
-    const payload = await buildCipherCreatePayload(EDIT, key);
+    const payload = await buildCipherCreatePayload(EDIT, key, USER_ID);
     expect((payload['login'] as Record<string, unknown>)['fido2Credentials']).toBeNull();
   });
 });

@@ -53,6 +53,8 @@ import type { AssertionChoice } from '../components/AssertionScreen.js';
 /** What the ceremony needs of an open vault. */
 export interface CeremonyVault {
   readonly userKey: SymmetricCryptoKey;
+  /** The account's id, named in every write (`encryptedFor`). */
+  readonly userId: string;
   readonly keys: CipherKeys;
   readonly items: readonly CipherOverview[];
   readonly raw: ReadonlyMap<string, CipherResponse>;
@@ -355,13 +357,13 @@ async function onCreatePasskey(): Promise<void> {
     if (target === undefined) {
       await auth.client.createCipher(
         auth.accessToken,
-        await buildCipherCreatePayload(edit, open.userKey),
+        await buildCipherCreatePayload(edit, open.userKey, open.userId),
       );
     } else {
       await auth.client.updateCipher(
         auth.accessToken,
         assertionChoice!,
-        await buildCipherUpdatePayload(target, edit, open.keys, false),
+        await buildCipherUpdatePayload(target, edit, open.keys, false, open.userId),
       );
     }
 

@@ -197,6 +197,12 @@ Common rules:
     this shape have already been found here — erased passkeys, then wiped card
     and identity sections on a mere rename — and the fix is by construction
     rather than by vigilance.
+  - **every write names the account.** Both payload builders put the account's
+    id (`profile.id` from the sync) under `encryptedFor`: Vaultwarden 1.37
+    rejects a body without it with a bare HTTP 422, before reading anything
+    else, and checks it against the session's user. It is always the account's
+    own id, for an organisation item too — it says who sealed the body, not who
+    owns the item.
 
 ## 4. Autofill — non-negotiable rules
 

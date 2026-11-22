@@ -971,11 +971,13 @@ async function buildEditedSection(
  *
  * @param edit Cleartext values. `totp` and `notes` are accepted empty.
  * @param userKey The vault key.
+ * @param encryptedFor The account's id, see {@link buildCipherUpdatePayload}.
  * @returns A body ready for `ApiClient.createCipher`.
  */
 export async function buildCipherCreatePayload(
   edit: CipherEdit,
   userKey: SymmetricCryptoKey,
+  encryptedFor: string,
 ): Promise<Record<string, unknown>> {
   const enc = async (text: string): Promise<string> =>
     (await encryptString(text, userKey)).toString();
@@ -985,6 +987,7 @@ export async function buildCipherCreatePayload(
   const type = edit.type ?? 1;
   const payload: Record<string, unknown> = {
     type,
+    encryptedFor,
     name: await enc(edit.name),
     notes: await encOrNull(edit.notes),
     favorite: false,
@@ -1066,6 +1069,11 @@ function requireBaseKey(cipher: CipherResponse, keys: CipherKeys): SymmetricCryp
  * @param edit New cleartext values.
  * @param keys The vault key alone, or the full keyring (organisations).
  * @param recordPasswordHistory Whether to record the old password.
+ * @param encryptedFor The account's id (`profile.id` in the sync). Vaultwarden
+ *   1.37 refuses any write without it — a bare HTTP 422, before even reading the
+ *   rest — and checks it against the session's user. Always the account's own
+ *   id, for an organisation item too: it names who sealed the body, not who
+ *   owns the item.
  * @returns A body ready for `ApiClient.updateCipher`.
  * @throws {MissingOrgKeyError} Organisation item with no unwrapped key.
  */
@@ -1074,6 +1082,7 @@ export async function buildCipherUpdatePayload(
   edit: CipherEdit,
   keys: CipherKeys,
   recordPasswordHistory: boolean,
+  encryptedFor: string,
 ): Promise<Record<string, unknown>> {
   const baseKey = requireBaseKey(cipher, keys);
   const itemKey = await resolveItemKey(cipher, baseKey);
@@ -1092,6 +1101,7 @@ export async function buildCipherUpdatePayload(
     // replaces the whole item server-side, and any omitted field is lost.
     const payload: Record<string, unknown> = {
       type,
+      encryptedFor,
       organizationId: readField<string | null>(cipher, 'organizationId') ?? null,
       folderId: readField<string | null>(cipher, 'folderId') ?? null,
       favorite: readField<boolean>(cipher, 'favorite') ?? false,

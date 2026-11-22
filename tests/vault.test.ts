@@ -54,6 +54,9 @@ import { decryptLabels } from '../src/core/vault/labels.js';
 import { matchesOrigin, uriOrigin } from '../src/core/vault/uriMatch.js';
 import { UnlockError, unlock } from '../src/core/vault/session.js';
 
+/** The account's id, as every write names it (`encryptedFor`). */
+const USER_ID = 'a1b2c3d4-0000-4000-8000-000000000001';
+
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status });
 }
@@ -341,6 +344,15 @@ describe('item update (buildCipherUpdatePayload)', () => {
     });
   }
 
+  it('names the account in every body, for the server to check (encryptedFor)', async () => {
+    // Vaultwarden 1.37 answers a bare HTTP 422 to a write without it.
+    const stored = await rawCipher(userKey);
+    const updated = await buildCipherUpdatePayload(stored, EDIT, userKey, false, USER_ID);
+    const created = await buildCipherCreatePayload(EDIT, userKey, USER_ID);
+    expect(updated['encryptedFor']).toBe(USER_ID);
+    expect(created['encryptedFor']).toBe(USER_ID);
+  });
+
   it('re-encrypts the edited fields and preserves the others', async () => {
     const stored = {
       ...(await rawCipher(userKey)),
@@ -350,7 +362,7 @@ describe('item update (buildCipherUpdatePayload)', () => {
       fields: [{ name: 'champ-personal' }],
     } as unknown as CipherResponse;
 
-    const payload = await buildCipherUpdatePayload(stored, EDIT, userKey, false);
+    const payload = await buildCipherUpdatePayload(stored, EDIT, userKey, false, USER_ID);
 
     expect(await dec(payload['name'], userKey)).toBe('New name');
     expect(await dec(payload['notes'], userKey)).toBe('new notes');
@@ -399,6 +411,7 @@ describe('item update (buildCipherUpdatePayload)', () => {
       { ...EDIT, uris: ['https://old.example.org', 'https://new.example.org'], uriRules: view.uris },
       userKey,
       false,
+      USER_ID,
     );
     const login = payload['login'] as Record<string, unknown>;
     const uris = login['uris'] as ReadonlyArray<Record<string, unknown>>;
@@ -411,7 +424,7 @@ describe('item update (buildCipherUpdatePayload)', () => {
     const wrapped = (await encryptBytes(itemKey.key, userKey)).toString();
     const stored: CipherResponse = { ...(await rawCipher(itemKey)), key: wrapped };
 
-    const payload = await buildCipherUpdatePayload(stored, EDIT, userKey, false);
+    const payload = await buildCipherUpdatePayload(stored, EDIT, userKey, false, USER_ID);
 
     expect(payload['key']).toBe(wrapped);
     // The fields decrypt with the item's key, not the vault's.
@@ -420,7 +433,7 @@ describe('item update (buildCipherUpdatePayload)', () => {
 
   it('records the old password, still encrypted, in the history', async () => {
     const stored = await rawCipher(userKey);
-    const payload = await buildCipherUpdatePayload(stored, EDIT, userKey, true);
+    const payload = await buildCipherUpdatePayload(stored, EDIT, userKey, true, USER_ID);
 
     const history = payload['passwordHistory'] as ReadonlyArray<Record<string, unknown>>;
     expect(history).toHaveLength(1);
@@ -432,7 +445,7 @@ describe('item update (buildCipherUpdatePayload)', () => {
     const existing = Array.from({ length: 6 }, (_, i) => ({ password: `h${i}`, lastUsedDate: 'd' }));
     const stored = { ...(await rawCipher(userKey)), passwordHistory: existing } as unknown as CipherResponse;
 
-    const payload = await buildCipherUpdatePayload(stored, EDIT, userKey, true);
+    const payload = await buildCipherUpdatePayload(stored, EDIT, userKey, true, USER_ID);
     expect(payload['passwordHistory'] as unknown[]).toHaveLength(5);
   });
 
@@ -441,7 +454,7 @@ describe('item update (buildCipherUpdatePayload)', () => {
     const keys = { userKey, orgKeys: new Map([['org-9', orgKey]]) };
     const stored: CipherResponse = { ...(await rawCipher(orgKey)), organizationId: 'org-9' };
 
-    const payload = await buildCipherUpdatePayload(stored, EDIT, keys, false);
+    const payload = await buildCipherUpdatePayload(stored, EDIT, keys, false, USER_ID);
 
     expect(payload['organizationId']).toBe('org-9');
     expect(await dec(payload['name'], orgKey)).toBe('New name');
@@ -468,7 +481,7 @@ describe('item update (buildCipherUpdatePayload)', () => {
       [section]: content,
     } as unknown as CipherResponse;
 
-    const payload = await buildCipherUpdatePayload(existing, EDIT, userKey, false);
+    const payload = await buildCipherUpdatePayload(existing, EDIT, userKey, false, USER_ID);
 
     expect(payload[section]).toEqual(content);
   });
@@ -481,7 +494,7 @@ describe('item update (buildCipherUpdatePayload)', () => {
       login: { ...base.login, fido2Credentials: passkeys },
     };
 
-    const payload = await buildCipherUpdatePayload(stored, EDIT, userKey, false);
+    const payload = await buildCipherUpdatePayload(stored, EDIT, userKey, false, USER_ID);
     const login = payload['login'] as Record<string, unknown>;
 
     // Carried over identically, with no re-encryption and no loss.
@@ -1219,6 +1232,7 @@ describe('cards and identities', () => {
       { ...EDIT, card: edited },
       key,
       false,
+      USER_ID,
     );
     expect(await readSection(payload['card'])).toEqual(edited);
   });
@@ -1230,6 +1244,7 @@ describe('cards and identities', () => {
       { ...EDIT, identity: edited },
       key,
       false,
+      USER_ID,
     );
     expect(await readSection(payload['identity'])).toEqual({
       ...edited,
@@ -1241,32 +1256,32 @@ describe('cards and identities', () => {
 
   it('carries the stored card over when the editor says nothing about it', async () => {
     const cipher = await cardCipher();
-    const payload = await buildCipherUpdatePayload(cipher, EDIT, key, false);
+    const payload = await buildCipherUpdatePayload(cipher, EDIT, key, false, USER_ID);
     expect(payload['card']).toBe(
       (cipher as unknown as Record<string, unknown>)['card'],
     );
   });
 
   it('creates a card, with no login section', async () => {
-    const payload = await buildCipherCreatePayload({ ...EDIT, type: 3, card: CARD }, key);
+    const payload = await buildCipherCreatePayload({ ...EDIT, type: 3, card: CARD }, key, USER_ID);
     expect(payload['type']).toBe(3);
     expect(payload['login']).toBeUndefined();
     expect(await readSection(payload['card'])).toEqual(CARD);
   });
 
   it('creates an identity, with no login section', async () => {
-    const payload = await buildCipherCreatePayload({ ...EDIT, type: 4, identity: IDENTITY }, key);
+    const payload = await buildCipherCreatePayload({ ...EDIT, type: 4, identity: IDENTITY }, key, USER_ID);
     expect(payload['type']).toBe(4);
     expect(payload['login']).toBeUndefined();
   });
 
   it('creates a secure note with the sub-object the API demands', async () => {
-    const payload = await buildCipherCreatePayload({ ...EDIT, type: 2 }, key);
+    const payload = await buildCipherCreatePayload({ ...EDIT, type: 2 }, key, USER_ID);
     expect(payload['secureNote']).toEqual({ type: 0 });
   });
 
   it('still creates a login by default', async () => {
-    const payload = await buildCipherCreatePayload(EDIT, key);
+    const payload = await buildCipherCreatePayload(EDIT, key, USER_ID);
     expect(payload['type']).toBe(1);
     expect(payload['login']).toBeDefined();
   });
@@ -1312,7 +1327,7 @@ describe('rewriting preserves what it does not edit', () => {
       organizationId: null,
     } as unknown as CipherResponse;
 
-    const payload = await buildCipherUpdatePayload(cipher, EDIT, key, false);
+    const payload = await buildCipherUpdatePayload(cipher, EDIT, key, false, USER_ID);
     const login = payload['login'] as Record<string, unknown>;
     expect(login['autofillOnPageLoad']).toBe(true);
     expect(login['passwordRevisionDate']).toBe('2024-01-01T00:00:00Z');
@@ -1335,7 +1350,7 @@ describe('rewriting preserves what it does not edit', () => {
       expYear: '2030',
       code: '123',
     };
-    const payload = await buildCipherUpdatePayload(cipher, { ...EDIT, card }, key, false);
+    const payload = await buildCipherUpdatePayload(cipher, { ...EDIT, card }, key, false, USER_ID);
     expect((payload['card'] as Record<string, unknown>)['futureField']).toBe('opaque');
   });
 
@@ -1356,7 +1371,7 @@ describe('rewriting preserves what it does not edit', () => {
       expYear: '',
       code: '',
     };
-    const payload = await buildCipherUpdatePayload(cipher, { ...EDIT, card }, key, false);
+    const payload = await buildCipherUpdatePayload(cipher, { ...EDIT, card }, key, false, USER_ID);
     const keys = Object.keys(payload['card'] as Record<string, unknown>);
     expect(keys.filter((name) => name.toLowerCase() === 'number')).toHaveLength(1);
   });

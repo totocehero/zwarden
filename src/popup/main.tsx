@@ -136,6 +136,8 @@ import {
 /** An unlocked vault's state, alive only for as long as the popup is. */
 interface OpenVault {
   readonly userKey: SymmetricCryptoKey;
+  /** The account's id, as the sync profile gives it: every write names it. */
+  readonly userId: string;
   /** The full keyring: vault key + unwrapped organisation keys. */
   readonly keys: CipherKeys;
   readonly items: readonly CipherOverview[];
@@ -679,7 +681,8 @@ function App() {
       decryptLabels(sync, keys, onDecryptError),
     ]);
 
-    const base = { userKey, keys, raw, labels, errors };
+    const userId = readField<string>(sync.profile, 'id') ?? '';
+    const base = { userKey, userId, keys, raw, labels, errors };
     if (tail.length > 0) {
       // On screen at once. The rest follows in the same turn of the loop, but
       // the rows the user is about to read are already there.
@@ -697,7 +700,7 @@ function App() {
     // Both of these need the whole vault: a save candidate missed because its
     // item was still encrypted would offer to create a duplicate.
     await evaluatePending(items, raw, keys, onDecryptError);
-    await ceremony.pickUp({ userKey, keys, raw, items });
+    await ceremony.pickUp({ userKey, userId, keys, raw, items });
 
     // Active tab. Items that match it get their own section at the top of the
     // list, so the filter is only pre-filled with the host when nothing
@@ -1049,6 +1052,7 @@ function App() {
         uris: [capture.origin],
       },
       open.userKey,
+      open.userId,
     );
     return payload;
   }
@@ -1088,6 +1092,7 @@ function App() {
       },
       open.keys,
       true,
+      open.userId,
     );
     return payload;
   }
@@ -1545,12 +1550,13 @@ function App() {
         raw === undefined
           ? // Creation goes out under the vault key, with no item key of its
             // own — the shape the interoperability round trip validates.
-            await buildCipherCreatePayload(edit, vault.userKey)
+            await buildCipherCreatePayload(edit, vault.userKey, vault.userId)
           : await buildCipherUpdatePayload(
               raw,
               edit,
               vault.keys,
               editForm.password !== editOriginalPassword,
+              vault.userId,
             );
 
       setBusy(t('statusSaving'));
