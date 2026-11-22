@@ -350,6 +350,35 @@ describe('updateCipher', () => {
     const error = await client.updateCipher('token', 'id-1', {}).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ApiError);
     expect((error as ApiError).status).toBe(403);
+    // A body that is not JSON contributes nothing: the status alone is said.
+    expect((error as ApiError).message).toBe('Request to /api/ciphers/id-1 failed (HTTP 403)');
+  });
+
+  it("carries the server's own sentence in the message", async () => {
+    // Vaultwarden's error shape: `message`, echoed under `errorModel`.
+    const client = clientWith(() =>
+      jsonResponse(404, {
+        message: 'Cipher is not write accessible',
+        errorModel: { message: 'Cipher is not write accessible', object: 'error' },
+        object: 'error',
+      }),
+    );
+
+    const error = await client.updateCipher('token', 'id-1', {}).catch((e: unknown) => e);
+    expect((error as ApiError).message).toBe(
+      'Request to /api/ciphers/id-1 failed (HTTP 404): Cipher is not write accessible',
+    );
+  });
+
+  it('falls back to the first validation error', async () => {
+    const client = clientWith(() =>
+      jsonResponse(400, { message: '', validationErrors: { '': ['Organization mismatch'] } }),
+    );
+
+    const error = await client.updateCipher('token', 'id-1', {}).catch((e: unknown) => e);
+    expect((error as ApiError).message).toBe(
+      'Request to /api/ciphers/id-1 failed (HTTP 400): Organization mismatch',
+    );
   });
 });
 

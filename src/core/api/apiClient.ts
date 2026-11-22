@@ -400,10 +400,11 @@ export class ApiClient {
     });
 
     if (!response.ok && response.status !== 404) {
+      const body = await response.text();
       throw new ApiError(
-        'Failed to move the item to the trash',
+        describeFailure('Failed to move the item to the trash', response.status, body),
         response.status,
-        await response.text(),
+        body,
       );
     }
   }
@@ -428,10 +429,11 @@ export class ApiClient {
     });
 
     if (!response.ok && response.status !== 404) {
+      const body = await response.text();
       throw new ApiError(
-        'Failed to delete the item',
+        describeFailure('Failed to delete the item', response.status, body),
         response.status,
-        await response.text(),
+        body,
       );
     }
   }
@@ -498,7 +500,11 @@ export class ApiClient {
       throw new RateLimitedError(parseRetryAfter(response.headers.get('Retry-After')));
     }
     if (!response.ok) {
-      throw new ApiError(`Request to ${path} failed`, response.status, body);
+      throw new ApiError(
+        describeFailure(`Request to ${path} failed`, response.status, body),
+        response.status,
+        body,
+      );
     }
 
     try {
@@ -620,6 +626,50 @@ function parseRetryAfter(value: string | null): number | undefined {
   }
   const seconds = Number(value);
   return Number.isFinite(seconds) && seconds >= 0 ? seconds : undefined;
+}
+
+/**
+ * Composes an error message that says why, not only that.
+ *
+ * "Request to /api/ciphers/… failed" sends the person to the developer tools
+ * to learn what the server objected to; the status and the server's own
+ * sentence were in hand all along. Vaultwarden puts that sentence under
+ * `message` (and again under `errorModel.message`), sometimes only under
+ * `validationErrors`; the token endpoint uses `error_description`. A body that
+ * is none of those — a proxy's HTML page — is left out, the status alone says
+ * enough.
+ *
+ * @param prefix What was being attempted.
+ * @param status HTTP status.
+ * @param body Raw response body.
+ */
+export function describeFailure(prefix: string, status: number, body: string): string {
+  const reason = serverReason(body);
+  return reason === undefined ? `${prefix} (HTTP ${status})` : `${prefix} (HTTP ${status}): ${reason}`;
+}
+
+/** The server's own explanation, if the body carries one. */
+function serverReason(body: string): string | undefined {
+  const data = parseJsonOrUndefined<Record<string, unknown>>(body);
+  if (data === undefined || typeof data !== 'object' || data === null) {
+    return undefined;
+  }
+  const direct =
+    readField<string>(data, 'message') ??
+    readField<string>(readField<unknown>(data, 'errorModel'), 'message') ??
+    readField<string>(data, 'error_description');
+  if (typeof direct === 'string' && direct.trim() !== '') {
+    return direct.trim();
+  }
+  const validation = readField<Record<string, unknown>>(data, 'validationErrors');
+  if (validation !== undefined && validation !== null && typeof validation === 'object') {
+    for (const value of Object.values(validation)) {
+      if (Array.isArray(value) && typeof value[0] === 'string' && value[0].trim() !== '') {
+        return value[0].trim();
+      }
+    }
+  }
+  return undefined;
 }
 
 /** Parses JSON without throwing: error bodies are not always JSON. */
